@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "name": "Rover Three Wheel",
+    "slug": "rover-three-wheel-native",
+    "version": "1.0.0",
+    "orientation": "default",
+    "userInterfaceStyle": "automatic",
+    "assetBundlePatterns": [
+      "**/*"
+    ]
+  }
+}
