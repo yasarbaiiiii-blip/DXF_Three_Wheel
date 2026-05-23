@@ -1,5 +1,6 @@
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
+  Modal,
   Pressable,
   ScrollView,
   Switch,
@@ -9,36 +10,102 @@ import {
 } from "react-native";
 import Slider from "@react-native-community/slider";
 import {
-  Check,
-  Crosshair,
-  FileCheck2,
+  Copy,
   FileUp,
-  Lock,
-  Map,
+  Info,
+  ListChecks,
+  Play,
   Settings2,
+  Square,
+  Trash2,
+  Upload,
 } from "lucide-react-native";
 
 import type { Palette } from "../theme/colors";
-
-type TabType = "fields" | "dxf" | "calibration" | "positioning";
+import type {
+  ImportedPlan,
+  LayerVisibility,
+  MarkingStyle,
+  PlanLine,
+  SidebarPanel,
+} from "../types/plan";
 
 interface LeftSidebarProps {
   palette: Palette;
   compact: boolean;
+  activePanel: SidebarPanel | null;
+  onTogglePanel: (panel: SidebarPanel) => void;
+  importedPlan: ImportedPlan | null;
+  layerVisibility: LayerVisibility;
+  onToggleLayer: (layer: keyof LayerVisibility) => void;
+  onImportPress: () => void;
+  onCopyFileName: () => void;
+  onDeletePlan: () => void;
+  selectedLine: PlanLine | null;
+  totalVisibleLines: number;
+  missionRunning: boolean;
+  onToggleMission: () => void;
+  markingStyle: MarkingStyle;
+  onSelectMarkingStyle: (style: MarkingStyle) => void;
+  rotation: number;
+  onDeleteSelectedLine: () => void;
 }
 
-export function LeftSidebar({ palette, compact }: LeftSidebarProps) {
-  const [activeTab, setActiveTab] = useState<TabType>("fields");
+export function LeftSidebar({
+  palette,
+  compact,
+  activePanel,
+  onTogglePanel,
+  importedPlan,
+  layerVisibility,
+  onToggleLayer,
+  onImportPress,
+  onCopyFileName,
+  onDeletePlan,
+  selectedLine,
+  totalVisibleLines,
+  missionRunning,
+  onToggleMission,
+  markingStyle,
+  onSelectMarkingStyle,
+  rotation,
+  onDeleteSelectedLine,
+}: LeftSidebarProps) {
+  const [displayPanel, setDisplayPanel] = useState<SidebarPanel | null>(activePanel);
+
+  useEffect(() => {
+    setDisplayPanel(activePanel);
+  }, [activePanel]);
+
+  const selectedMetrics = useMemo(() => {
+    if (!selectedLine) {
+      return null;
+    }
+
+    const dx = selectedLine.to.x - selectedLine.from.x;
+    const dy = selectedLine.to.y - selectedLine.from.y;
+    const length = Math.sqrt(dx * dx + dy * dy);
+    const angle = ((Math.atan2(dy, dx) * 180) / Math.PI + 360) % 360;
+
+    return {
+      length,
+      angle,
+      span: `${selectedLine.from.id} to ${selectedLine.to.id}`,
+      range: `(${selectedLine.from.x.toFixed(1)}, ${selectedLine.from.y.toFixed(
+        1
+      )}) -> (${selectedLine.to.x.toFixed(1)}, ${selectedLine.to.y.toFixed(1)})`,
+    };
+  }, [selectedLine]);
+
+  const panelWidth = compact ? 300 : 360;
 
   return (
     <View
       className="flex-row"
       style={{
-        width: compact ? "100%" : "40%",
-        minHeight: compact ? 380 : undefined,
+        width: compact ? "100%" : undefined,
         backgroundColor: palette.panel,
-        borderBottomWidth: compact ? 1 : 0,
-        borderRightWidth: compact ? 0 : 1,
+        borderRightWidth: 1,
         borderColor: palette.border,
       }}
     >
@@ -53,197 +120,664 @@ export function LeftSidebar({ palette, compact }: LeftSidebarProps) {
         }}
       >
         <NavButton
-          label="Fields"
-          active={activeTab === "fields"}
-          icon={<Map size={20} color={activeTab === "fields" ? palette.background : palette.mutedForeground} />}
-          onPress={() => setActiveTab("fields")}
-          palette={palette}
-        />
-        <NavButton
-          label="DXF Import"
-          active={activeTab === "dxf"}
-          icon={<FileUp size={20} color={activeTab === "dxf" ? palette.background : palette.mutedForeground} />}
-          onPress={() => setActiveTab("dxf")}
-          palette={palette}
-        />
-        <NavButton
-          label="Hardware"
-          active={activeTab === "calibration"}
-          icon={<Settings2 size={20} color={activeTab === "calibration" ? palette.background : palette.mutedForeground} />}
-          onPress={() => setActiveTab("calibration")}
-          palette={palette}
-        />
-        <NavButton
-          label="Positioning"
-          active={activeTab === "positioning"}
-          icon={<Crosshair size={20} color={activeTab === "positioning" ? palette.background : palette.mutedForeground} />}
-          onPress={() => setActiveTab("positioning")}
-          palette={palette}
-        />
-      </View>
-
-      <ScrollView
-        className="flex-1"
-        contentContainerStyle={{ padding: 24, gap: 24 }}
-        showsVerticalScrollIndicator={false}
-      >
-        {activeTab === "fields" && <FieldInventoryView palette={palette} />}
-        {activeTab === "dxf" && <DxfImportView palette={palette} />}
-        {activeTab === "calibration" && <HardwareCalibrationView palette={palette} />}
-        {activeTab === "positioning" && <PositioningFilterView palette={palette} />}
-      </ScrollView>
-    </View>
-  );
-}
-
-function FieldInventoryView({ palette }: { palette: Palette }) {
-  return (
-    <View className="gap-6">
-      <SectionIntro
-        title="Field Inventory"
-        subtitle="Select a template or custom layout."
-        palette={palette}
-      />
-      <View className="gap-2.5">
-        <TemplateItem label="Football (Soccer)" locked active palette={palette} />
-        <TemplateItem label="Rugby" locked palette={palette} />
-        <TemplateItem label="North American Football" locked palette={palette} />
-        <TemplateItem label="Running Tracks - Grass" locked palette={palette} />
-        <TemplateItem label="Athletics" locked palette={palette} />
-        <TemplateItem label="Ball and Net Sports" locked palette={palette} />
-        <TemplateItem label="Custom Layout - Beta Field" locked={false} palette={palette} />
-      </View>
-    </View>
-  );
-}
-
-function DxfImportView({ palette }: { palette: Palette }) {
-  const [units, setUnits] = useState<"meters" | "feet">("meters");
-
-  return (
-    <View className="gap-6">
-      <SectionIntro
-        title="DXF Import Profile"
-        subtitle="Configure CAD geometry mapping."
-        palette={palette}
-      />
-
-      <View
-        className="gap-4 rounded-xl border p-4"
-        style={{
-          borderColor: palette.border,
-          backgroundColor: palette.background,
-        }}
-      >
-        <MetaBlock label="File Name" value="soccer_pitch_fifa_edited.dxf" palette={palette} />
-
-        <View className="gap-2">
-          <Text style={labelStyle(palette)}>Scale Units</Text>
-          <View
-            className="self-start flex-row gap-1 rounded-[10px] p-1"
-            style={{
-              backgroundColor: palette.muted,
-            }}
-          >
-            <SegmentButton
-              label="Meters"
-              active={units === "meters"}
-              palette={palette}
-              onPress={() => setUnits("meters")}
+          label="Import"
+          active={activePanel === "import"}
+          icon={
+            <FileUp
+              size={20}
+              color={
+                activePanel === "import"
+                  ? palette.background
+                  : palette.mutedForeground
+              }
             />
-            <SegmentButton
-              label="Feet"
-              active={units === "feet"}
-              palette={palette}
-              onPress={() => setUnits("feet")}
+          }
+          onPress={() => onTogglePanel("import")}
+          palette={palette}
+        />
+        <NavButton
+          label="Plan Info"
+          active={activePanel === "details"}
+          icon={
+            <Info
+              size={20}
+              color={
+                activePanel === "details"
+                  ? palette.background
+                  : palette.mutedForeground
+              }
             />
-          </View>
-        </View>
+          }
+          onPress={() => onTogglePanel("details")}
+          palette={palette}
+        />
+        <NavButton
+          label="Mission"
+          active={activePanel === "mission"}
+          icon={
+            <ListChecks
+              size={20}
+              color={
+                activePanel === "mission"
+                  ? palette.background
+                  : palette.mutedForeground
+              }
+            />
+          }
+          onPress={() => onTogglePanel("mission")}
+          palette={palette}
+        />
+        <NavButton
+          label="Control"
+          active={activePanel === "view"}
+          icon={
+            <Settings2
+              size={20}
+              color={
+                activePanel === "view"
+                  ? palette.background
+                  : palette.mutedForeground
+              }
+            />
+          }
+          onPress={() => onTogglePanel("view")}
+          palette={palette}
+        />
       </View>
 
-      <View className="gap-3">
-        <Text style={labelStyle(palette)}>Layer Mapping Checklist</Text>
+      {displayPanel ? (
         <View
-          className="overflow-hidden rounded-xl border"
+          style={{
+            width: panelWidth,
+            overflow: "hidden",
+            backgroundColor: palette.panel,
+            borderRightWidth: 1,
+            borderRightColor: palette.border,
+          }}
+        >
+          <ScrollView
+            key={displayPanel}
+            contentContainerStyle={{ padding: 20, gap: 20 }}
+            showsVerticalScrollIndicator={false}
+          >
+            <PanelContent
+              activePanel={displayPanel}
+              palette={palette}
+              importedPlan={importedPlan}
+              layerVisibility={layerVisibility}
+              onToggleLayer={onToggleLayer}
+              onImportPress={onImportPress}
+              onCopyFileName={onCopyFileName}
+              onDeletePlan={onDeletePlan}
+              selectedLine={selectedLine}
+              selectedMetrics={selectedMetrics}
+              totalVisibleLines={totalVisibleLines}
+              missionRunning={missionRunning}
+              onToggleMission={onToggleMission}
+              markingStyle={markingStyle}
+              onSelectMarkingStyle={onSelectMarkingStyle}
+              rotation={rotation}
+              onDeleteSelectedLine={onDeleteSelectedLine}
+            />
+          </ScrollView>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function PanelContent({
+  activePanel,
+  palette,
+  importedPlan,
+  layerVisibility,
+  onToggleLayer,
+  onImportPress,
+  onCopyFileName,
+  onDeletePlan,
+  selectedLine,
+  selectedMetrics,
+  totalVisibleLines,
+  missionRunning,
+  onToggleMission,
+  markingStyle,
+  onSelectMarkingStyle,
+  rotation,
+  onDeleteSelectedLine,
+}: {
+  activePanel: SidebarPanel;
+  palette: Palette;
+  importedPlan: ImportedPlan | null;
+  layerVisibility: LayerVisibility;
+  onToggleLayer: (layer: keyof LayerVisibility) => void;
+  onImportPress: () => void;
+  onCopyFileName: () => void;
+  onDeletePlan: () => void;
+  selectedLine: PlanLine | null;
+  selectedMetrics: {
+    length: number;
+    angle: number;
+    span: string;
+    range: string;
+  } | null;
+  totalVisibleLines: number;
+  missionRunning: boolean;
+  onToggleMission: () => void;
+  markingStyle: MarkingStyle;
+  onSelectMarkingStyle: (style: MarkingStyle) => void;
+  rotation: number;
+  onDeleteSelectedLine: () => void;
+}) {
+  const [fieldName, setFieldName] = useState("");
+  const [fieldNotes, setFieldNotes] = useState("");
+  const [manualPainting, setManualPainting] = useState(false);
+  const [paintWhenReversing, setPaintWhenReversing] = useState(false);
+  const [pumpStartDelay, setPumpStartDelay] = useState(0.2);
+  const [pumpStopDelay, setPumpStopDelay] = useState(0.2);
+  const [rateModalOpen, setRateModalOpen] = useState(false);
+  const [slowestRateDraft, setSlowestRateDraft] = useState(100);
+  const [fastestRateDraft, setFastestRateDraft] = useState(100);
+  const [slowestRate, setSlowestRate] = useState(100);
+  const [fastestRate, setFastestRate] = useState(100);
+  const [pumpRelayInstalled, setPumpRelayInstalled] = useState(true);
+  const [offsetSideways, setOffsetSideways] = useState("0.085");
+  const [offsetFront, setOffsetFront] = useState("0.000");
+  const [offsetUp, setOffsetUp] = useState("0.500");
+  const [mowDeckCutWidth, setMowDeckCutWidth] = useState("1.000");
+  const [savedDimensions, setSavedDimensions] = useState({
+    offsetSideways: "0.085",
+    offsetFront: "0.000",
+    offsetUp: "0.500",
+    mowDeckCutWidth: "1.000",
+  });
+
+  useEffect(() => {
+    if (!importedPlan) {
+      setFieldName("");
+      setFieldNotes("");
+      return;
+    }
+
+    const nextName = importedPlan.fileName.replace(/\.(csv|dxf)$/i, "");
+    setFieldName(nextName);
+    setFieldNotes("");
+  }, [importedPlan]);
+
+  const hasDimensionChanges =
+    offsetSideways !== savedDimensions.offsetSideways ||
+    offsetFront !== savedDimensions.offsetFront ||
+    offsetUp !== savedDimensions.offsetUp ||
+    mowDeckCutWidth !== savedDimensions.mowDeckCutWidth;
+
+  if (activePanel === "import") {
+    return (
+      <View className="gap-6">
+        <SectionIntro
+          title="Import Profile"
+          subtitle="Import a DXF or CSV file and decide which layers are visible."
+          palette={palette}
+        />
+
+        <View
+          className="gap-4 rounded-xl border p-4"
           style={{
             borderColor: palette.border,
             backgroundColor: palette.background,
           }}
         >
-          <LayerCheckItem label="BOUNDARY" checked palette={palette} />
-          <LayerCheckItem label="MARKINGS" checked palette={palette} />
-          <LayerCheckItem label="CENTER" checked palette={palette} last />
+          <Pressable
+            onPress={onImportPress}
+            className="h-12 flex-row items-center justify-center rounded-md"
+            style={{ backgroundColor: palette.foreground, gap: 8 }}
+          >
+            <Upload size={18} color={palette.background} />
+            <Text
+              className="text-sm font-semibold"
+              style={{ color: palette.background }}
+            >
+              Import File
+            </Text>
+          </Pressable>
+
+          <Text className="text-xs" style={{ color: palette.mutedForeground }}>
+            Only CSV and DXF supported.
+          </Text>
+
+          {importedPlan ? (
+            <>
+              <MetaPill
+                label="Imported file"
+                value={importedPlan.fileName}
+                palette={palette}
+              />
+
+              <LabeledInput
+                label="Field Name"
+                value={fieldName}
+                onChangeText={setFieldName}
+                palette={palette}
+              />
+              <LabeledInput
+                label="Field Notes"
+                value={fieldNotes}
+                onChangeText={setFieldNotes}
+                palette={palette}
+                multiline
+              />
+
+              <View className="flex-row" style={{ gap: 10 }}>
+                <ActionChip
+                  icon={<Copy size={16} color={palette.foreground} />}
+                  label="Copy file name"
+                  palette={palette}
+                  onPress={onCopyFileName}
+                />
+                <ActionChip
+                  icon={<Trash2 size={16} color="#FFFFFF" />}
+                  label="Delete plan"
+                  palette={palette}
+                  destructive
+                  onPress={onDeletePlan}
+                />
+              </View>
+            </>
+          ) : null}
         </View>
+
+        {importedPlan ? (
+          <View className="gap-3">
+            <Text style={labelStyle(palette)}>Visible Layers</Text>
+            <CheckboxRow
+              label="Boundary"
+              checked={layerVisibility.boundary}
+              onPress={() => onToggleLayer("boundary")}
+              palette={palette}
+            />
+            <CheckboxRow
+              label="Marking"
+              checked={layerVisibility.marking}
+              onPress={() => onToggleLayer("marking")}
+              palette={palette}
+            />
+            <CheckboxRow
+              label="Center"
+              checked={layerVisibility.center}
+              onPress={() => onToggleLayer("center")}
+              palette={palette}
+            />
+          </View>
+        ) : null}
       </View>
-    </View>
-  );
-}
+    );
+  }
 
-function HardwareCalibrationView({ palette }: { palette: Palette }) {
-  const [pumpStart, setPumpStart] = useState(0.1);
-  const [pumpStop, setPumpStop] = useState(0.15);
-
-  return (
-    <View className="gap-7">
-      <SectionIntro
-        title="Hardware Calibration"
-        subtitle="Adjust structural offsets and fluid delays."
-        palette={palette}
-      />
-
+  if (activePanel === "details") {
+    return (
       <View className="gap-6">
-        <SliderRow
-          label="Pump Start Delay [s]"
-          value={pumpStart}
-          onChange={setPumpStart}
+        <SectionIntro
+          title="Plan Info"
+          subtitle="Select a line in the canvas to inspect its values here."
           palette={palette}
         />
-        <SliderRow
-          label="Pump Stop Delay [s]"
-          value={pumpStop}
-          onChange={setPumpStop}
+
+        <View
+          className="gap-4 rounded-xl border p-4"
+          style={{
+            borderColor: palette.border,
+            backgroundColor: palette.background,
+          }}
+        >
+          <DetailRow
+            label="Visible segments"
+            value={`${totalVisibleLines}`}
+            palette={palette}
+          />
+          <DetailRow
+            label="Imported file"
+            value={importedPlan?.fileName ?? "Nothing imported"}
+            palette={palette}
+          />
+          <DetailRow
+            label="Selected segment"
+            value={selectedLine?.label ?? "Tap a line to inspect it"}
+            palette={palette}
+          />
+        </View>
+
+        {selectedLine && selectedMetrics ? (
+          <View className="gap-3">
+            <InfoTile label="Layer" value={selectedLine.layer} palette={palette} />
+            <InfoTile
+              label="Length"
+              value={`${selectedMetrics.length.toFixed(2)} m`}
+              palette={palette}
+            />
+            <InfoTile
+              label="Width"
+              value={`${selectedLine.width.toFixed(2)} m`}
+              palette={palette}
+            />
+            <InfoTile
+              label="Angle"
+              value={`${selectedMetrics.angle.toFixed(1)} deg`}
+              palette={palette}
+            />
+            <InfoTile
+              label="Point span"
+              value={selectedMetrics.span}
+              palette={palette}
+            />
+            <InfoTile
+              label="Range"
+              value={selectedMetrics.range}
+              palette={palette}
+            />
+          </View>
+        ) : (
+          <EmptyNote
+            title="No line selected yet"
+            body="After you import a plan, tap any highlighted line in the canvas and its details will show up here."
+            palette={palette}
+          />
+        )}
+      </View>
+    );
+  }
+
+  if (activePanel === "mission") {
+    return (
+      <View className="gap-6">
+        <SectionIntro
+          title="Mission Setup"
+          subtitle="Choose how the rover should mark the field."
           palette={palette}
         />
+
+        <View className="gap-3">
+          <Text style={labelStyle(palette)}>Marking Style</Text>
+          <OptionButton
+            label="Straight Line"
+            active={markingStyle === "straight"}
+            palette={palette}
+            onPress={() => onSelectMarkingStyle("straight")}
+          />
+          <OptionButton
+            label="Dotted Line"
+            active={markingStyle === "dotted"}
+            palette={palette}
+            onPress={() => onSelectMarkingStyle("dotted")}
+          />
+          <OptionButton
+            label="Dashed Line"
+            active={markingStyle === "dashed"}
+            palette={palette}
+            onPress={() => onSelectMarkingStyle("dashed")}
+          />
+        </View>
+
+        <View
+          className="gap-3 rounded-xl border p-4"
+          style={{
+            borderColor: palette.border,
+            backgroundColor: palette.background,
+          }}
+        >
+          <DetailRow
+            label="Rotation"
+            value={`${rotation.toFixed(0)} deg`}
+            palette={palette}
+          />
+          <Text className="text-xs" style={{ color: palette.mutedForeground }}>
+            Tap rotate once in the canvas toolbar to enter an angle, or long-press
+            it and drag on the plan to rotate.
+          </Text>
+        </View>
+
+        <Pressable
+          onPress={onToggleMission}
+          className="h-14 items-center justify-center rounded-md"
+          style={{
+            backgroundColor: missionRunning ? palette.crimson : palette.emerald,
+          }}
+        >
+          <View className="flex-row items-center" style={{ gap: 8 }}>
+            {missionRunning ? (
+              <Square size={18} color="#FFFFFF" />
+            ) : (
+              <Play size={18} color="#FFFFFF" />
+            )}
+            <Text
+              className="text-base font-semibold"
+              style={{ color: "#FFFFFF" }}
+            >
+              {missionRunning ? "STOP" : "START"}
+            </Text>
+          </View>
+        </Pressable>
       </View>
+    );
+  }
 
-      <View className="h-px" style={{ backgroundColor: palette.border }} />
-
-      <View className="flex-row flex-wrap gap-3">
-        <OffsetInputCard label="Offset Sideways" value="0.085" unit="m" palette={palette} />
-        <OffsetInputCard label="Offset Front" value="0.000" unit="m" palette={palette} />
-        <OffsetInputCard label="Offset Up" value="0.500" unit="m" palette={palette} />
-        <OffsetInputCard label="Mow Deck Cut Width" value="1.000" unit="m" palette={palette} />
-      </View>
-    </View>
-  );
-}
-
-function PositioningFilterView({ palette }: { palette: Palette }) {
   return (
-    <View className="gap-7">
+    <View className="gap-6">
       <SectionIntro
-        title="Positioning Filters"
-        subtitle="Sensor overrides and terrain corrections."
+        title="Control Section"
+        subtitle="Plan interaction and painting preferences for the imported field."
         palette={palette}
       />
+
+      <View
+        className="gap-3 rounded-xl border p-4"
+        style={{
+          borderColor: palette.border,
+          backgroundColor: palette.background,
+        }}
+      >
+        <DetailRow
+          label="Current file"
+          value={importedPlan?.fileName ?? "Nothing imported"}
+          palette={palette}
+        />
+        <DetailRow
+          label="Layer visibility"
+          value={`${Number(layerVisibility.boundary) + Number(layerVisibility.marking) + Number(layerVisibility.center)} / 3 active`}
+          palette={palette}
+        />
+      </View>
 
       <View className="gap-4">
-        <ToggleRow label="Position Smoothing" initialValue palette={palette} />
-        <ToggleRow label="Disable Position Snap with Long Press" initialValue={false} palette={palette} />
-        <ToggleRow label="Position Jump Detection" initialValue palette={palette} />
+        <ToggleRow
+          label="Manual painting with long press"
+          value={manualPainting}
+          onValueChange={setManualPainting}
+          palette={palette}
+        />
+        <ToggleRow
+          label="Paint when reversing"
+          value={paintWhenReversing}
+          onValueChange={setPaintWhenReversing}
+          palette={palette}
+        />
+      </View>
+
+      <SliderBlock
+        label="Pump Start Delay [s]"
+        value={pumpStartDelay}
+        onValueChange={setPumpStartDelay}
+        palette={palette}
+      />
+
+      <SliderBlock
+        label="Pump Stop Delay [s]"
+        value={pumpStopDelay}
+        onValueChange={setPumpStopDelay}
+        palette={palette}
+      />
+
+      <View
+        className="gap-3 rounded-xl border p-4"
+        style={{
+          borderColor: palette.border,
+          backgroundColor: palette.background,
+        }}
+      >
+        <Text style={labelStyle(palette)}>Heading Paint Rate</Text>
+        <DetailRow
+          label="Slowest rate"
+          value={`${slowestRate}%`}
+          palette={palette}
+        />
+        <DetailRow
+          label="Fastest rate"
+          value={`${fastestRate}%`}
+          palette={palette}
+        />
+        <Pressable
+          onPress={() => {
+            setSlowestRateDraft(slowestRate);
+            setFastestRateDraft(fastestRate);
+            setRateModalOpen(true);
+          }}
+          className="mt-2 h-11 items-center justify-center rounded-md"
+          style={{ backgroundColor: palette.muted }}
+        >
+          <Text className="text-sm font-semibold" style={{ color: palette.foreground }}>
+            Adjust
+          </Text>
+        </Pressable>
       </View>
 
       <View className="gap-3">
-        <Text style={labelStyle(palette)}>Source</Text>
-        <RadioOption label="GPS (RTK)" selected palette={palette} />
-        <RadioOption label="Local Laser Tracker" disabled palette={palette} />
+        <Text style={labelStyle(palette)}>Heading Dimensions</Text>
+        <DimensionInput
+          label="Offset Sideways"
+          value={offsetSideways}
+          onChangeText={setOffsetSideways}
+          palette={palette}
+        />
+        <DimensionInput
+          label="Offset Front"
+          value={offsetFront}
+          onChangeText={setOffsetFront}
+          palette={palette}
+        />
+        <DimensionInput
+          label="Offset Up"
+          value={offsetUp}
+          onChangeText={setOffsetUp}
+          palette={palette}
+        />
+        <DimensionInput
+          label="Mow Deck Cut Width"
+          value={mowDeckCutWidth}
+          onChangeText={setMowDeckCutWidth}
+          palette={palette}
+        />
+
+        {hasDimensionChanges ? (
+          <View className="flex-row" style={{ gap: 10 }}>
+            <Pressable
+              onPress={() => {
+                setOffsetSideways(savedDimensions.offsetSideways);
+                setOffsetFront(savedDimensions.offsetFront);
+                setOffsetUp(savedDimensions.offsetUp);
+                setMowDeckCutWidth(savedDimensions.mowDeckCutWidth);
+              }}
+              className="flex-1 items-center justify-center rounded-md px-4 py-3"
+              style={{ backgroundColor: palette.muted }}
+            >
+              <Text className="text-sm font-semibold" style={{ color: palette.foreground }}>
+                Cancel Changes
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() =>
+                setSavedDimensions({
+                  offsetSideways,
+                  offsetFront,
+                  offsetUp,
+                  mowDeckCutWidth,
+                })
+              }
+              className="flex-1 items-center justify-center rounded-md px-4 py-3"
+              style={{ backgroundColor: palette.foreground }}
+            >
+              <Text className="text-sm font-semibold" style={{ color: palette.background }}>
+                Save Changes
+              </Text>
+            </Pressable>
+          </View>
+        ) : null}
       </View>
 
-      <View className="gap-4">
-        <Text style={labelStyle(palette)}>Terrain Correction</Text>
-        <ToggleRow label="Terrain Correction" initialValue palette={palette} />
-        <ToggleRow label="3D Terrain Correction (Beta)" initialValue palette={palette} />
-      </View>
+      <Modal
+        visible={rateModalOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setRateModalOpen(false)}
+      >
+        <View
+          className="flex-1 items-center justify-center px-6"
+          style={{ backgroundColor: "rgba(0,0,0,0.55)" }}
+        >
+          <View
+            className="w-full max-w-[360px] rounded-xl border p-5"
+            style={{
+              borderColor: palette.border,
+              backgroundColor: palette.panel,
+              gap: 14,
+            }}
+          >
+            <Text className="text-lg font-semibold" style={{ color: palette.foreground }}>
+              Heading Paint Rate
+            </Text>
+            <RateSlider
+              label="Slowest rate"
+              value={slowestRateDraft}
+              onValueChange={setSlowestRateDraft}
+              palette={palette}
+            />
+            <RateSlider
+              label="Fastest rate"
+              value={fastestRateDraft}
+              onValueChange={setFastestRateDraft}
+              palette={palette}
+            />
+
+            <CheckboxRow
+              label="Pump relay installed"
+              checked={pumpRelayInstalled}
+              onPress={() => setPumpRelayInstalled((current) => !current)}
+              palette={palette}
+            />
+
+            <View className="flex-row" style={{ gap: 10 }}>
+              <Pressable
+                onPress={() => setRateModalOpen(false)}
+                className="flex-1 items-center justify-center rounded-md px-4 py-3"
+                style={{ backgroundColor: palette.muted }}
+              >
+                <Text className="text-sm font-semibold" style={{ color: palette.foreground }}>
+                  Cancel
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => {
+                  setSlowestRate(slowestRateDraft);
+                  setFastestRate(fastestRateDraft);
+                  setRateModalOpen(false);
+                }}
+                className="flex-1 items-center justify-center rounded-md px-4 py-3"
+                style={{ backgroundColor: palette.foreground }}
+              >
+                <Text className="text-sm font-semibold" style={{ color: palette.background }}>
+                  Save
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -259,8 +793,12 @@ function SectionIntro({
 }) {
   return (
     <View className="gap-1">
-      <Text className="text-xl font-semibold" style={{ color: palette.foreground }}>{title}</Text>
-      <Text className="text-sm" style={{ color: palette.mutedForeground }}>{subtitle}</Text>
+      <Text className="text-xl font-semibold" style={{ color: palette.foreground }}>
+        {title}
+      </Text>
+      <Text className="text-sm" style={{ color: palette.mutedForeground }}>
+        {subtitle}
+      </Text>
     </View>
   );
 }
@@ -292,112 +830,77 @@ function NavButton({
   );
 }
 
-function TemplateItem({
+function CheckboxRow({
   label,
-  locked,
-  active = false,
+  checked,
+  onPress,
   palette,
 }: {
   label: string;
-  locked: boolean;
-  active?: boolean;
+  checked: boolean;
+  onPress: () => void;
   palette: Palette;
 }) {
   return (
     <Pressable
-      className="flex-row items-center rounded-md border p-3"
-      style={{
-        gap: 12,
-        borderColor: active ? palette.foreground : palette.border,
-        backgroundColor: active ? palette.muted : palette.background,
-      }}
-    >
-      <View className="w-5 items-center">
-        {locked ? (
-          <Lock size={16} color={palette.mutedForeground} />
-        ) : active ? (
-          <Check size={16} color={palette.foreground} />
-        ) : null}
-      </View>
-      <Text className="shrink text-sm font-semibold" style={{ color: palette.foreground, flexShrink: 1 }}>
-        {label}
-      </Text>
-    </Pressable>
-  );
-}
-
-function LayerCheckItem({
-  label,
-  checked,
-  palette,
-  last = false,
-}: {
-  label: string;
-  checked: boolean;
-  palette: Palette;
-  last?: boolean;
-}) {
-  return (
-    <View
-      className="flex-row items-center justify-between p-3"
-      style={{
-        borderBottomWidth: last ? 0 : 1,
-        borderBottomColor: palette.border,
-      }}
-    >
-      <Text className="text-sm font-semibold" style={{ color: palette.foreground }}>{label}</Text>
-      <FileCheck2 size={16} color={checked ? palette.emerald : palette.mutedForeground} />
-    </View>
-  );
-}
-
-function OffsetInputCard({
-  label,
-  value,
-  unit,
-  palette,
-}: {
-  label: string;
-  value: string;
-  unit: string;
-  palette: Palette;
-}) {
-  return (
-    <View
-      className="w-[47%] min-w-[150px] gap-1.5 rounded-md border p-3"
+      onPress={onPress}
+      className="flex-row items-center justify-between rounded-md border p-3"
       style={{
         borderColor: palette.border,
         backgroundColor: palette.background,
       }}
     >
-      <Text className="text-xs" style={{ color: palette.mutedForeground }}>{label}</Text>
-      <View className="flex-row items-end gap-1">
-        <Text className="text-[22px] font-bold" style={{ color: palette.foreground }}>{value}</Text>
-        <Text className="mb-0.5 text-sm" style={{ color: palette.mutedForeground }}>{unit}</Text>
+      <Text className="text-sm font-semibold" style={{ color: palette.foreground }}>
+        {label}
+      </Text>
+      <View
+        className="items-center justify-center rounded-sm"
+        style={{
+          width: 18,
+          height: 18,
+          borderWidth: 1.5,
+          borderColor: checked ? palette.emerald : palette.mutedForeground,
+          backgroundColor: checked ? palette.emerald : "transparent",
+        }}
+      >
+        {checked ? (
+          <Text style={{ color: "#FFFFFF", fontSize: 11, fontWeight: "700" }}>
+            X
+          </Text>
+        ) : null}
       </View>
-    </View>
+    </Pressable>
   );
 }
 
 function ToggleRow({
   label,
-  initialValue = true,
+  value,
+  onValueChange,
   palette,
 }: {
   label: string;
-  initialValue?: boolean;
+  value: boolean;
+  onValueChange: (value: boolean) => void;
   palette: Palette;
 }) {
-  const [enabled, setEnabled] = useState(initialValue);
-
   return (
-    <View className="flex-row items-center justify-between" style={{ gap: 16 }}>
-      <Text className="flex-1 text-sm font-semibold" style={{ color: palette.foreground, flex: 1 }}>
+    <View
+      className="flex-row items-center justify-between rounded-md border p-3"
+      style={{
+        borderColor: palette.border,
+        backgroundColor: palette.background,
+      }}
+    >
+      <Text
+        className="mr-3 flex-1 text-sm font-semibold"
+        style={{ color: palette.foreground }}
+      >
         {label}
       </Text>
       <Switch
-        value={enabled}
-        onValueChange={setEnabled}
+        value={value}
+        onValueChange={onValueChange}
         trackColor={{ false: palette.muted, true: palette.emerald }}
         thumbColor="#FFFFFF"
       />
@@ -405,87 +908,185 @@ function ToggleRow({
   );
 }
 
-function RadioOption({
-  label,
-  selected = false,
-  disabled = false,
-  palette,
-}: {
-  label: string;
-  selected?: boolean;
-  disabled?: boolean;
-  palette: Palette;
-}) {
-  return (
-    <Pressable
-      disabled={disabled}
-      className="flex-row items-center rounded-md border p-3"
-      style={{
-        gap: 12,
-        borderColor: palette.border,
-        backgroundColor: palette.background,
-        opacity: disabled ? 0.45 : 1,
-      }}
-    >
-      <View
-        style={{
-          width: 18,
-          height: 18,
-          borderRadius: 9,
-          borderWidth: 2,
-          borderColor: selected ? palette.emerald : palette.mutedForeground,
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        {selected ? (
-          <View
-            style={{
-              width: 8,
-              height: 8,
-              borderRadius: 4,
-              backgroundColor: palette.emerald,
-            }}
-          />
-        ) : null}
-      </View>
-      <Text className="text-sm font-semibold" style={{ color: palette.foreground }}>{label}</Text>
-    </Pressable>
-  );
-}
-
-function SliderRow({
+function SliderBlock({
   label,
   value,
-  onChange,
+  onValueChange,
   palette,
 }: {
   label: string;
   value: number;
-  onChange: (next: number) => void;
+  onValueChange: (value: number) => void;
   palette: Palette;
 }) {
   return (
-    <View className="gap-2.5">
+    <View
+      className="gap-3 rounded-xl border p-4"
+      style={{
+        borderColor: palette.border,
+        backgroundColor: palette.background,
+      }}
+    >
       <View className="flex-row items-center justify-between">
-        <Text className="text-sm font-semibold" style={{ color: palette.foreground }}>{label}</Text>
-        <Text className="text-sm" style={{ color: palette.mutedForeground }}>{value.toFixed(2)}s</Text>
+        <Text className="text-sm font-semibold" style={{ color: palette.foreground }}>
+          {label}
+        </Text>
+        <Text className="text-sm" style={{ color: palette.mutedForeground }}>
+          {value.toFixed(2)} s
+        </Text>
       </View>
       <Slider
         minimumValue={0}
-        maximumValue={1}
-        step={0.01}
+        maximumValue={3}
+        step={0.05}
+        value={value}
+        onValueChange={onValueChange}
         minimumTrackTintColor={palette.emerald}
         maximumTrackTintColor={palette.muted}
         thumbTintColor="#FFFFFF"
-        value={value}
-        onValueChange={onChange}
       />
     </View>
   );
 }
 
-function SegmentButton({
+function RateSlider({
+  label,
+  value,
+  onValueChange,
+  palette,
+}: {
+  label: string;
+  value: number;
+  onValueChange: (value: number) => void;
+  palette: Palette;
+}) {
+  return (
+    <View className="gap-2">
+      <View className="flex-row items-center justify-between">
+        <Text className="text-sm font-semibold" style={{ color: palette.foreground }}>
+          {label}
+        </Text>
+        <Text className="text-sm" style={{ color: palette.mutedForeground }}>
+          {value}%
+        </Text>
+      </View>
+      <Slider
+        minimumValue={0}
+        maximumValue={100}
+        step={10}
+        value={value}
+        onValueChange={onValueChange}
+        minimumTrackTintColor={palette.emerald}
+        maximumTrackTintColor={palette.muted}
+        thumbTintColor="#FFFFFF"
+      />
+    </View>
+  );
+}
+
+function LabeledInput({
+  label,
+  value,
+  onChangeText,
+  palette,
+  multiline = false,
+}: {
+  label: string;
+  value: string;
+  onChangeText: (value: string) => void;
+  palette: Palette;
+  multiline?: boolean;
+}) {
+  return (
+    <View className="gap-1.5">
+      <Text style={labelStyle(palette)}>{label}</Text>
+      <TextInput
+        value={value}
+        onChangeText={onChangeText}
+        multiline={multiline}
+        textAlignVertical={multiline ? "top" : "center"}
+        className="rounded-md border px-3 py-3 text-sm font-semibold"
+        style={{
+          minHeight: multiline ? 92 : undefined,
+          color: palette.foreground,
+          borderColor: palette.border,
+          backgroundColor: palette.panel,
+        }}
+      />
+    </View>
+  );
+}
+
+function DimensionInput({
+  label,
+  value,
+  onChangeText,
+  palette,
+}: {
+  label: string;
+  value: string;
+  onChangeText: (value: string) => void;
+  palette: Palette;
+}) {
+  return (
+    <View className="gap-1.5">
+      <Text style={labelStyle(palette)}>{label}</Text>
+      <View
+        className="flex-row items-center rounded-md border px-3"
+        style={{
+          borderColor: palette.border,
+          backgroundColor: palette.background,
+        }}
+      >
+        <TextInput
+          value={value}
+          onChangeText={onChangeText}
+          keyboardType="decimal-pad"
+          className="flex-1 py-3 text-sm font-semibold"
+          style={{ color: palette.foreground }}
+        />
+        <Text className="text-sm" style={{ color: palette.mutedForeground }}>
+          m
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+function ActionChip({
+  icon,
+  label,
+  palette,
+  destructive = false,
+  onPress,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  palette: Palette;
+  destructive?: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      className="flex-1 flex-row items-center justify-center rounded-md px-3 py-2.5"
+      style={{
+        gap: 8,
+        backgroundColor: destructive ? palette.crimson : palette.muted,
+      }}
+    >
+      {icon}
+      <Text
+        className="text-sm font-semibold"
+        style={{ color: destructive ? "#FFFFFF" : palette.foreground }}
+      >
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+function OptionButton({
   label,
   active,
   palette,
@@ -499,24 +1100,20 @@ function SegmentButton({
   return (
     <Pressable
       onPress={onPress}
-      className="rounded-md px-3 py-1.5"
+      className="rounded-md border px-4 py-3"
       style={{
-        backgroundColor: active ? palette.panel : "transparent",
+        borderColor: active ? palette.foreground : palette.border,
+        backgroundColor: active ? palette.muted : palette.background,
       }}
     >
-      <Text
-        className="text-sm font-semibold"
-        style={{
-          color: active ? palette.foreground : palette.mutedForeground,
-        }}
-      >
+      <Text className="text-sm font-semibold" style={{ color: palette.foreground }}>
         {label}
       </Text>
     </Pressable>
   );
 }
 
-function MetaBlock({
+function MetaPill({
   label,
   value,
   palette,
@@ -528,16 +1125,88 @@ function MetaBlock({
   return (
     <View className="gap-1.5">
       <Text style={labelStyle(palette)}>{label}</Text>
-      <TextInput
-        value={value}
-        editable={false}
-        className="rounded-[10px] border px-[14px] py-3 text-sm font-semibold"
+      <View
+        className="rounded-md border px-3 py-3"
         style={{
-          color: palette.foreground,
           borderColor: palette.border,
           backgroundColor: palette.panel,
         }}
-      />
+      >
+        <Text className="text-sm font-semibold" style={{ color: palette.foreground }}>
+          {value}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+function DetailRow({
+  label,
+  value,
+  palette,
+}: {
+  label: string;
+  value: string;
+  palette: Palette;
+}) {
+  return (
+    <View className="gap-1">
+      <Text style={labelStyle(palette)}>{label}</Text>
+      <Text className="text-sm font-semibold" style={{ color: palette.foreground }}>
+        {value}
+      </Text>
+    </View>
+  );
+}
+
+function InfoTile({
+  label,
+  value,
+  palette,
+}: {
+  label: string;
+  value: string;
+  palette: Palette;
+}) {
+  return (
+    <View
+      className="rounded-md border p-3"
+      style={{
+        borderColor: palette.border,
+        backgroundColor: palette.background,
+      }}
+    >
+      <Text style={labelStyle(palette)}>{label}</Text>
+      <Text className="mt-1 text-sm font-semibold" style={{ color: palette.foreground }}>
+        {value}
+      </Text>
+    </View>
+  );
+}
+
+function EmptyNote({
+  title,
+  body,
+  palette,
+}: {
+  title: string;
+  body: string;
+  palette: Palette;
+}) {
+  return (
+    <View
+      className="gap-2 rounded-xl border p-4"
+      style={{
+        borderColor: palette.border,
+        backgroundColor: palette.background,
+      }}
+    >
+      <Text className="text-sm font-semibold" style={{ color: palette.foreground }}>
+        {title}
+      </Text>
+      <Text className="text-sm" style={{ color: palette.mutedForeground }}>
+        {body}
+      </Text>
     </View>
   );
 }

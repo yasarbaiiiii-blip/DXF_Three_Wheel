@@ -16,7 +16,7 @@ type ThemeMode = "light" | "dark";
 
 interface TopHeaderProps {
   title: string;
-  fileName: string;
+  fileName?: string;
   status: MachineStatus;
   theme: ThemeMode;
   palette: Palette;
@@ -65,15 +65,23 @@ export function TopHeader({
           >
             {title}
           </Text>
-          <Text
-            numberOfLines={1}
-            className="mt-0.5 text-xs"
-            style={{
-              color: palette.mutedForeground,
-            }}
-          >
-            File: <Text className="font-semibold" style={{ color: palette.foreground }}>{fileName}</Text>
-          </Text>
+          {fileName ? (
+            <Text
+              numberOfLines={1}
+              className="mt-0.5 text-xs"
+              style={{
+                color: palette.mutedForeground,
+              }}
+            >
+              File:{" "}
+              <Text
+                className="font-semibold"
+                style={{ color: palette.foreground }}
+              >
+                {fileName}
+              </Text>
+            </Text>
+          ) : null}
         </View>
       </View>
 
