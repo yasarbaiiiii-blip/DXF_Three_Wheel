@@ -1,5 +1,5 @@
 export type PlanLayer = "boundary" | "marking" | "center";
-export type SidebarPanel = "import" | "details" | "mission" | "view";
+export type SidebarPanel = "import" | "details" | "mission" | "view" | "positioning" | "settings";
 export type MarkingStyle = "straight" | "dotted" | "dashed";
 
 export interface PlanPoint {

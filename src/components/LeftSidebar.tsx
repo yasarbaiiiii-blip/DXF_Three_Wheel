@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
+  Animated,
   Modal,
   Pressable,
   ScrollView,
@@ -7,15 +8,23 @@ import {
   Text,
   TextInput,
   View,
+  useWindowDimensions,
 } from "react-native";
 import Slider from "@react-native-community/slider";
 import {
+  Battery,
+  ChevronLeft,
+  X,
   Copy,
   FileUp,
   Info,
   ListChecks,
+  MapPinned,
   Play,
+  Satellite,
+  Search,
   Settings2,
+  Signal,
   Square,
   Trash2,
   Upload,
@@ -33,8 +42,11 @@ import type {
 interface LeftSidebarProps {
   palette: Palette;
   compact: boolean;
+  mode: "menu" | "panel";
   activePanel: SidebarPanel | null;
   onTogglePanel: (panel: SidebarPanel) => void;
+  onCloseMenu?: () => void;
+  onBack?: () => void;
   importedPlan: ImportedPlan | null;
   layerVisibility: LayerVisibility;
   onToggleLayer: (layer: keyof LayerVisibility) => void;
@@ -54,8 +66,11 @@ interface LeftSidebarProps {
 export function LeftSidebar({
   palette,
   compact,
+  mode,
   activePanel,
   onTogglePanel,
+  onCloseMenu,
+  onBack,
   importedPlan,
   layerVisibility,
   onToggleLayer,
@@ -71,12 +86,7 @@ export function LeftSidebar({
   rotation,
   onDeleteSelectedLine,
 }: LeftSidebarProps) {
-  const [displayPanel, setDisplayPanel] = useState<SidebarPanel | null>(activePanel);
-
-  useEffect(() => {
-    setDisplayPanel(activePanel);
-  }, [activePanel]);
-
+  const { width: screenWidth } = useWindowDimensions();
   const selectedMetrics = useMemo(() => {
     if (!selectedLine) {
       return null;
@@ -97,132 +107,199 @@ export function LeftSidebar({
     };
   }, [selectedLine]);
 
-  const panelWidth = compact ? 300 : 360;
+  if (mode === "menu") {
+    // eslint-disable-next-line no-console
+    console.log("[LS MENU] rendering in menu mode");
+    const menuWidth = compact ? 300 : 340;
+    return (
+      <Modal
+        visible={true}
+        transparent={true}
+        animationType="none"
+        onRequestClose={onCloseMenu}
+      >
+        <View
+          style={{
+            flex: 1,
+            backgroundColor: "rgba(9, 12, 18, 0.85)",
+            flexDirection: "row",
+          }}
+        >
+          {/* Sliding menu panel — on the left side */}
+          <View
+            style={{
+              width: menuWidth,
+              backgroundColor: palette.panel,
+              borderRightWidth: 1,
+              borderRightColor: palette.border,
+              paddingTop: 18,
+              paddingHorizontal: 18,
+            }}
+          >
+            <View className="flex-row items-start justify-between" style={{ gap: 12 }}>
+              <View className="flex-1">
+                <Text className="text-xs font-semibold" style={{ color: palette.mutedForeground }}>
+                  NAVIGATION
+                </Text>
+                <Text className="mt-2 text-2xl font-semibold" style={{ color: palette.foreground }}>
+                  Open a section
+                </Text>
+                <Text className="mt-1 text-sm" style={{ color: palette.mutedForeground }}>
+                  Choose one section at a time to keep the screen simple.
+                </Text>
+              </View>
+              <Pressable
+                onPress={onCloseMenu}
+                className="items-center rounded-2xl px-3 py-3"
+                style={{ backgroundColor: palette.muted, minWidth: 64 }}
+              >
+                <X size={18} color={palette.foreground} />
+                <Text className="mt-1 text-xs font-semibold" style={{ color: palette.foreground }}>
+                  Close
+                </Text>
+              </Pressable>
+            </View>
+
+            <View className="mt-6" style={{ gap: 14 }}>
+              <MenuButton
+                label="Import Profile"
+                icon={<FileUp size={26} color={palette.foreground} />}
+                palette={palette}
+                onPress={() => onTogglePanel("import")}
+              />
+              <MenuButton
+                label="Plan Info"
+                icon={<Info size={26} color={palette.foreground} />}
+                palette={palette}
+                onPress={() => onTogglePanel("details")}
+              />
+              <MenuButton
+                label="Mission Status"
+                icon={<ListChecks size={26} color={palette.foreground} />}
+                palette={palette}
+                onPress={() => onTogglePanel("mission")}
+              />
+              <MenuButton
+                label="Control Section"
+                icon={<Settings2 size={26} color={palette.foreground} />}
+                palette={palette}
+                onPress={() => onTogglePanel("view")}
+              />
+              <MenuButton
+                label="Positioning"
+                icon={<MapPinned size={26} color={palette.foreground} />}
+                palette={palette}
+                onPress={() => onTogglePanel("positioning")}
+              />
+              <MenuButton
+                label="Settings"
+                icon={<Settings2 size={26} color={palette.foreground} />}
+                palette={palette}
+                onPress={() => onTogglePanel("settings")}
+              />
+            </View>
+          </View>
+          {/* Back-drop — tapping here closes the menu. */}
+          <Pressable
+            onPress={onCloseMenu}
+            style={{
+              flex: 1,
+            }}
+          />
+        </View>
+      </Modal>
+    );
+  }
+
+  if (!activePanel) {
+    return null;
+  }
+
+  const panelWidthPercent = compact ? 0.72 : 0.5;
+  const panelWidth = screenWidth * panelWidthPercent;
 
   return (
-    <View
-      className="flex-row"
-      style={{
-        width: compact ? "100%" : undefined,
-        backgroundColor: palette.panel,
-        borderRightWidth: 1,
-        borderColor: palette.border,
-      }}
+    <Modal
+      visible={true}
+      transparent={true}
+      animationType="none"
+      onRequestClose={onBack}
     >
       <View
-        className="items-center py-4"
         style={{
-          width: 64,
-          gap: 16,
-          backgroundColor: palette.background,
-          borderRightWidth: 1,
-          borderRightColor: palette.border,
+          flex: 1,
+          backgroundColor: "rgba(9, 12, 18, 0.85)",
+          flexDirection: "row",
         }}
       >
-        <NavButton
-          label="Import"
-          active={activePanel === "import"}
-          icon={
-            <FileUp
-              size={20}
-              color={
-                activePanel === "import"
-                  ? palette.background
-                  : palette.mutedForeground
-              }
-            />
-          }
-          onPress={() => onTogglePanel("import")}
-          palette={palette}
-        />
-        <NavButton
-          label="Plan Info"
-          active={activePanel === "details"}
-          icon={
-            <Info
-              size={20}
-              color={
-                activePanel === "details"
-                  ? palette.background
-                  : palette.mutedForeground
-              }
-            />
-          }
-          onPress={() => onTogglePanel("details")}
-          palette={palette}
-        />
-        <NavButton
-          label="Mission"
-          active={activePanel === "mission"}
-          icon={
-            <ListChecks
-              size={20}
-              color={
-                activePanel === "mission"
-                  ? palette.background
-                  : palette.mutedForeground
-              }
-            />
-          }
-          onPress={() => onTogglePanel("mission")}
-          palette={palette}
-        />
-        <NavButton
-          label="Control"
-          active={activePanel === "view"}
-          icon={
-            <Settings2
-              size={20}
-              color={
-                activePanel === "view"
-                  ? palette.background
-                  : palette.mutedForeground
-              }
-            />
-          }
-          onPress={() => onTogglePanel("view")}
-          palette={palette}
-        />
-      </View>
-
-      {displayPanel ? (
+        {/* Panel — visible on the left side */}
         <View
           style={{
             width: panelWidth,
-            overflow: "hidden",
-            backgroundColor: palette.panel,
+            backgroundColor: palette.background,
             borderRightWidth: 1,
             borderRightColor: palette.border,
           }}
         >
-          <ScrollView
-            key={displayPanel}
-            contentContainerStyle={{ padding: 20, gap: 20 }}
-            showsVerticalScrollIndicator={false}
+        <View
+          className="flex-row items-center border-b px-4 py-3"
+          style={{
+            borderBottomColor: palette.border,
+            backgroundColor: palette.panel,
+            gap: 12,
+          }}
+        >
+          <Pressable
+            onPress={onBack}
+            className="h-12 w-12 items-center justify-center rounded-2xl"
+            style={{ backgroundColor: palette.muted }}
           >
-            <PanelContent
-              activePanel={displayPanel}
-              palette={palette}
-              importedPlan={importedPlan}
-              layerVisibility={layerVisibility}
-              onToggleLayer={onToggleLayer}
-              onImportPress={onImportPress}
-              onCopyFileName={onCopyFileName}
-              onDeletePlan={onDeletePlan}
-              selectedLine={selectedLine}
-              selectedMetrics={selectedMetrics}
-              totalVisibleLines={totalVisibleLines}
-              missionRunning={missionRunning}
-              onToggleMission={onToggleMission}
-              markingStyle={markingStyle}
-              onSelectMarkingStyle={onSelectMarkingStyle}
-              rotation={rotation}
-              onDeleteSelectedLine={onDeleteSelectedLine}
-            />
-          </ScrollView>
+            <ChevronLeft size={24} color={palette.foreground} />
+          </Pressable>
+          <View>
+            <Text className="text-xs font-semibold" style={{ color: palette.mutedForeground }}>
+              SECTION
+            </Text>
+            <Text className="text-xl font-semibold" style={{ color: palette.foreground }}>
+              {panelTitle(activePanel)}
+            </Text>
+          </View>
         </View>
-      ) : null}
-    </View>
+
+        <ScrollView
+          key={activePanel}
+          contentContainerStyle={{ padding: 20, gap: 20 }}
+          showsVerticalScrollIndicator={false}
+        >
+          <PanelContent
+            activePanel={activePanel}
+            palette={palette}
+            importedPlan={importedPlan}
+            layerVisibility={layerVisibility}
+            onToggleLayer={onToggleLayer}
+            onImportPress={onImportPress}
+            onCopyFileName={onCopyFileName}
+            onDeletePlan={onDeletePlan}
+            selectedLine={selectedLine}
+            selectedMetrics={selectedMetrics}
+            totalVisibleLines={totalVisibleLines}
+            missionRunning={missionRunning}
+            onToggleMission={onToggleMission}
+            markingStyle={markingStyle}
+            onSelectMarkingStyle={onSelectMarkingStyle}
+            rotation={rotation}
+            onDeleteSelectedLine={onDeleteSelectedLine}
+          />
+        </ScrollView>
+      </View>
+        <Pressable
+          onPress={onBack}
+          style={{
+            flex: 1,
+          }}
+        />
+      </View>
+    </Modal>
   );
 }
 
@@ -421,57 +498,66 @@ function PanelContent({
         />
 
         <View
-          className="gap-4 rounded-xl border p-4"
+          className="gap-4 rounded-2xl border p-5"
           style={{
             borderColor: palette.border,
             backgroundColor: palette.background,
           }}
         >
-          <DetailRow
-            label="Visible segments"
-            value={`${totalVisibleLines}`}
-            palette={palette}
-          />
-          <DetailRow
-            label="Imported file"
-            value={importedPlan?.fileName ?? "Nothing imported"}
-            palette={palette}
-          />
-          <DetailRow
-            label="Selected segment"
-            value={selectedLine?.label ?? "Tap a line to inspect it"}
-            palette={palette}
-          />
+          <Text style={labelStyle(palette)}>Plan Overview</Text>
+          <View className="flex-row flex-wrap" style={{ gap: 12 }}>
+            <OverviewChip label="Segments" value={`${totalVisibleLines}`} palette={palette} />
+            <OverviewChip
+              label="File"
+              value={importedPlan ? "Imported" : "Not imported"}
+              palette={palette}
+            />
+            <OverviewChip
+              label="Selection"
+              value={selectedLine ? "Active" : "Waiting"}
+              palette={palette}
+            />
+          </View>
+          <View
+            className="rounded-2xl px-4 py-4"
+            style={{ backgroundColor: palette.panel }}
+          >
+            <Text style={labelStyle(palette)}>Current Line</Text>
+            <Text className="mt-2 text-lg font-semibold" style={{ color: palette.foreground }}>
+              {selectedLine?.label ?? "Tap a line in the map"}
+            </Text>
+            <Text className="mt-1 text-sm" style={{ color: palette.mutedForeground }}>
+              {importedPlan?.fileName ?? "Import a plan to start reviewing line details."}
+            </Text>
+          </View>
         </View>
 
         {selectedLine && selectedMetrics ? (
-          <View className="gap-3">
-            <InfoTile label="Layer" value={selectedLine.layer} palette={palette} />
-            <InfoTile
-              label="Length"
-              value={`${selectedMetrics.length.toFixed(2)} m`}
-              palette={palette}
-            />
-            <InfoTile
-              label="Width"
-              value={`${selectedLine.width.toFixed(2)} m`}
-              palette={palette}
-            />
-            <InfoTile
-              label="Angle"
-              value={`${selectedMetrics.angle.toFixed(1)} deg`}
-              palette={palette}
-            />
-            <InfoTile
-              label="Point span"
-              value={selectedMetrics.span}
-              palette={palette}
-            />
-            <InfoTile
-              label="Range"
-              value={selectedMetrics.range}
-              palette={palette}
-            />
+          <View
+            className="rounded-2xl border p-5"
+            style={{ borderColor: palette.border, backgroundColor: palette.background }}
+          >
+            <Text style={labelStyle(palette)}>Selected Line Details</Text>
+            <View className="mt-4" style={{ gap: 12 }}>
+              <ReadableRow label="Layer" value={selectedLine.layer} palette={palette} />
+              <ReadableRow
+                label="Length"
+                value={`${selectedMetrics.length.toFixed(2)} m`}
+                palette={palette}
+              />
+              <ReadableRow
+                label="Width"
+                value={`${selectedLine.width.toFixed(2)} m`}
+                palette={palette}
+              />
+              <ReadableRow
+                label="Angle"
+                value={`${selectedMetrics.angle.toFixed(1)} deg`}
+                palette={palette}
+              />
+              <ReadableRow label="Point span" value={selectedMetrics.span} palette={palette} />
+              <ReadableRow label="Range" value={selectedMetrics.range} palette={palette} />
+            </View>
           </View>
         ) : (
           <EmptyNote
@@ -488,31 +574,45 @@ function PanelContent({
     return (
       <View className="gap-6">
         <SectionIntro
-          title="Mission Setup"
-          subtitle="Choose how the rover should mark the field."
+          title="Mission Status"
+          subtitle="A clear view of what the tablet and machine are doing right now."
           palette={palette}
         />
 
         <View className="gap-3">
-          <Text style={labelStyle(palette)}>Marking Style</Text>
-          <OptionButton
-            label="Straight Line"
-            active={markingStyle === "straight"}
-            palette={palette}
-            onPress={() => onSelectMarkingStyle("straight")}
-          />
-          <OptionButton
-            label="Dotted Line"
-            active={markingStyle === "dotted"}
-            palette={palette}
-            onPress={() => onSelectMarkingStyle("dotted")}
-          />
-          <OptionButton
-            label="Dashed Line"
-            active={markingStyle === "dashed"}
-            palette={palette}
-            onPress={() => onSelectMarkingStyle("dashed")}
-          />
+          <Text style={labelStyle(palette)}>Live Checks</Text>
+          <View className="flex-row flex-wrap" style={{ gap: 12 }}>
+            <StatusIconCard
+              icon={<Battery size={24} color={palette.foreground} />}
+              title="Battery"
+              value="87%"
+              palette={palette}
+            />
+            <StatusIconCard
+              icon={<MapPinned size={24} color={palette.foreground} />}
+              title="Location"
+              value="Locked"
+              palette={palette}
+            />
+            <StatusIconCard
+              icon={<Satellite size={24} color={palette.foreground} />}
+              title="RTK"
+              value="Fixed"
+              palette={palette}
+            />
+            <StatusIconCard
+              icon={<Search size={24} color={palette.foreground} />}
+              title="Machine"
+              value="Searching"
+              palette={palette}
+            />
+            <StatusIconCard
+              icon={<Signal size={24} color={palette.foreground} />}
+              title="Signal"
+              value="Strong"
+              palette={palette}
+            />
+          </View>
         </View>
 
         <View
@@ -523,14 +623,25 @@ function PanelContent({
           }}
         >
           <DetailRow
-            label="Rotation"
+            label="Current Status"
+            value={missionRunning ? "Tablet connected to mission" : "Tablet ready"}
+            palette={palette}
+          />
+          <DetailRow
+            label="To Proceed"
+            value="Ensure the tablet is configured"
+            palette={palette}
+          />
+          <DetailRow
+            label="Next Status"
+            value="Connected to machine"
+            palette={palette}
+          />
+          <DetailRow
+            label="Plan Rotation"
             value={`${rotation.toFixed(0)} deg`}
             palette={palette}
           />
-          <Text className="text-xs" style={{ color: palette.mutedForeground }}>
-            Tap rotate once in the canvas toolbar to enter an angle, or long-press
-            it and drag on the plan to rotate.
-          </Text>
         </View>
 
         <Pressable
@@ -554,6 +665,21 @@ function PanelContent({
             </Text>
           </View>
         </Pressable>
+
+        <View className="gap-3">
+          <Text style={labelStyle(palette)}>Field Category</Text>
+          <View className="flex-row flex-wrap" style={{ gap: 10 }}>
+            <DisabledTag label="Football" palette={palette} />
+            <DisabledTag label="Rugby" palette={palette} />
+            <DisabledTag label="North American Football" palette={palette} />
+            <DisabledTag label="Running Tracks" palette={palette} />
+            <DisabledTag label="Athletics" palette={palette} />
+            <DisabledTag label="Ball and Net Sports" palette={palette} />
+            <DisabledTag label="Racquet" palette={palette} />
+            <DisabledTag label="Bat and Stick Sports" palette={palette} />
+            <DisabledTag label="Miscellaneous Fields" palette={palette} />
+          </View>
+        </View>
       </View>
     );
   }
@@ -803,6 +929,100 @@ function SectionIntro({
   );
 }
 
+function panelTitle(panel: SidebarPanel) {
+  if (panel === "import") {
+    return "Import Profile";
+  }
+
+  if (panel === "details") {
+    return "Plan Info";
+  }
+
+  if (panel === "mission") {
+    return "Mission Status";
+  }
+
+  return "Control Section";
+}
+
+function MenuButton({
+  label,
+  icon,
+  palette,
+  onPress,
+}: {
+  label: string;
+  icon: React.ReactNode;
+  palette: Palette;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      className="flex-row items-center rounded-2xl border px-4 py-4"
+      style={{
+        borderColor: palette.border,
+        backgroundColor: palette.background,
+        gap: 14,
+      }}
+    >
+      <View
+        className="h-14 w-14 items-center justify-center rounded-2xl"
+        style={{ backgroundColor: palette.muted }}
+      >
+        {icon}
+      </View>
+      <Text className="text-lg font-semibold" style={{ color: palette.foreground }}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+function OverviewChip({
+  label,
+  value,
+  palette,
+}: {
+  label: string;
+  value: string;
+  palette: Palette;
+}) {
+  return (
+    <View
+      className="rounded-2xl px-4 py-3"
+      style={{ backgroundColor: palette.panel, minWidth: 112 }}
+    >
+      <Text style={labelStyle(palette)}>{label}</Text>
+      <Text className="mt-1 text-base font-semibold" style={{ color: palette.foreground }}>
+        {value}
+      </Text>
+    </View>
+  );
+}
+
+function ReadableRow({
+  label,
+  value,
+  palette,
+}: {
+  label: string;
+  value: string;
+  palette: Palette;
+}) {
+  return (
+    <View
+      className="rounded-2xl px-4 py-4"
+      style={{ backgroundColor: palette.panel }}
+    >
+      <Text style={labelStyle(palette)}>{label}</Text>
+      <Text className="mt-1 text-base font-semibold" style={{ color: palette.foreground }}>
+        {value}
+      </Text>
+    </View>
+  );
+}
+
 function NavButton({
   label,
   active,
@@ -819,7 +1039,7 @@ function NavButton({
   return (
     <Pressable
       onPress={onPress}
-      className="h-10 w-10 items-center justify-center rounded-[10px]"
+      className="h-14 w-14 items-center justify-center rounded-[16px]"
       style={{
         backgroundColor: active ? palette.foreground : "transparent",
       }}
@@ -827,6 +1047,68 @@ function NavButton({
     >
       {icon}
     </Pressable>
+  );
+}
+
+function StatusIconCard({
+  icon,
+  title,
+  value,
+  palette,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  value: string;
+  palette: Palette;
+}) {
+  return (
+    <View
+      className="rounded-xl border px-4 py-4"
+      style={{
+        minWidth: 120,
+        borderColor: palette.border,
+        backgroundColor: palette.background,
+        gap: 10,
+      }}
+    >
+      <View
+        className="h-11 w-11 items-center justify-center rounded-xl"
+        style={{ backgroundColor: palette.muted }}
+      >
+        {icon}
+      </View>
+      <View>
+        <Text className="text-sm font-semibold" style={{ color: palette.foreground }}>
+          {title}
+        </Text>
+        <Text className="text-sm" style={{ color: palette.mutedForeground }}>
+          {value}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+function DisabledTag({
+  label,
+  palette,
+}: {
+  label: string;
+  palette: Palette;
+}) {
+  return (
+    <View
+      className="rounded-xl border px-4 py-3"
+      style={{
+        borderColor: palette.border,
+        backgroundColor: palette.muted,
+        opacity: 0.55,
+      }}
+    >
+      <Text className="text-sm font-semibold" style={{ color: palette.foreground }}>
+        {label}
+      </Text>
+    </View>
   );
 }
 

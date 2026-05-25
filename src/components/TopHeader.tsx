@@ -2,8 +2,8 @@ import React from "react";
 import { Pressable, Text, View } from "react-native";
 import {
   Battery,
-  ChevronLeft,
   Droplets,
+  Menu,
   Moon,
   Satellite,
   Sun,
@@ -20,6 +20,8 @@ interface TopHeaderProps {
   status: MachineStatus;
   theme: ThemeMode;
   palette: Palette;
+  sidebarVisible: boolean;
+  onToggleSidebar: () => void;
   onToggleTheme: () => void;
 }
 
@@ -38,6 +40,8 @@ export function TopHeader({
   status,
   theme,
   palette,
+  sidebarVisible,
+  onToggleSidebar,
   onToggleTheme,
 }: TopHeaderProps) {
   return (
@@ -49,16 +53,22 @@ export function TopHeader({
         backgroundColor: palette.panel,
       }}
     >
-      <View className="flex-row items-center" style={{ gap: 12, flex: 1.2 }}>
-        <Pressable
-          className="h-10 w-10 items-center justify-center rounded-[10px]"
-        >
-          <ChevronLeft color={palette.foreground} size={20} />
-        </Pressable>
+  <View className="flex-row items-center" style={{ gap: 12, flex: 1.2 }}>
+    <Pressable
+      onPress={onToggleSidebar}
+      className="h-14 w-14 items-center justify-center rounded-[16px]"
+      style={{
+        backgroundColor: sidebarVisible ? palette.muted : palette.background,
+        borderWidth: 1,
+        borderColor: palette.border,
+      }}
+    >
+      <Menu color={palette.foreground} size={36} />
+    </Pressable>
 
         <View className="shrink" style={{ flexShrink: 1 }}>
           <Text
-            className="text-sm font-semibold"
+            className="text-base font-semibold"
             style={{
               color: palette.foreground,
             }}
@@ -106,12 +116,13 @@ export function TopHeader({
       <View className="items-end" style={{ flex: 0.35 }}>
         <Pressable
           onPress={onToggleTheme}
-          className="h-10 w-10 items-center justify-center rounded-[10px]"
+          className="h-12 w-12 items-center justify-center rounded-[14px]"
+          style={{ backgroundColor: palette.background }}
         >
           {theme === "dark" ? (
-            <Sun color={palette.foreground} size={20} />
+            <Sun color={palette.foreground} size={22} />
           ) : (
-            <Moon color={palette.foreground} size={20} />
+            <Moon color={palette.foreground} size={22} />
           )}
         </Pressable>
       </View>
@@ -130,7 +141,7 @@ function MicroBadge({
 }) {
   return (
     <View
-      className="flex-row items-center rounded-md px-2.5 py-1.5"
+      className="flex-row items-center rounded-xl px-3 py-2"
       style={{
         gap: 6,
         backgroundColor: palette.muted,

@@ -10,17 +10,16 @@ import {
   View,
 } from "react-native";
 import {
+  Paintbrush,
   FileUp,
   Hand,
-  Play,
   RotateCw,
   Search,
-  Square,
   Trash2,
   ZoomIn,
   ZoomOut,
 } from "lucide-react-native";
-import Svg, { Circle, G, Line, Rect } from "react-native-svg";
+import Svg, { Circle, G, Line } from "react-native-svg";
 
 import type { Palette } from "../theme/colors";
 import type { ImportedPlan, MarkingStyle, PlanLine } from "../types/plan";
@@ -33,9 +32,8 @@ interface GeometryViewportProps {
   selectedLineId: string | null;
   onSelectLine: (id: string | null) => void;
   onImportPress: () => void;
-  missionRunning: boolean;
-  onToggleMission: () => void;
   markingStyle: MarkingStyle;
+  onSelectMarkingStyle: (style: MarkingStyle) => void;
   rotation: number;
   onRotationChange: (angle: number) => void;
   onDeleteSelectedLine: () => void;
@@ -49,9 +47,8 @@ export function GeometryViewport({
   selectedLineId,
   onSelectLine,
   onImportPress,
-  missionRunning,
-  onToggleMission,
   markingStyle,
+  onSelectMarkingStyle,
   rotation,
   onRotationChange,
   onDeleteSelectedLine,
@@ -60,6 +57,8 @@ export function GeometryViewport({
   const [rotateDragMode, setRotateDragMode] = useState(false);
   const [dragMode, setDragMode] = useState(false);
   const [angleModalVisible, setAngleModalVisible] = useState(false);
+  const [markingModalVisible, setMarkingModalVisible] = useState(false);
+  const [miniInfoVisible, setMiniInfoVisible] = useState(false);
   const [angleInput, setAngleInput] = useState("0");
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [surfaceSize, setSurfaceSize] = useState({
@@ -288,15 +287,13 @@ export function GeometryViewport({
         borderColor: palette.border,
       }}
     >
-      <View className="flex-1 items-center justify-center p-6">
+      <View className="flex-1 p-4">
         <View
           className="w-full flex-1 overflow-hidden border"
           style={{
             borderColor: palette.border,
             backgroundColor: palette.panel,
             minHeight: compact ? 320 : undefined,
-            maxWidth: 980,
-            maxHeight: compact ? undefined : "84%",
             borderRadius: 0,
           }}
         >
@@ -316,16 +313,6 @@ export function GeometryViewport({
                   viewBox="0 0 100 60"
                   preserveAspectRatio="xMidYMid meet"
                 >
-                  <Rect
-                    x="4"
-                    y="4"
-                    width="92"
-                    height="52"
-                    fill="none"
-                    stroke={palette.border}
-                    strokeWidth="0.2"
-                  />
-
                   <G transform={planTransform}>
                     {lines.map((line) => {
                       const isSelected = line.id === selectedLineId;
@@ -373,98 +360,59 @@ export function GeometryViewport({
               </View>
 
               <View
-                className="absolute left-5 top-5 gap-1 rounded-md px-3 py-2"
-                style={{ backgroundColor: palette.background }}
+                className="absolute left-6 right-6 top-6 flex-row items-center justify-between rounded-2xl px-4 py-4"
+                style={{ backgroundColor: palette.background, gap: 16 }}
               >
-                <Text
-                  className="text-xs font-semibold uppercase"
-                  style={{ color: palette.mutedForeground, letterSpacing: 0.5 }}
+                <View
+                  className="flex-1"
+                  style={{ maxWidth: 420 }}
                 >
-                  Plan Preview
-                </Text>
-                <Text className="text-base font-semibold" style={{ color: palette.foreground }}>
-                  {importedPlan.fileName}
-                </Text>
-                <Text className="text-xs" style={{ color: palette.mutedForeground }}>
-                  Tap a line to inspect it on the left.
-                </Text>
-              </View>
+                  <Text
+                    className="text-xs font-semibold uppercase"
+                    style={{ color: palette.mutedForeground, letterSpacing: 0.5 }}
+                  >
+                    Map Home
+                  </Text>
+                  <Text
+                    className="mt-1 text-base font-semibold"
+                    style={{ color: palette.foreground }}
+                  >
+                    {importedPlan.fileName}
+                  </Text>
+                  <Text className="mt-1 text-xs" style={{ color: palette.mutedForeground }}>
+                    {selectedLine
+                      ? "Selected details are in Plan Info."
+                      : "Tap a line to see its details."}
+                  </Text>
+                </View>
 
-              <View className="absolute right-5 top-5 flex-row" style={{ gap: 8 }}>
-                <ToolButton
-                  icon={<ZoomOut size={18} color={palette.foreground} />}
-                  label="Zoom out"
-                  palette={palette}
-                  onPress={() => setZoom((current) => Math.max(0.6, current - 0.15))}
-                />
-                <ToolButton
-                  icon={<ZoomIn size={18} color={palette.foreground} />}
-                  label="Zoom in"
-                  palette={palette}
-                  onPress={() => setZoom((current) => Math.min(2.6, current + 0.15))}
-                />
-                <Pressable
-                  onPress={() => {
-                    setRotateDragMode(false);
-                    setDragMode((current) => !current);
-                  }}
-                  className="h-10 w-10 items-center justify-center rounded-md"
-                  style={{
-                    backgroundColor: dragMode ? palette.emerald : palette.muted,
-                  }}
-                >
-                  <Hand
-                    size={18}
-                    color={dragMode ? "#FFFFFF" : palette.foreground}
-                  />
-                </Pressable>
-                <Pressable
-                  onPress={() => {
-                    if (ignoreTapRef.current) {
-                      ignoreTapRef.current = false;
-                      return;
-                    }
-
-                    setAngleInput(rotation.toFixed(0));
-                    setAngleModalVisible(true);
-                  }}
-                  onLongPress={() => {
-                    ignoreTapRef.current = true;
-                    setDragMode(false);
-                    setRotateDragMode(true);
-                  }}
-                  delayLongPress={260}
-                  className="h-10 w-10 items-center justify-center rounded-md"
-                  style={{
-                    backgroundColor: rotateDragMode ? palette.emerald : palette.muted,
-                  }}
-                >
-                  <RotateCw
-                    size={18}
-                    color={rotateDragMode ? "#FFFFFF" : palette.foreground}
-                  />
-                </Pressable>
-              </View>
-
-              <View className="absolute bottom-5 left-5 flex-row" style={{ gap: 10 }}>
-                <MetaBadge label={`Zoom ${(zoom * 100).toFixed(0)}%`} palette={palette} />
-                <MetaBadge label={`Rotate ${rotation.toFixed(0)} deg`} palette={palette} />
-                <MetaBadge label={dragMode ? "Drag mode on" : "Drag mode off"} palette={palette} />
-                <MetaBadge
-                  label={rotateDragMode ? "Rotate mode on" : "Rotate mode off"}
-                  palette={palette}
-                />
-              </View>
-
-              <View className="absolute bottom-5 right-5">
-                <MetaBadge
-                  label={
-                    selectedLine
-                      ? `Selected ${selectedLine.from.id} to ${selectedLine.to.id}`
-                      : "Select a line"
-                  }
-                  palette={palette}
-                />
+              <View className="items-end">
+                  <Text
+                    className="text-xs font-semibold uppercase"
+                    style={{ color: palette.mutedForeground, letterSpacing: 0.5 }}
+                  >
+                    Selected Line
+                  </Text>
+                  <Text
+                    className="mt-1 text-sm font-semibold"
+                    style={{ color: palette.foreground }}
+                  >
+                    {selectedLine
+                      ? `${selectedLine.from.id} to ${selectedLine.to.id}`
+                      : "Tap any line"}
+                  </Text>
+                  {selectedLine ? (
+                    <Pressable
+                      onPress={() => setMiniInfoVisible(true)}
+                      className="mt-3 rounded-xl px-4 py-3"
+                      style={{ backgroundColor: palette.muted }}
+                    >
+                      <Text className="text-sm font-semibold" style={{ color: palette.foreground }}>
+                        Open mini info tab
+                      </Text>
+                    </Pressable>
+                  ) : null}
+                </View>
               </View>
             </>
           ) : (
@@ -508,46 +456,139 @@ export function GeometryViewport({
       </View>
 
       <View
-        className="border-t p-4"
+        className="border-t px-4 py-3"
         style={{
           borderTopColor: palette.border,
           backgroundColor: palette.panel,
         }}
       >
-        <View className="flex-row" style={{ gap: 12 }}>
-          <Pressable
-            onPress={onToggleMission}
-            className="h-14 flex-1 items-center justify-center rounded-md"
-            style={{
-              backgroundColor: missionRunning ? palette.crimson : palette.emerald,
-            }}
-          >
-            <View className="flex-row items-center" style={{ gap: 8 }}>
-              {missionRunning ? (
-                <Square size={18} color="#FFFFFF" />
-              ) : (
-                <Play size={18} color="#FFFFFF" />
-              )}
-              <Text className="text-base font-semibold" style={{ color: "#FFFFFF" }}>
-                {missionRunning ? "STOP" : "START"}
-              </Text>
-            </View>
-          </Pressable>
-
-          {selectedLine ? (
-            <Pressable
-              onPress={onDeleteSelectedLine}
-              className="h-14 items-center justify-center rounded-md px-5"
-              style={{ backgroundColor: palette.crimson }}
-            >
-              <View className="flex-row items-center" style={{ gap: 8 }}>
-                <Trash2 size={18} color="#FFFFFF" />
-                <Text className="text-base font-semibold" style={{ color: "#FFFFFF" }}>
-                  DELETE
+        <View
+          className="rounded-2xl px-4 py-4"
+          style={{ backgroundColor: palette.background }}
+        >
+          <View className="flex-row items-center justify-between" style={{ gap: 14 }}>
+            <View className="flex-row items-center" style={{ gap: 12 }}>
+              <LabeledToolButton
+                icon={<ZoomOut size={24} color={palette.foreground} />}
+                label="Zoom -"
+                palette={palette}
+                onPress={() => setZoom((current) => Math.max(0.6, current - 0.15))}
+              />
+              <LabeledToolButton
+                icon={<ZoomIn size={24} color={palette.foreground} />}
+                label="Zoom +"
+                palette={palette}
+                onPress={() => setZoom((current) => Math.min(2.6, current + 0.15))}
+              />
+              <Pressable
+                onPress={() => {
+                  setRotateDragMode(false);
+                  setDragMode((current) => !current);
+                }}
+                className="items-center"
+              >
+                <View
+                  className="h-14 w-[78px] items-center justify-center rounded-2xl"
+                  style={{
+                    backgroundColor: dragMode ? palette.emerald : palette.muted,
+                  }}
+                >
+                  <Hand
+                    size={24}
+                    color={dragMode ? "#FFFFFF" : palette.foreground}
+                  />
+                </View>
+                <Text
+                  className="mt-2 text-xs font-semibold"
+                  style={{ color: palette.foreground }}
+                >
+                  Move
                 </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => {
+                  if (ignoreTapRef.current) {
+                    ignoreTapRef.current = false;
+                    return;
+                  }
+
+                  setAngleInput(rotation.toFixed(0));
+                  setAngleModalVisible(true);
+                }}
+                onLongPress={() => {
+                  ignoreTapRef.current = true;
+                  setDragMode(false);
+                  setRotateDragMode(true);
+                }}
+                delayLongPress={260}
+                className="items-center"
+              >
+                <View
+                  className="h-14 w-[78px] items-center justify-center rounded-2xl"
+                  style={{
+                    backgroundColor: rotateDragMode ? palette.emerald : palette.muted,
+                  }}
+                >
+                  <RotateCw
+                    size={24}
+                    color={rotateDragMode ? "#FFFFFF" : palette.foreground}
+                  />
+                </View>
+                <Text
+                  className="mt-2 text-xs font-semibold"
+                  style={{ color: palette.foreground }}
+                >
+                  Rotate
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => setMarkingModalVisible(true)}
+                className="items-center"
+              >
+                <View
+                  className="h-14 w-[78px] items-center justify-center rounded-2xl"
+                  style={{ backgroundColor: palette.muted }}
+                >
+                  <Paintbrush size={24} color={palette.foreground} />
+                </View>
+                <Text className="mt-2 text-xs font-semibold" style={{ color: palette.foreground }}>
+                  Style
+                </Text>
+              </Pressable>
+            </View>
+
+            <View className="flex-1 items-end">
+              <View className="flex-row flex-wrap justify-end" style={{ gap: 12 }}>
+                <MetaBadge label={`${(zoom * 100).toFixed(0)}%`} palette={palette} />
+                <MetaBadge label={`${rotation.toFixed(0)} deg`} palette={palette} />
+                <MetaBadge
+                  label={dragMode ? "Drag on" : "Drag off"}
+                  palette={palette}
+                />
+                <MetaBadge
+                  label={rotateDragMode ? "Rotate on" : "Rotate off"}
+                  palette={palette}
+                />
+                <MetaBadge
+                  label={
+                    selectedLine
+                      ? `${selectedLine.from.id}-${selectedLine.to.id}`
+                      : "No line"
+                  }
+                  palette={palette}
+                />
+                {selectedLine ? (
+                  <Pressable
+                    onPress={onDeleteSelectedLine}
+                    className="h-14 w-14 items-center justify-center rounded-2xl"
+                    style={{ backgroundColor: palette.crimson }}
+                  >
+                    <Trash2 size={18} color="#FFFFFF" />
+                  </Pressable>
+                ) : null}
               </View>
-            </Pressable>
-          ) : null}
+            </View>
+          </View>
         </View>
       </View>
 
@@ -609,11 +650,140 @@ export function GeometryViewport({
           </View>
         </View>
       </Modal>
+
+      <Modal
+        visible={miniInfoVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setMiniInfoVisible(false)}
+      >
+        <View
+          className="flex-1 items-end justify-start px-6 pt-28"
+          style={{ backgroundColor: "rgba(0,0,0,0.28)" }}
+        >
+          <View
+            className="rounded-2xl border p-5"
+            style={{
+              width: 320,
+              borderColor: palette.border,
+              backgroundColor: palette.panel,
+              gap: 10,
+            }}
+          >
+            <Text className="text-lg font-semibold" style={{ color: palette.foreground }}>
+              Mini Line Info
+            </Text>
+            {selectedLine ? (
+              <>
+                <MiniInfoRow label="Line" value={selectedLine.label} palette={palette} />
+                <MiniInfoRow label="Layer" value={selectedLine.layer} palette={palette} />
+                <MiniInfoRow
+                  label="Length"
+                  value={`${lineLength(selectedLine).toFixed(2)} m`}
+                  palette={palette}
+                />
+                <MiniInfoRow
+                  label="Width"
+                  value={`${selectedLine.width.toFixed(2)} m`}
+                  palette={palette}
+                />
+                <MiniInfoRow
+                  label="Angle"
+                  value={`${lineAngle(selectedLine).toFixed(1)} deg`}
+                  palette={palette}
+                />
+              </>
+            ) : (
+              <Text className="text-sm" style={{ color: palette.mutedForeground }}>
+                Select a line first.
+              </Text>
+            )}
+
+            <Pressable
+              onPress={() => setMiniInfoVisible(false)}
+              className="mt-2 items-center justify-center rounded-xl px-4 py-3"
+              style={{ backgroundColor: palette.muted }}
+            >
+              <Text className="text-sm font-semibold" style={{ color: palette.foreground }}>
+                Close
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={markingModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setMarkingModalVisible(false)}
+      >
+        <View
+          className="flex-1 items-center justify-center px-6"
+          style={{ backgroundColor: "rgba(0,0,0,0.5)" }}
+        >
+          <View
+            className="w-full max-w-[340px] rounded-xl border p-5"
+            style={{
+              borderColor: palette.border,
+              backgroundColor: palette.panel,
+              gap: 14,
+            }}
+          >
+            <Text className="text-lg font-semibold" style={{ color: palette.foreground }}>
+              Marking Style
+            </Text>
+            <Text className="text-sm" style={{ color: palette.mutedForeground }}>
+              Choose how the field lines should be painted.
+            </Text>
+
+            <MarkingOption
+              label="Straight Line"
+              active={markingStyle === "straight"}
+              palette={palette}
+              onPress={() => onSelectMarkingStyle("straight")}
+            />
+            <MarkingOption
+              label="Dotted Line"
+              active={markingStyle === "dotted"}
+              palette={palette}
+              onPress={() => onSelectMarkingStyle("dotted")}
+            />
+            <MarkingOption
+              label="Dashed Line"
+              active={markingStyle === "dashed"}
+              palette={palette}
+              onPress={() => onSelectMarkingStyle("dashed")}
+            />
+
+            <View className="flex-row" style={{ gap: 10 }}>
+              <Pressable
+                onPress={() => setMarkingModalVisible(false)}
+                className="flex-1 items-center justify-center rounded-md px-4 py-3"
+                style={{ backgroundColor: palette.muted }}
+              >
+                <Text className="text-sm font-semibold" style={{ color: palette.foreground }}>
+                  Cancel
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => setMarkingModalVisible(false)}
+                className="flex-1 items-center justify-center rounded-md px-4 py-3"
+                style={{ backgroundColor: palette.foreground }}
+              >
+                <Text className="text-sm font-semibold" style={{ color: palette.background }}>
+                  Save
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
 
-function ToolButton({
+function LabeledToolButton({
   icon,
   label,
   palette,
@@ -628,10 +798,44 @@ function ToolButton({
     <Pressable
       onPress={onPress}
       accessibilityLabel={label}
-      className="h-10 w-10 items-center justify-center rounded-md"
-      style={{ backgroundColor: palette.muted }}
+      className="items-center"
     >
-      {icon}
+      <View
+        className="h-14 w-[78px] items-center justify-center rounded-2xl"
+        style={{ backgroundColor: palette.muted }}
+      >
+        {icon}
+      </View>
+      <Text className="mt-2 text-xs font-semibold" style={{ color: palette.foreground }}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+function MarkingOption({
+  label,
+  active,
+  palette,
+  onPress,
+}: {
+  label: string;
+  active: boolean;
+  palette: Palette;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      className="rounded-xl border px-4 py-4"
+      style={{
+        borderColor: active ? palette.emerald : palette.border,
+        backgroundColor: active ? palette.muted : palette.background,
+      }}
+    >
+      <Text className="text-base font-semibold" style={{ color: palette.foreground }}>
+        {label}
+      </Text>
     </Pressable>
   );
 }
@@ -645,11 +849,35 @@ function MetaBadge({
 }) {
   return (
     <View
-      className="rounded-md px-3 py-2"
+      className="rounded-xl px-4 py-3"
       style={{ backgroundColor: palette.background }}
     >
       <Text className="text-xs font-semibold" style={{ color: palette.foreground }}>
         {label}
+      </Text>
+    </View>
+  );
+}
+
+function MiniInfoRow({
+  label,
+  value,
+  palette,
+}: {
+  label: string;
+  value: string;
+  palette: Palette;
+}) {
+  return (
+    <View
+      className="flex-row items-center justify-between rounded-xl px-4 py-3"
+      style={{ backgroundColor: palette.background }}
+    >
+      <Text className="text-sm font-semibold" style={{ color: palette.mutedForeground }}>
+        {label}
+      </Text>
+      <Text className="ml-4 flex-1 text-right text-sm font-semibold" style={{ color: palette.foreground }}>
+        {value}
       </Text>
     </View>
   );
@@ -665,6 +893,30 @@ function dashPattern(style: MarkingStyle) {
   }
 
   return undefined;
+}
+
+function formatMarkingStyle(style: MarkingStyle) {
+  if (style === "dotted") {
+    return "Dotted Line";
+  }
+
+  if (style === "dashed") {
+    return "Dashed Line";
+  }
+
+  return "Straight Line";
+}
+
+function lineLength(line: PlanLine) {
+  const dx = line.to.x - line.from.x;
+  const dy = line.to.y - line.from.y;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+function lineAngle(line: PlanLine) {
+  const dx = line.to.x - line.from.x;
+  const dy = line.to.y - line.from.y;
+  return ((Math.atan2(dy, dx) * 180) / Math.PI + 360) % 360;
 }
 
 const styles = StyleSheet.create({

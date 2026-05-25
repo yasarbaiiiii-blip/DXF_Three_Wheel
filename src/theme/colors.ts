@@ -13,14 +13,14 @@ export interface Palette {
 }
 
 export const lightPalette: Palette = {
-  background: "#FAFAFA",
-  foreground: "#18181B",
+  background: "#EEF3F7",
+  foreground: "#15202B",
   panel: "#FFFFFF",
-  border: "#E4E4E7",
-  muted: "#F4F4F5",
-  mutedForeground: "#71717A",
-  primary: "#18181B",
-  primaryForeground: "#FAFAFA",
+  border: "#CBD5E1",
+  muted: "#E2E8F0",
+  mutedForeground: "#52606D",
+  primary: "#1E293B",
+  primaryForeground: "#F8FAFC",
   emerald: "#059669",
   amber: "#D97706",
   crimson: "#DC2626",
