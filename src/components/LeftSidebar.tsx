@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import {
   Animated,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   Switch,
@@ -39,6 +40,8 @@ import type {
   SidebarPanel,
 } from "../types/plan";
 
+const sliderThumbImage = require("../../assets/slider-thumb.png");
+
 interface LeftSidebarProps {
   palette: Palette;
   compact: boolean;
@@ -61,6 +64,8 @@ interface LeftSidebarProps {
   onSelectMarkingStyle: (style: MarkingStyle) => void;
   rotation: number;
   onDeleteSelectedLine: () => void;
+  planNotes: string;
+  onSavePlanNotes: (notes: string) => void;
 }
 
 export function LeftSidebar({
@@ -85,6 +90,8 @@ export function LeftSidebar({
   onSelectMarkingStyle,
   rotation,
   onDeleteSelectedLine,
+  planNotes,
+  onSavePlanNotes,
 }: LeftSidebarProps) {
   const { width: screenWidth } = useWindowDimensions();
   const selectedMetrics = useMemo(() => {
@@ -105,10 +112,9 @@ export function LeftSidebar({
         1
       )}) -> (${selectedLine.to.x.toFixed(1)}, ${selectedLine.to.y.toFixed(1)})`,
     };
-  }, [selectedLine]);
+}, [selectedLine]);
 
   if (mode === "menu") {
-    // eslint-disable-next-line no-console
     console.log("[LS MENU] rendering in menu mode");
     const menuWidth = compact ? 300 : 340;
     return (
@@ -116,7 +122,10 @@ export function LeftSidebar({
         visible={true}
         transparent={true}
         animationType="none"
-        onRequestClose={onCloseMenu}
+        onRequestClose={() => {
+          console.log("[LS MODAL] onRequestClose called (hardware back/Android back)");
+          onCloseMenu?.();
+        }}
       >
         <View
           style={{
@@ -148,15 +157,11 @@ export function LeftSidebar({
                   Choose one section at a time to keep the screen simple.
                 </Text>
               </View>
-              <Pressable
-                onPress={onCloseMenu}
-                className="items-center rounded-2xl px-3 py-3"
-                style={{ backgroundColor: palette.muted, minWidth: 64 }}
-              >
-                <X size={18} color={palette.foreground} />
-                <Text className="mt-1 text-xs font-semibold" style={{ color: palette.foreground }}>
-                  Close
-                </Text>
+<Pressable
+                 onPress={onCloseMenu}
+                 className="items-center justify-center px-3 py-3"
+               >
+                 <X size={20} color={palette.foreground} />
               </Pressable>
             </View>
 
@@ -199,13 +204,17 @@ export function LeftSidebar({
               />
             </View>
           </View>
-          {/* Back-drop — tapping here closes the menu. */}
-          <Pressable
-            onPress={onCloseMenu}
-            style={{
-              flex: 1,
-            }}
-          />
+{/* Back-drop — tapping here closes the menu. */}
+           <Pressable
+             onPress={() => {
+               console.log("[LS BACKDROP] onPress called");
+               console.trace("[LS BACKDROP] stack trace");
+               onCloseMenu?.();
+             }}
+             style={{
+               flex: 1,
+             }}
+           />
         </View>
       </Modal>
     );
@@ -249,14 +258,13 @@ export function LeftSidebar({
             gap: 12,
           }}
         >
-          <Pressable
-            onPress={onBack}
-            className="h-12 w-12 items-center justify-center rounded-2xl"
-            style={{ backgroundColor: palette.muted }}
-          >
-            <ChevronLeft size={24} color={palette.foreground} />
+<Pressable
+             onPress={onBack}
+             className="h-14 w-14 items-center justify-center rounded-2xl"
+           >
+             <ChevronLeft size={26} color={palette.foreground} />
           </Pressable>
-          <View>
+          <View style={{ marginLeft: 6 }}>
             <Text className="text-xs font-semibold" style={{ color: palette.mutedForeground }}>
               SECTION
             </Text>
@@ -289,6 +297,8 @@ export function LeftSidebar({
             onSelectMarkingStyle={onSelectMarkingStyle}
             rotation={rotation}
             onDeleteSelectedLine={onDeleteSelectedLine}
+            planNotes={planNotes}
+            onSavePlanNotes={onSavePlanNotes}
           />
         </ScrollView>
       </View>
@@ -321,6 +331,8 @@ function PanelContent({
   onSelectMarkingStyle,
   rotation,
   onDeleteSelectedLine,
+  planNotes,
+  onSavePlanNotes,
 }: {
   activePanel: SidebarPanel;
   palette: Palette;
@@ -344,9 +356,11 @@ function PanelContent({
   onSelectMarkingStyle: (style: MarkingStyle) => void;
   rotation: number;
   onDeleteSelectedLine: () => void;
+  planNotes: string;
+  onSavePlanNotes: (notes: string) => void;
 }) {
   const [fieldName, setFieldName] = useState("");
-  const [fieldNotes, setFieldNotes] = useState("");
+  const [fieldNotes, setFieldNotes] = useState(planNotes);
   const [manualPainting, setManualPainting] = useState(false);
   const [paintWhenReversing, setPaintWhenReversing] = useState(false);
   const [pumpStartDelay, setPumpStartDelay] = useState(0.2);
@@ -377,8 +391,12 @@ function PanelContent({
 
     const nextName = importedPlan.fileName.replace(/\.(csv|dxf)$/i, "");
     setFieldName(nextName);
-    setFieldNotes("");
+    setFieldNotes(planNotes);
   }, [importedPlan]);
+
+  useEffect(() => {
+    setFieldNotes(planNotes);
+  }, [planNotes]);
 
   const hasDimensionChanges =
     offsetSideways !== savedDimensions.offsetSideways ||
@@ -402,11 +420,11 @@ function PanelContent({
             backgroundColor: palette.background,
           }}
         >
-          <Pressable
-            onPress={onImportPress}
-            className="h-12 flex-row items-center justify-center rounded-md"
-            style={{ backgroundColor: palette.foreground, gap: 8 }}
-          >
+<Pressable
+             onPress={onImportPress}
+             className="h-14 flex-row items-center justify-center self-start rounded-md px-4"
+             style={{ backgroundColor: palette.foreground, gap: 8, minWidth: 180 }}
+           >
             <Upload size={18} color={palette.background} />
             <Text
               className="text-sm font-semibold"
@@ -441,8 +459,24 @@ function PanelContent({
                 palette={palette}
                 multiline
               />
+              {fieldNotes.trim() !== planNotes.trim() && fieldNotes.trim() ? (
+                <View className="items-end -mt-2">
+<Pressable
+                     onPress={() => onSavePlanNotes(fieldNotes.trim())}
+                     className="rounded-md border px-4 py-3"
+                     style={{
+                       borderColor: palette.emerald,
+                       backgroundColor: "transparent",
+                     }}
+                   >
+                     <Text className="text-sm font-semibold" style={{ color: palette.emerald }}>
+                       Add Notes
+                     </Text>
+                  </Pressable>
+                </View>
+              ) : null}
 
-              <View className="flex-row" style={{ gap: 10 }}>
+              <View className="flex-row flex-wrap" style={{ gap: 10 }}>
                 <ActionChip
                   icon={<Copy size={16} color={palette.foreground} />}
                   label="Copy file name"
@@ -454,6 +488,7 @@ function PanelContent({
                   label="Delete plan"
                   palette={palette}
                   destructive
+                  wide
                   onPress={onDeletePlan}
                 />
               </View>
@@ -529,6 +564,14 @@ function PanelContent({
             <Text className="mt-1 text-sm" style={{ color: palette.mutedForeground }}>
               {importedPlan?.fileName ?? "Import a plan to start reviewing line details."}
             </Text>
+            {planNotes ? (
+              <View className="mt-3 rounded-xl px-3 py-3" style={{ backgroundColor: palette.background }}>
+                <Text style={labelStyle(palette)}>Field Notes</Text>
+                <Text className="mt-1 text-sm" style={{ color: palette.foreground }}>
+                  {planNotes}
+                </Text>
+              </View>
+            ) : null}
           </View>
         </View>
 
@@ -646,9 +689,10 @@ function PanelContent({
 
         <Pressable
           onPress={onToggleMission}
-          className="h-14 items-center justify-center rounded-md"
+          className="h-12 items-center justify-center self-start rounded-md px-6"
           style={{
             backgroundColor: missionRunning ? palette.crimson : palette.emerald,
+            minWidth: 180,
           }}
         >
           <View className="flex-row items-center" style={{ gap: 8 }}>
@@ -758,18 +802,22 @@ function PanelContent({
           value={`${fastestRate}%`}
           palette={palette}
         />
-        <Pressable
-          onPress={() => {
-            setSlowestRateDraft(slowestRate);
-            setFastestRateDraft(fastestRate);
-            setRateModalOpen(true);
-          }}
-          className="mt-2 h-11 items-center justify-center rounded-md"
-          style={{ backgroundColor: palette.muted }}
-        >
-          <Text className="text-sm font-semibold" style={{ color: palette.foreground }}>
-            Adjust
-          </Text>
+          <Pressable
+            onPress={() => {
+              setSlowestRateDraft(slowestRate);
+              setFastestRateDraft(fastestRate);
+              setRateModalOpen(true);
+            }}
+            className="mt-2 h-11 items-center justify-center self-start rounded-md border px-5"
+            style={{
+              borderColor: palette.foreground,
+              backgroundColor: "transparent",
+              minWidth: 180,
+            }}
+          >
+            <Text className="text-sm font-semibold" style={{ color: palette.foreground }}>
+              Adjust
+            </Text>
         </Pressable>
       </View>
 
@@ -800,40 +848,45 @@ function PanelContent({
           palette={palette}
         />
 
-        {hasDimensionChanges ? (
-          <View className="flex-row" style={{ gap: 10 }}>
-            <Pressable
-              onPress={() => {
-                setOffsetSideways(savedDimensions.offsetSideways);
-                setOffsetFront(savedDimensions.offsetFront);
-                setOffsetUp(savedDimensions.offsetUp);
-                setMowDeckCutWidth(savedDimensions.mowDeckCutWidth);
-              }}
-              className="flex-1 items-center justify-center rounded-md px-4 py-3"
-              style={{ backgroundColor: palette.muted }}
-            >
-              <Text className="text-sm font-semibold" style={{ color: palette.foreground }}>
-                Cancel Changes
-              </Text>
-            </Pressable>
-            <Pressable
-              onPress={() =>
-                setSavedDimensions({
-                  offsetSideways,
-                  offsetFront,
-                  offsetUp,
-                  mowDeckCutWidth,
-                })
-              }
-              className="flex-1 items-center justify-center rounded-md px-4 py-3"
-              style={{ backgroundColor: palette.foreground }}
-            >
-              <Text className="text-sm font-semibold" style={{ color: palette.background }}>
-                Save Changes
-              </Text>
-            </Pressable>
-          </View>
-        ) : null}
+{hasDimensionChanges ? (
+           <View className="flex-row flex-wrap" style={{ gap: 10 }}>
+             <Pressable
+               onPress={() => {
+                 setOffsetSideways(savedDimensions.offsetSideways);
+                 setOffsetFront(savedDimensions.offsetFront);
+                 setOffsetUp(savedDimensions.offsetUp);
+                 setMowDeckCutWidth(savedDimensions.mowDeckCutWidth);
+               }}
+               className="items-center justify-center rounded-md px-4 py-4"
+               style={{
+                 borderWidth: 1,
+                 borderColor: palette.foreground,
+                 backgroundColor: "transparent",
+                 width: "48%",
+               }}
+             >
+               <Text className="text-sm font-semibold" style={{ color: palette.foreground }}>
+                 Cancel Changes
+               </Text>
+             </Pressable>
+             <Pressable
+               onPress={() =>
+                 setSavedDimensions({
+                   offsetSideways,
+                   offsetFront,
+                   offsetUp,
+                   mowDeckCutWidth,
+                 })
+               }
+               className="items-center justify-center rounded-md px-4 py-4"
+               style={{ backgroundColor: palette.foreground, width: "48%" }}
+             >
+               <Text className="text-sm font-semibold" style={{ color: palette.background }}>
+                 Save Changes
+               </Text>
+             </Pressable>
+           </View>
+         ) : null}
       </View>
 
       <Modal
@@ -880,8 +933,8 @@ function PanelContent({
             <View className="flex-row" style={{ gap: 10 }}>
               <Pressable
                 onPress={() => setRateModalOpen(false)}
-                className="flex-1 items-center justify-center rounded-md px-4 py-3"
-                style={{ backgroundColor: palette.muted }}
+                className="flex-1 items-center justify-center rounded-md border px-4 py-3"
+                style={{ borderColor: palette.foreground, backgroundColor: "transparent" }}
               >
                 <Text className="text-sm font-semibold" style={{ color: palette.foreground }}>
                   Cancel
@@ -972,9 +1025,10 @@ function MenuButton({
       >
         {icon}
       </View>
-      <Text className="text-lg font-semibold" style={{ color: palette.foreground }}>
+      <Text className="flex-1 text-lg font-semibold" style={{ color: palette.foreground }}>
         {label}
       </Text>
+      <ChevronLeft size={20} color={palette.mutedForeground} style={{ transform: [{ rotate: "180deg" }] }} />
     </Pressable>
   );
 }
@@ -1224,8 +1278,8 @@ function SliderBlock({
         value={value}
         onValueChange={onValueChange}
         minimumTrackTintColor={palette.emerald}
-        maximumTrackTintColor={palette.muted}
-        thumbTintColor="#FFFFFF"
+        maximumTrackTintColor={sliderTrackColor(palette)}
+        thumbImage={Platform.OS === "web" ? undefined : sliderThumbImage}
       />
     </View>
   );
@@ -1259,8 +1313,8 @@ function RateSlider({
         value={value}
         onValueChange={onValueChange}
         minimumTrackTintColor={palette.emerald}
-        maximumTrackTintColor={palette.muted}
-        thumbTintColor="#FFFFFF"
+        maximumTrackTintColor={sliderTrackColor(palette)}
+        thumbImage={Platform.OS === "web" ? undefined : sliderThumbImage}
       />
     </View>
   );
@@ -1340,23 +1394,27 @@ function ActionChip({
   label,
   palette,
   destructive = false,
+  wide = false,
   onPress,
 }: {
   icon: React.ReactNode;
   label: string;
   palette: Palette;
   destructive?: boolean;
+  wide?: boolean;
   onPress: () => void;
 }) {
   return (
-    <Pressable
-      onPress={onPress}
-      className="flex-1 flex-row items-center justify-center rounded-md px-3 py-2.5"
-      style={{
-        gap: 8,
-        backgroundColor: destructive ? palette.crimson : palette.muted,
-      }}
-    >
+<Pressable
+       onPress={onPress}
+       className="flex-row items-center justify-center rounded-md border px-4 py-3.5"
+       style={{
+         gap: 8,
+         borderColor: destructive ? palette.crimson : palette.foreground,
+         backgroundColor: destructive ? palette.crimson : "transparent",
+         minWidth: wide ? 170 : 150,
+       }}
+     >
       {icon}
       <Text
         className="text-sm font-semibold"
@@ -1501,4 +1559,9 @@ function labelStyle(palette: Palette) {
     textTransform: "uppercase" as const,
     letterSpacing: 0.5,
   };
+}
+
+function sliderTrackColor(palette: Palette) {
+  const isDark = palette.background.toLowerCase() === "#09090b";
+  return isDark ? palette.muted : "#B8C3D1";
 }

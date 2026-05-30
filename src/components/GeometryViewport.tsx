@@ -27,6 +27,7 @@ import type { ImportedPlan, MarkingStyle, PlanLine } from "../types/plan";
 interface GeometryViewportProps {
   palette: Palette;
   compact: boolean;
+  mode?: "home" | "plan";
   importedPlan: ImportedPlan | null;
   lines: PlanLine[];
   selectedLineId: string | null;
@@ -37,6 +38,7 @@ interface GeometryViewportProps {
   rotation: number;
   onRotationChange: (angle: number) => void;
   onDeleteSelectedLine: () => void;
+  planNotes: string;
 }
 
 export function GeometryViewport({
@@ -365,7 +367,27 @@ export function GeometryViewport({
               >
                 <View
                   className="flex-1"
-                  style={{ maxWidth: 420 }}
+                  style={{ maxWidth: 200 }}
+                >
+                  <Text
+                    className="text-xs font-semibold uppercase"
+                    style={{ color: palette.mutedForeground, letterSpacing: 0.5 }}
+                  >
+                    File Summary
+                  </Text>
+                  <Text
+                    className="mt-1 text-base font-semibold"
+                    style={{ color: palette.foreground }}
+                  >
+                    {importedPlan.fileName}
+                  </Text>
+                  <Text className="mt-1 text-xs" style={{ color: palette.mutedForeground }}>
+                    {lines.length} points imported
+                  </Text>
+                </View>
+                <View
+                  className="flex-1"
+                  style={{ maxWidth: 200 }}
                 >
                   <Text
                     className="text-xs font-semibold uppercase"
@@ -439,7 +461,7 @@ export function GeometryViewport({
               </Text>
               <Pressable
                 onPress={onImportPress}
-                className="h-12 flex-row items-center justify-center rounded-md px-5"
+                className="h-14 flex-row items-center justify-center rounded-md px-5"
                 style={{ backgroundColor: palette.foreground, gap: 8 }}
               >
                 <FileUp size={18} color={palette.background} />

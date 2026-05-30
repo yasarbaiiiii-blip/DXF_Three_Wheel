@@ -18,6 +18,17 @@ export async function readImportedPlanFile(plan: ImportedPlan) {
   return parseCsv(raw);
 }
 
+export function parseImportedPlanContent(
+  fileType: ImportedPlan["fileType"],
+  content: string
+) {
+  if (fileType === "dxf") {
+    return parseDxf(content);
+  }
+
+  return parseCsv(content);
+}
+
 function parseDxf(content: string): PlanLine[] {
   const pairs = toPairs(content);
   const entitiesStart = pairs.findIndex(
