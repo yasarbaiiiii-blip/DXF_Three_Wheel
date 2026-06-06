@@ -1417,13 +1417,39 @@ function HomeView({
   const saveExportedPlan = async () => {
     if (!importedPlan || lines.length === 0) return;
     const cleanedName = exportFileName.trim().replace(/[\\/:*?"<>|]/g, "_") || "generated_plan";
-    const uri = `${FileSystem.documentDirectory ?? ""}${cleanedName}.dxf`;
-    console.log(`[${new Date().toISOString()}] [UI] EXPORT_SAVE`, { fileName: cleanedName, uri });
-    await FileSystem.writeAsStringAsync(uri, linesToDxf(lines, cleanedName), {
-      encoding: FileSystem.EncodingType.UTF8,
-    });
-    setExportDialogOpen(false);
-    Alert.alert("Exported", `DXF saved to ${uri}`);
+    const fileContent = linesToDxf(lines, cleanedName);
+
+    try {
+      if (Platform.OS === "android") {
+        console.log(`[${new Date().toISOString()}] [UI] EXPORT_SAVE_ANDROID`, { fileName: cleanedName });
+        const permissions = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
+        if (permissions.granted) {
+          const fileUri = await FileSystem.StorageAccessFramework.createFileAsync(
+            permissions.directoryUri,
+            cleanedName,
+            "application/dxf"
+          );
+          await FileSystem.writeAsStringAsync(fileUri, fileContent, {
+            encoding: FileSystem.EncodingType.UTF8,
+          });
+          setExportDialogOpen(false);
+          Alert.alert("Exported", "DXF file saved successfully to your selected folder!");
+        } else {
+          Alert.alert("Permission Denied", "Cannot export without folder selection permissions.");
+        }
+      } else {
+        const uri = `${FileSystem.documentDirectory ?? ""}${cleanedName}.dxf`;
+        console.log(`[${new Date().toISOString()}] [UI] EXPORT_SAVE_FALLBACK`, { fileName: cleanedName, uri });
+        await FileSystem.writeAsStringAsync(uri, fileContent, {
+          encoding: FileSystem.EncodingType.UTF8,
+        });
+        setExportDialogOpen(false);
+        Alert.alert("Exported", `DXF saved to app storage:\n${uri}`);
+      }
+    } catch (error: any) {
+      console.error("Export save error:", error);
+      Alert.alert("Export Failed", error.message || "An unknown error occurred during save.");
+    }
   };
 
   const missionActionButtonStyle = {
