@@ -1548,9 +1548,13 @@ function HomeView({
                       tone={telemetrySnapshot?.pose_age_ms == null ? "#64748b" : telemetrySnapshot.pose_age_ms <= 500 ? "#16a34a" : telemetrySnapshot.pose_age_ms <= 1500 ? "#d97706" : "#dc2626"}
                     />
                     <StripMetric
-                      label="RPP"
-                      value={telemetrySnapshot?.rpp_state_name ?? String(telemetrySnapshot?.rpp_state ?? systemHealth?.rpp_state ?? "n/a")}
-                      tone="#0f172a"
+                      label="RPP State"
+                      value={
+                        telemetrySnapshot?.rpp_state_name && telemetrySnapshot?.rpp_state != null
+                          ? `${telemetrySnapshot.rpp_state_name} (${telemetrySnapshot.rpp_state})`
+                          : telemetrySnapshot?.rpp_state_name || String(telemetrySnapshot?.rpp_state ?? systemHealth?.rpp_state ?? "n/a")
+                      }
+                      tone="#ffffff"
                     />
                   </View>
 
