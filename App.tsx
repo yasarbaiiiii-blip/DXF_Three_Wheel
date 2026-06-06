@@ -3400,6 +3400,12 @@ function touchDistance(t1: { locationX: number; locationY: number }, t2: { locat
   return Math.sqrt(dx * dx + dy * dy);
 }
 
+function touchAngle(t1: { locationX: number; locationY: number }, t2: { locationX: number; locationY: number }) {
+  const dx = t1.locationX - t2.locationX;
+  const dy = t1.locationY - t2.locationY;
+  return Math.atan2(dy, dx);
+}
+
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
@@ -3548,22 +3554,32 @@ function PlanPreview({
   const viewportRef = React.useRef<PreviewViewport>({ panX: 0, panY: 0, zoom: 1 });
   const linesRef = React.useRef(filtered);
   const onSelectLineRef = React.useRef(onSelectLine);
+  const [layoutSize, setLayoutSize] = useState({ width: 0, height: 0 });
+  const [viewport, setViewport] = useState<PreviewViewport>({ panX: 0, panY: 0, zoom: 1 });
+  const [rotation, setRotation] = useState(0);
+
+  const rotationRef = React.useRef(rotation);
+  useEffect(() => {
+    rotationRef.current = rotation;
+  }, [rotation]);
+
   const gestureRef = React.useRef<{
     lastTouch: LocalPoint | null;
     startTouch: LocalPoint | null;
     pinchDistance: number | null;
+    pinchAngle: number | null;
     pinchViewport: PreviewViewport;
+    pinchRotation: number;
     isTap: boolean;
   }>({
     lastTouch: null,
     startTouch: null,
     pinchDistance: null,
+    pinchAngle: null,
     pinchViewport: { panX: 0, panY: 0, zoom: 1 },
+    pinchRotation: 0,
     isTap: false,
   });
-  const [layoutSize, setLayoutSize] = useState({ width: 0, height: 0 });
-  const [viewport, setViewport] = useState<PreviewViewport>({ panX: 0, panY: 0, zoom: 1 });
-  const [rotation, setRotation] = useState(0);
 
   useEffect(() => {
     linesRef.current = filtered;
@@ -3607,7 +3623,14 @@ function PlanPreview({
           gestureRef.current.isTap = true;
           gestureRef.current.startTouch = { x: evt.nativeEvent.locationX, y: evt.nativeEvent.locationY };
           gestureRef.current.lastTouch = gestureRef.current.startTouch;
-          gestureRef.current.pinchDistance = touches.length >= 2 ? touchDistance(touches[0], touches[1]) : null;
+          if (touches.length >= 2) {
+            gestureRef.current.pinchDistance = touchDistance(touches[0], touches[1]);
+            gestureRef.current.pinchAngle = touchAngle(touches[0], touches[1]);
+            gestureRef.current.pinchRotation = rotationRef.current;
+          } else {
+            gestureRef.current.pinchDistance = null;
+            gestureRef.current.pinchAngle = null;
+          }
           gestureRef.current.pinchViewport = viewportRef.current;
         },
 
@@ -3642,8 +3665,14 @@ function PlanPreview({
             };
 
             gestureRef.current.isTap = false;
-            if (!gestureRef.current.pinchDistance || gestureRef.current.pinchDistance <= 0) {
+            if (
+              !gestureRef.current.pinchDistance ||
+              gestureRef.current.pinchDistance <= 0 ||
+              gestureRef.current.pinchAngle === null
+            ) {
               gestureRef.current.pinchDistance = distance;
+              gestureRef.current.pinchAngle = touchAngle(touches[0], touches[1]);
+              gestureRef.current.pinchRotation = rotationRef.current;
               gestureRef.current.pinchViewport = viewportRef.current;
               return;
             }
@@ -3659,6 +3688,12 @@ function PlanPreview({
             };
             viewportRef.current = next;
             setViewport(next);
+
+            const currentAngle = touchAngle(touches[0], touches[1]);
+            const angleDiffRad = currentAngle - gestureRef.current.pinchAngle;
+            const angleDiffDeg = (angleDiffRad * 180) / Math.PI;
+            const nextRotation = ((gestureRef.current.pinchRotation + angleDiffDeg) % 360 + 360) % 360;
+            setRotation(nextRotation);
           }
         },
 
@@ -3676,6 +3711,7 @@ function PlanPreview({
           gestureRef.current.lastTouch = null;
           gestureRef.current.startTouch = null;
           gestureRef.current.pinchDistance = null;
+          gestureRef.current.pinchAngle = null;
           gestureRef.current.isTap = false;
         },
 
@@ -3683,6 +3719,7 @@ function PlanPreview({
           gestureRef.current.lastTouch = null;
           gestureRef.current.startTouch = null;
           gestureRef.current.pinchDistance = null;
+          gestureRef.current.pinchAngle = null;
           gestureRef.current.isTap = false;
         },
       }),
@@ -3732,86 +3769,40 @@ function PlanPreview({
       )}
 
       {filtered.length > 0 && (
-        <>
-          {/* Floating Compass Overlay */}
-          <View
-            style={{
-              position: "absolute",
-              top: 14,
-              right: 14,
-              width: 54,
-              height: 54,
-              zIndex: 40,
-              elevation: 40,
-              backgroundColor: "transparent",
-            }}
-          >
-            <Svg width={54} height={54} viewBox="0 0 54 54">
-              {/* Outer circle */}
-              <Circle cx={27} cy={27} r={24} fill="rgba(15,23,42,0.85)" stroke="#cbd5e1" strokeWidth={1.5} />
-              
-              {/* Cardinal labels */}
-              <SvgText x={27} y={12} fontSize={8} fill="#ef4444" fontWeight="900" textAnchor="middle">N</SvgText>
-              <SvgText x={27} y={48} fontSize={7} fill="#94a3b8" fontWeight="700" textAnchor="middle">S</SvgText>
-              <SvgText x={47} y={30} fontSize={7} fill="#94a3b8" fontWeight="700" textAnchor="middle">E</SvgText>
-              <SvgText x={7} y={30} fontSize={7} fill="#94a3b8" fontWeight="700" textAnchor="middle">W</SvgText>
-              
-              {/* Rotating needle */}
-              <G transform={`rotate(${rotation} 27 27)`}>
-                {/* North Pointer */}
-                <Polygon points="27,15 31,27 23,27" fill="#ef4444" />
-                {/* South Pointer */}
-                <Polygon points="27,39 31,27 23,27" fill="#cbd5e1" />
-                {/* Center pin */}
-                <Circle cx={27} cy={27} r={2.5} fill="#0f172a" stroke="#fff" strokeWidth={1} />
-              </G>
-            </Svg>
-          </View>
-
-          {/* Floating Rotation Controls */}
-          <View
-            style={{
-              position: "absolute",
-              bottom: 14,
-              right: 14,
-              flexDirection: "row",
-              gap: 10,
-              zIndex: 40,
-              elevation: 40,
-            }}
-          >
-            <Pressable
-              onPress={() => setRotation((r) => (r - 15 + 360) % 360)}
-              style={{
-                width: 44,
-                height: 44,
-                borderRadius: 22,
-                backgroundColor: "rgba(15,23,42,0.85)",
-                alignItems: "center",
-                justifyContent: "center",
-                borderWidth: 1,
-                borderColor: "#cbd5e1",
-              }}
-            >
-              <RotateCcw size={20} color="#ffffff" />
-            </Pressable>
-            <Pressable
-              onPress={() => setRotation((r) => (r + 15) % 360)}
-              style={{
-                width: 44,
-                height: 44,
-                borderRadius: 22,
-                backgroundColor: "rgba(15,23,42,0.85)",
-                alignItems: "center",
-                justifyContent: "center",
-                borderWidth: 1,
-                borderColor: "#cbd5e1",
-              }}
-            >
-              <RotateCw size={20} color="#ffffff" />
-            </Pressable>
-          </View>
-        </>
+        /* Floating Compass Overlay */
+        <View
+          style={{
+            position: "absolute",
+            top: 14,
+            right: 14,
+            width: 54,
+            height: 54,
+            zIndex: 40,
+            elevation: 40,
+            backgroundColor: "transparent",
+          }}
+        >
+          <Svg width={54} height={54} viewBox="0 0 54 54">
+            {/* Outer circle */}
+            <Circle cx={27} cy={27} r={24} fill="rgba(15,23,42,0.85)" stroke="#cbd5e1" strokeWidth={1.5} />
+            
+            {/* Cardinal labels */}
+            <SvgText x={27} y={12} fontSize={8} fill="#ef4444" fontWeight="900" textAnchor="middle">N</SvgText>
+            <SvgText x={27} y={48} fontSize={7} fill="#94a3b8" fontWeight="700" textAnchor="middle">S</SvgText>
+            <SvgText x={47} y={30} fontSize={7} fill="#94a3b8" fontWeight="700" textAnchor="middle">E</SvgText>
+            <SvgText x={7} y={30} fontSize={7} fill="#94a3b8" fontWeight="700" textAnchor="middle">W</SvgText>
+            
+            {/* Rotating needle */}
+            <G transform={`rotate(${rotation} 27 27)`}>
+              {/* North Pointer */}
+              <Polygon points="27,15 31,27 23,27" fill="#ef4444" />
+              {/* South Pointer */}
+              <Polygon points="27,39 31,27 23,27" fill="#cbd5e1" />
+              {/* Center pin */}
+              <Circle cx={27} cy={27} r={2.5} fill="#0f172a" stroke="#fff" strokeWidth={1} />
+            </G>
+          </Svg>
+        </View>
       )}
 
     </View>
