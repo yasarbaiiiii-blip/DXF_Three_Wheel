@@ -35,6 +35,8 @@ import {
   ChevronRight,
   Waves,
   X,
+  RotateCcw,
+  RotateCw,
 } from "lucide-react-native";
 
 import { readImportedPlanFile, normalizePlanLines } from "./src/utils/planImport";
@@ -3456,6 +3458,18 @@ function toScreenPoint(point: { x: number; y: number }, viewport: PreviewViewpor
   };
 }
 
+function rotatePoint(px: number, py: number, cx: number, cy: number, angleDegrees: number): LocalPoint {
+  const radians = (angleDegrees * Math.PI) / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  const dx = px - cx;
+  const dy = py - cy;
+  return {
+    x: cx + dx * cos - dy * sin,
+    y: cy + dx * sin + dy * cos,
+  };
+}
+
 function distancePointToSegment(
   px: number,
   py: number,
@@ -3475,13 +3489,29 @@ function distancePointToSegment(
   return Math.hypot(px - sx, py - sy);
 }
 
-function pickNearestLineId(lines: PlanLine[], viewport: PreviewViewport, tap: LocalPoint, radiusPx: number) {
+function pickNearestLineId(
+  lines: PlanLine[],
+  viewport: PreviewViewport,
+  tap: LocalPoint,
+  radiusPx: number,
+  rotation: number = 0,
+  layoutSize: { width: number; height: number} = { width: 0, height: 0 }
+) {
   let nearestId: string | null = null;
   let nearestDistance = radiusPx;
 
+  const cx = layoutSize.width / 2;
+  const cy = layoutSize.height / 2;
+
   for (const line of lines) {
-    const from = toScreenPoint(line.from, viewport);
-    const to = toScreenPoint(line.to, viewport);
+    let from = toScreenPoint(line.from, viewport);
+    let to = toScreenPoint(line.to, viewport);
+
+    if (rotation !== 0 && layoutSize.width > 0 && layoutSize.height > 0) {
+      from = rotatePoint(from.x, from.y, cx, cy, rotation);
+      to = rotatePoint(to.x, to.y, cx, cy, rotation);
+    }
+
     const distance = distancePointToSegment(tap.x, tap.y, from.x, from.y, to.x, to.y);
 
     if (distance < nearestDistance) {
@@ -3533,6 +3563,7 @@ function PlanPreview({
   });
   const [layoutSize, setLayoutSize] = useState({ width: 0, height: 0 });
   const [viewport, setViewport] = useState<PreviewViewport>({ panX: 0, panY: 0, zoom: 1 });
+  const [rotation, setRotation] = useState(0);
 
   useEffect(() => {
     linesRef.current = filtered;
@@ -3553,6 +3584,7 @@ function PlanPreview({
     const fitted = computeAutoFitViewport(filtered, layoutSize.width, layoutSize.height);
     viewportRef.current = fitted;
     setViewport(fitted);
+    setRotation(0);
   }, [filtered, layoutSize.width, layoutSize.height]);
 
   const handleLayout = useCallback((event: any) => {
@@ -3633,7 +3665,7 @@ function PlanPreview({
         onPanResponderRelease: (evt) => {
           if (gestureRef.current.isTap && gestureRef.current.startTouch) {
             const tap = { x: evt.nativeEvent.locationX, y: evt.nativeEvent.locationY };
-            const hit = pickNearestLineId(linesRef.current, viewportRef.current, tap, 24);
+            const hit = pickNearestLineId(linesRef.current, viewportRef.current, tap, 24, rotation, layoutSize);
             if (hit) {
               onSelectLineRef.current?.(hit);
             } else {
@@ -3680,7 +3712,7 @@ function PlanPreview({
         </View>
       ) : (
         <Svg width="100%" height="100%">
-          <G transform={`translate(${viewport.panX}, ${viewport.panY}) scale(${viewport.zoom})`}>
+          <G transform={`translate(${layoutSize.width / 2}, ${layoutSize.height / 2}) rotate(${rotation}) translate(${-layoutSize.width / 2}, ${-layoutSize.height / 2}) translate(${viewport.panX}, ${viewport.panY}) scale(${viewport.zoom})`}>
             {filtered.map((line) => (
               <Line
                 key={line.id}
@@ -3700,39 +3732,86 @@ function PlanPreview({
       )}
 
       {filtered.length > 0 && (
-        <View
-          style={{
-            position: "absolute",
-            top: 14,
-            right: 14,
-            width: 54,
-            height: 54,
-            zIndex: 40,
-            elevation: 40,
-            backgroundColor: "transparent",
-          }}
-        >
-          <Svg width={54} height={54} viewBox="0 0 54 54">
-            {/* Outer circle */}
-            <Circle cx={27} cy={27} r={24} fill="rgba(15,23,42,0.85)" stroke="#cbd5e1" strokeWidth={1.5} />
-            
-            {/* Cardinal labels */}
-            <SvgText x={27} y={12} fontSize={8} fill="#ef4444" fontWeight="900" textAnchor="middle">N</SvgText>
-            <SvgText x={27} y={48} fontSize={7} fill="#94a3b8" fontWeight="700" textAnchor="middle">S</SvgText>
-            <SvgText x={47} y={30} fontSize={7} fill="#94a3b8" fontWeight="700" textAnchor="middle">E</SvgText>
-            <SvgText x={7} y={30} fontSize={7} fill="#94a3b8" fontWeight="700" textAnchor="middle">W</SvgText>
-            
-            {/* Rotating needle (Always pointing North up = 0 degrees) */}
-            <G transform="rotate(0 27 27)">
-              {/* North Pointer */}
-              <Polygon points="27,15 31,27 23,27" fill="#ef4444" />
-              {/* South Pointer */}
-              <Polygon points="27,39 31,27 23,27" fill="#cbd5e1" />
-              {/* Center pin */}
-              <Circle cx={27} cy={27} r={2.5} fill="#0f172a" stroke="#fff" strokeWidth={1} />
-            </G>
-          </Svg>
-        </View>
+        <>
+          {/* Floating Compass Overlay */}
+          <View
+            style={{
+              position: "absolute",
+              top: 14,
+              right: 14,
+              width: 54,
+              height: 54,
+              zIndex: 40,
+              elevation: 40,
+              backgroundColor: "transparent",
+            }}
+          >
+            <Svg width={54} height={54} viewBox="0 0 54 54">
+              {/* Outer circle */}
+              <Circle cx={27} cy={27} r={24} fill="rgba(15,23,42,0.85)" stroke="#cbd5e1" strokeWidth={1.5} />
+              
+              {/* Cardinal labels */}
+              <SvgText x={27} y={12} fontSize={8} fill="#ef4444" fontWeight="900" textAnchor="middle">N</SvgText>
+              <SvgText x={27} y={48} fontSize={7} fill="#94a3b8" fontWeight="700" textAnchor="middle">S</SvgText>
+              <SvgText x={47} y={30} fontSize={7} fill="#94a3b8" fontWeight="700" textAnchor="middle">E</SvgText>
+              <SvgText x={7} y={30} fontSize={7} fill="#94a3b8" fontWeight="700" textAnchor="middle">W</SvgText>
+              
+              {/* Rotating needle */}
+              <G transform={`rotate(${rotation} 27 27)`}>
+                {/* North Pointer */}
+                <Polygon points="27,15 31,27 23,27" fill="#ef4444" />
+                {/* South Pointer */}
+                <Polygon points="27,39 31,27 23,27" fill="#cbd5e1" />
+                {/* Center pin */}
+                <Circle cx={27} cy={27} r={2.5} fill="#0f172a" stroke="#fff" strokeWidth={1} />
+              </G>
+            </Svg>
+          </View>
+
+          {/* Floating Rotation Controls */}
+          <View
+            style={{
+              position: "absolute",
+              bottom: 14,
+              right: 14,
+              flexDirection: "row",
+              gap: 10,
+              zIndex: 40,
+              elevation: 40,
+            }}
+          >
+            <Pressable
+              onPress={() => setRotation((r) => (r - 15 + 360) % 360)}
+              style={{
+                width: 44,
+                height: 44,
+                borderRadius: 22,
+                backgroundColor: "rgba(15,23,42,0.85)",
+                alignItems: "center",
+                justifyContent: "center",
+                borderWidth: 1,
+                borderColor: "#cbd5e1",
+              }}
+            >
+              <RotateCcw size={20} color="#ffffff" />
+            </Pressable>
+            <Pressable
+              onPress={() => setRotation((r) => (r + 15) % 360)}
+              style={{
+                width: 44,
+                height: 44,
+                borderRadius: 22,
+                backgroundColor: "rgba(15,23,42,0.85)",
+                alignItems: "center",
+                justifyContent: "center",
+                borderWidth: 1,
+                borderColor: "#cbd5e1",
+              }}
+            >
+              <RotateCw size={20} color="#ffffff" />
+            </Pressable>
+          </View>
+        </>
       )}
 
     </View>
