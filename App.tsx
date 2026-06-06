@@ -1531,7 +1531,7 @@ function HomeView({
                       value={{
                         label: "Control mode",
                         value: telemetrySnapshot?.mode ?? systemHealth?.mode ?? "UNKNOWN",
-                        tone: "#0f172a",
+                        tone: "#ffffff",
                       }}
                     />
                   </View>
