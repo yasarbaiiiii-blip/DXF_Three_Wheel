@@ -16,7 +16,7 @@ import Slider from "@react-native-community/slider";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
-import Svg, { Circle, G, Line, Polygon } from "react-native-svg";
+import Svg, { Circle, G, Line, Polygon, Text as SvgText } from "react-native-svg";
 import { io, Socket } from "socket.io-client";
 import {
   Battery,
@@ -3699,7 +3699,42 @@ function PlanPreview({
         </Svg>
       )}
 
-      
+      {filtered.length > 0 && (
+        <View
+          style={{
+            position: "absolute",
+            top: 14,
+            right: 14,
+            width: 54,
+            height: 54,
+            zIndex: 40,
+            elevation: 40,
+            backgroundColor: "transparent",
+          }}
+        >
+          <Svg width={54} height={54} viewBox="0 0 54 54">
+            {/* Outer circle */}
+            <Circle cx={27} cy={27} r={24} fill="rgba(15,23,42,0.85)" stroke="#cbd5e1" strokeWidth={1.5} />
+            
+            {/* Cardinal labels */}
+            <SvgText x={27} y={12} fontSize={8} fill="#ef4444" fontWeight="900" textAnchor="middle">N</SvgText>
+            <SvgText x={27} y={48} fontSize={7} fill="#94a3b8" fontWeight="700" textAnchor="middle">S</SvgText>
+            <SvgText x={47} y={30} fontSize={7} fill="#94a3b8" fontWeight="700" textAnchor="middle">E</SvgText>
+            <SvgText x={7} y={30} fontSize={7} fill="#94a3b8" fontWeight="700" textAnchor="middle">W</SvgText>
+            
+            {/* Rotating needle (Always pointing North up = 0 degrees) */}
+            <G transform="rotate(0 27 27)">
+              {/* North Pointer */}
+              <Polygon points="27,15 31,27 23,27" fill="#ef4444" />
+              {/* South Pointer */}
+              <Polygon points="27,39 31,27 23,27" fill="#cbd5e1" />
+              {/* Center pin */}
+              <Circle cx={27} cy={27} r={2.5} fill="#0f172a" stroke="#fff" strokeWidth={1} />
+            </G>
+          </Svg>
+        </View>
+      )}
+
     </View>
   );
 }
