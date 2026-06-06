@@ -205,7 +205,7 @@ function parseCsv(content: string): PlanLine[] {
   return normalizePlanLines(refineLayerAssignments(lines));
 }
 
-function normalizePlanLines(lines: PlanLine[]) {
+export function normalizePlanLines(lines: PlanLine[]) {
   if (lines.length === 0) {
     return lines;
   }

@@ -21,6 +21,7 @@ export interface ImportedPlan {
   fileName: string;
   uri: string;
   fileType: "csv" | "dxf";
+  source?: "imported" | "generated" | "builtin";
 }
 
 export interface LayerVisibility {

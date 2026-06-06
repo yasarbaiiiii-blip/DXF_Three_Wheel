@@ -361,6 +361,10 @@ function PanelContent({
 }) {
   const [fieldName, setFieldName] = useState("");
   const [fieldNotes, setFieldNotes] = useState(planNotes);
+  const [loadedInfo, setLoadedInfo] = useState<string | null>(null);
+  const [isLoaded, setIsLoaded] = useState(false);
+  const [exportModalOpen, setExportModalOpen] = useState(false);
+  const [exportFileName, setExportFileName] = useState("");
   const [manualPainting, setManualPainting] = useState(false);
   const [paintWhenReversing, setPaintWhenReversing] = useState(false);
   const [pumpStartDelay, setPumpStartDelay] = useState(0.2);
@@ -445,6 +449,136 @@ function PanelContent({
                 value={importedPlan.fileName}
                 palette={palette}
               />
+
+              <View className="mt-2 flex-row items-center justify-between" style={{ gap: 8 }}>
+                <Pressable
+                  onPress={async () => {
+                    if (!importedPlan) return;
+                    try {
+                      const resp = await fetch(`/api/mission/load`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ mission_file: importedPlan.fileName }),
+                      });
+                      if (!resp.ok) {
+                        const txt = await resp.text();
+                        console.error("Load failed:", resp.status, txt);
+                        return;
+                      }
+                      const data = await resp.json();
+                      setLoadedInfo(`Loaded: ${data.loaded} (${data.num_points} points)`);
+                      setIsLoaded(true);
+                    } catch (err) {
+                      console.error("Load error:", err);
+                    }
+                  }}
+                  className="h-10 items-center justify-center rounded-md px-3"
+                  style={{ backgroundColor: palette.foreground }}
+                >
+                  <Text className="text-sm font-semibold" style={{ color: palette.background }}>
+                    Load
+                  </Text>
+                </Pressable>
+
+                {isLoaded ? (
+                  <View className="flex-row" style={{ gap: 8 }}>
+                    <Pressable
+                      onPress={async () => {
+                        try {
+                          if (missionRunning) {
+                            const resp = await fetch(`/api/mission/stop`, { method: "POST" });
+                            if (!resp.ok) {
+                              const txt = await resp.text();
+                              console.error("Stop failed:", resp.status, txt);
+                              return;
+                            }
+                            onToggleMission();
+                          } else {
+                            const resp = await fetch(`/api/mission/start`, { method: "POST" });
+                            if (!resp.ok) {
+                              const txt = await resp.text();
+                              console.error("Start failed:", resp.status, txt);
+                              return;
+                            }
+                            onToggleMission();
+                          }
+                        } catch (err) {
+                          console.error("Start/Stop error:", err);
+                        }
+                      }}
+                      className="h-10 items-center justify-center rounded-md px-3"
+                      style={{ backgroundColor: missionRunning ? palette.crimson : palette.emerald }}
+                    >
+                      <Text className="text-sm font-semibold" style={{ color: palette.background }}>
+                        {missionRunning ? "Stop" : "Start"}
+                      </Text>
+                    </Pressable>
+
+                    <Pressable
+                      onPress={() => setExportModalOpen(true)}
+                      className="h-10 items-center justify-center rounded-md px-3 border"
+                      style={{ borderColor: palette.foreground }}
+                    >
+                      <Text className="text-sm font-semibold" style={{ color: palette.foreground }}>
+                        Export
+                      </Text>
+                    </Pressable>
+                  </View>
+                ) : null}
+              </View>
+
+              {loadedInfo ? (
+                <Text className="mt-2 text-sm" style={{ color: palette.mutedForeground }}>
+                  {loadedInfo}
+                </Text>
+              ) : null}
+              <Modal
+                visible={exportModalOpen}
+                transparent
+                animationType="fade"
+                onRequestClose={() => setExportModalOpen(false)}
+              >
+                <View className="flex-1 items-center justify-center px-6" style={{ backgroundColor: "rgba(0,0,0,0.55)" }}>
+                  <View className="w-full max-w-[360px] rounded-xl border p-5" style={{ borderColor: palette.border, backgroundColor: palette.panel, gap: 14 }}>
+                    <Text className="text-lg font-semibold" style={{ color: palette.foreground }}>Export File</Text>
+                    <LabeledInput label="Filename" value={exportFileName} onChangeText={setExportFileName} palette={palette} />
+                    <Text className="text-sm" style={{ color: palette.mutedForeground }}>Provide a filename (include .csv or .dxf extension).</Text>
+
+                    <View className="flex-row" style={{ gap: 10 }}>
+                      <Pressable onPress={() => setExportModalOpen(false)} className="flex-1 items-center justify-center rounded-md border px-4 py-3" style={{ borderColor: palette.foreground, backgroundColor: "transparent" }}>
+                        <Text className="text-sm font-semibold" style={{ color: palette.foreground }}>Cancel</Text>
+                      </Pressable>
+                      <Pressable
+                        onPress={async () => {
+                          // Create a minimal file from plan notes or a placeholder
+                          const fname = exportFileName || (importedPlan ? importedPlan.fileName : "export.csv");
+                          const hasExt = /\.[a-zA-Z0-9]+$/.test(fname);
+                          const safeName = hasExt ? fname : `${fname}.csv`;
+                          const content = fieldNotes || "";
+                          try {
+                            const form = new FormData();
+                            // @ts-ignore
+                            form.append("file", new Blob([content], { type: "text/plain" }), safeName);
+                            const resp = await fetch(`/api/path/upload`, { method: "POST", body: form });
+                            if (!resp.ok) {
+                              const txt = await resp.text();
+                              console.error("Export/upload failed:", resp.status, txt);
+                              return;
+                            }
+                            setExportModalOpen(false);
+                          } catch (err) {
+                            console.error("Export error:", err);
+                          }
+                        }}
+                        className="flex-1 items-center justify-center rounded-md px-4 py-3"
+                        style={{ backgroundColor: palette.foreground }}
+                      >
+                        <Text className="text-sm font-semibold" style={{ color: palette.background }}>Save</Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                </View>
+              </Modal>
 
               <LabeledInput
                 label="Field Name"

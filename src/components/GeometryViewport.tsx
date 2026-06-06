@@ -362,7 +362,7 @@ export function GeometryViewport({
               </View>
 
               <View
-                className="absolute left-6 right-6 top-6 flex-row items-center justify-between rounded-2xl px-4 py-4"
+                className="absolute left-6 right-6 top-6 flex-row items-start justify-between rounded-2xl px-4 py-4"
                 style={{ backgroundColor: palette.background, gap: 16 }}
               >
                 <View
@@ -385,30 +385,32 @@ export function GeometryViewport({
                     {lines.length} points imported
                   </Text>
                 </View>
-                <View
-                  className="flex-1"
-                  style={{ maxWidth: 200 }}
-                >
-                  <Text
-                    className="text-xs font-semibold uppercase"
-                    style={{ color: palette.mutedForeground, letterSpacing: 0.5 }}
+                <View className="items-end" style={{ gap: 10 }}>
+                  <View
+                    className="flex-1"
+                    style={{ maxWidth: 200, alignItems: "flex-end" }}
                   >
-                    Map Home
-                  </Text>
-                  <Text
-                    className="mt-1 text-base font-semibold"
-                    style={{ color: palette.foreground }}
-                  >
-                    {importedPlan.fileName}
-                  </Text>
-                  <Text className="mt-1 text-xs" style={{ color: palette.mutedForeground }}>
-                    {selectedLine
-                      ? "Selected details are in Plan Info."
-                      : "Tap a line to see its details."}
-                  </Text>
+                    <Text
+                      className="text-xs font-semibold uppercase"
+                      style={{ color: palette.mutedForeground, letterSpacing: 0.5 }}
+                    >
+                      Map Home
+                    </Text>
+                    <Text
+                      className="mt-1 text-base font-semibold text-right"
+                      style={{ color: palette.foreground }}
+                    >
+                      {importedPlan.fileName}
+                    </Text>
+                    <Text className="mt-1 text-xs text-right" style={{ color: palette.mutedForeground }}>
+                      {selectedLine
+                        ? "Selected details are in Plan Info."
+                        : "Tap a line to see its details."}
+                    </Text>
+                  </View>
                 </View>
 
-              <View className="items-end">
+                <View className="items-end">
                   <Text
                     className="text-xs font-semibold uppercase"
                     style={{ color: palette.mutedForeground, letterSpacing: 0.5 }}
@@ -436,6 +438,21 @@ export function GeometryViewport({
                   ) : null}
                 </View>
               </View>
+
+              {selectedLine ? (
+                <Pressable
+                  onPress={onDeleteSelectedLine}
+                  className="absolute bottom-6 right-6 h-12 w-12 items-center justify-center rounded-2xl"
+                  style={{
+                    backgroundColor: palette.crimson,
+                    zIndex: 20,
+                    elevation: 20,
+                  }}
+                >
+                  <Trash2 size={18} color="#FFFFFF" />
+                </Pressable>
+              ) : null}
+
             </>
           ) : (
             <View className="flex-1 items-center justify-center px-8" style={{ gap: 16 }}>
@@ -599,15 +616,6 @@ export function GeometryViewport({
                   }
                   palette={palette}
                 />
-                {selectedLine ? (
-                  <Pressable
-                    onPress={onDeleteSelectedLine}
-                    className="h-14 w-14 items-center justify-center rounded-2xl"
-                    style={{ backgroundColor: palette.crimson }}
-                  >
-                    <Trash2 size={18} color="#FFFFFF" />
-                  </Pressable>
-                ) : null}
               </View>
             </View>
           </View>

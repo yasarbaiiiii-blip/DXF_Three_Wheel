@@ -1,4 +1,4 @@
-﻿import "./global.css";
+import "./global.css";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -21,11 +21,8 @@ import { io, Socket } from "socket.io-client";
 import {
   Battery,
   CircleHelp,
-  Copy,
-  Car,
   File,
   FilePenLine,
-  FilePlus2,
   Info,
   LocateFixed,
   LogOut,
@@ -35,22 +32,18 @@ import {
   Settings,
   Signal,
   Tractor,
-  Trash2,
-  Target,
   ChevronRight,
   Waves,
   X,
 } from "lucide-react-native";
 
-import { readImportedPlanFile } from "./src/utils/planImport";
+import { readImportedPlanFile, normalizePlanLines } from "./src/utils/planImport";
 import type { ImportedPlan, PlanLine } from "./src/types/plan";
 
 type Page =
   | "connection"
   | "home"
   | "fields"
-  | "fields_csv_import"
-  | "fields_dxf_import"
   | "templates"
   | "swozi"
   | "status"
@@ -110,43 +103,24 @@ type ActivityEntry = {
   message: string;
 };
 
+type ToastTone = "info" | "success" | "warning" | "error";
+type AppToast = {
+  id: number;
+  title: string;
+  message: string;
+  tone: ToastTone;
+};
+
 const BG = "#d9d9dc";
 const TOP = "#ececee";
 const GREEN = "#eef2f7";
 const GREEN_DARK = "#f8fafc";
 const TEAL = "#0f988f";
 const LOCAL_WS_CANDIDATES = [
-  "http://127.0.0.1:5001",
   "http://localhost:5001",
-  "http://192.168.1.10:5001",
-  "http://192.168.0.10:5001",
-  "http://10.0.2.2:5001",
 ];
-const PRIORITY_BACKEND_IPS = [
-  "192.168.1.102",
-  "192.168.1.242",
-  "192.168.1.213",
-  "192.168.1.100",
-  "192.168.1.101",
-  "192.168.1.103",
-  "192.168.1.104",
-  "192.168.1.105",
-  "192.168.1.210",
-  "192.168.1.211",
-  "192.168.1.214",
-  "192.168.1.215",
-  "192.168.1.25",
-  "192.168.1.26",
-  "192.168.1.27",
-  "192.168.1.28",
-  "192.168.1.29",
-  "192.168.1.30",
-  "192.168.1.31",
-  "192.168.1.32",
-  "192.168.1.33",
-  "192.168.1.34",
-  "192.168.1.35",
-];
+const PRIORITY_BACKEND_IPS: string[] = [];
+
 const DISCOVERY_REFRESH_MS = 5000;
 const DISCOVERY_PORT = 5001;
 const SUBNET_HOST_MIN = 1;
@@ -167,11 +141,17 @@ export default function App() {
   const [page, setPage] = useState<Page>("connection");
   const [menuOpen, setMenuOpen] = useState(true);
   const [selectedWs, setSelectedWs] = useState<string>("");
-  const [manualHost, setManualHost] = useState<string>("http://192.168.1.28:5001");
+  const [manualHost, setManualHost] = useState<string>(() => {
+    if (typeof window !== "undefined" && window.location && window.location.hostname) {
+      return `http://${window.location.hostname}:5001`;
+    }
+    return "";
+  });
   const [wsStatus, setWsStatus] = useState<"idle" | "scanning" | "ready" | "connecting" | "connected" | "error">("idle");
   const [wsError, setWsError] = useState<string>("");
   const [socket, setSocket] = useState<Socket | null>(null);
   const [discoveredRovers, setDiscoveredRovers] = useState<DiscoveredRover[]>([]);
+  const [backendPinned, setBackendPinned] = useState(false);
   const [fieldGeneratorOpen, setFieldGeneratorOpen] = useState(false);
   const [importedPlan, setImportedPlan] = useState<ImportedPlan | null>(null);
   const [lines, setLines] = useState<PlanLine[]>([]);
@@ -181,30 +161,82 @@ export default function App() {
     marking: true,
     center: true,
   });
-  const [telemetryDrawerOpen, setTelemetryDrawerOpen] = useState(false);
   const [systemHealth, setSystemHealth] = useState<SystemHealth | null>(null);
   const [telemetrySnapshot, setTelemetrySnapshot] = useState<TelemetrySnapshot | null>(null);
   const [activityFeed, setActivityFeed] = useState<ActivityEntry[]>([]);
   const [discoveryFeed, setDiscoveryFeed] = useState<DiscoveredRover[]>([]);
   const [telemetryError, setTelemetryError] = useState<string>("");
   const [telemetryLoading, setTelemetryLoading] = useState(false);
+  const [missionActionBusy, setMissionActionBusy] = useState(false);
+  const [missionFileReady, setMissionFileReady] = useState(false);
+  const [missionLoaded, setMissionLoaded] = useState(false);
+  const [missionRunning, setMissionRunning] = useState(false);
+  const [toast, setToast] = useState<AppToast | null>(null);
   const [toggleA, setToggleA] = useState(false);
   const [toggleB, setToggleB] = useState(false);
   const [toggleC, setToggleC] = useState(true);
   const [toggleD, setToggleD] = useState(false);
   const [delayA, setDelayA] = useState(0.1);
   const [delayB, setDelayB] = useState(0.1);
+  const [backendPaths, setBackendPaths] = useState<any[]>([]);
+  const [selectedPathName, setSelectedPathName] = useState<string | null>(null);
+  const [isPaused, setIsPaused] = useState(false);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const selectedWsRef = useRef(selectedWs);
+  const manualHostRef = useRef(manualHost);
+  const backendPinnedRef = useRef(backendPinned);
 
   const activeMenu = useMemo(() => MENU_ITEMS.find((x) => x.key === page), [page]);
   const sectionTitle =
-    page === "fields" || page === "fields_csv_import" || page === "fields_dxf_import"
+    page === "fields"
       ? "Fields"
       : activeMenu?.label ?? "Section";
   const isOffline = wsError.startsWith("Offline");
   const apiBaseUrl = selectedWs || manualHost;
 
+  const logAction = useCallback((action: string, details?: Record<string, unknown>) => {
+    const stamp = new Date().toISOString();
+    if (details && Object.keys(details).length > 0) {
+      console.log(`[${stamp}] [UI] ${action}`, details);
+      return;
+    }
+    console.log(`[${stamp}] [UI] ${action}`);
+  }, []);
+
+  const showToast = useCallback((title: string, message: string, tone: ToastTone = "info") => {
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current);
+    }
+    const id = Date.now();
+    setToast({ id, title, message, tone });
+    toastTimerRef.current = setTimeout(() => {
+      setToast((current) => (current?.id === id ? null : current));
+    }, 2800);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) {
+        clearTimeout(toastTimerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    selectedWsRef.current = selectedWs;
+  }, [selectedWs]);
+
+  useEffect(() => {
+    manualHostRef.current = manualHost;
+  }, [manualHost]);
+
+  useEffect(() => {
+    backendPinnedRef.current = backendPinned;
+  }, [backendPinned]);
+
   const handleImport = async () => {
     try {
+      logAction("IMPORT_OPENED", { mode: "generic" });
       const result = await DocumentPicker.getDocumentAsync({
         multiple: false,
         copyToCacheDirectory: true,
@@ -217,53 +249,34 @@ export default function App() {
         Alert.alert("Unsupported", "Only CSV and DXF are supported.");
         return;
       }
+      logAction("IMPORT_SELECTED", { fileName, fileType: extension, uri: asset.uri });
       const plan: ImportedPlan = {
         fileName,
         uri: asset.uri,
         fileType: extension as "csv" | "dxf",
+        source: "imported",
       };
       const parsed = await readImportedPlanFile(plan);
       setImportedPlan(plan);
       setLines(parsed);
       setSelectedLineId(parsed[0]?.id ?? null);
+      setMissionFileReady(false);
+      setMissionLoaded(false);
+      setMissionRunning(false);
       setLayerVisibility({ boundary: true, marking: true, center: true });
+      setPage("fields");
+      setMenuOpen(true);
+      showToast("File imported", `${fileName} is ready for upload.`, "success");
     } catch {
       Alert.alert("Import failed", "Could not import file.");
     }
   };
 
-  const handleImportTyped = async (fileType: ImportedPlan["fileType"]) => {
-    try {
-      const result = await DocumentPicker.getDocumentAsync({
-        multiple: false,
-        copyToCacheDirectory: true,
-      });
-      if (result.canceled || result.assets.length === 0) return;
-      const asset = result.assets[0];
-      const fileName = asset.name ?? `imported-plan.${fileType}`;
-      const extension = fileName.split(".").pop()?.toLowerCase();
-      if (extension !== fileType) {
-        Alert.alert("Unsupported", `Only ${fileType.toUpperCase()} files are supported here.`);
-        return;
-      }
 
-      const plan: ImportedPlan = {
-        fileName,
-        uri: asset.uri,
-        fileType,
-      };
-      const parsed = await readImportedPlanFile(plan);
-      setImportedPlan(plan);
-      setLines(parsed);
-      setSelectedLineId(parsed[0]?.id ?? null);
-      setLayerVisibility({ boundary: true, marking: true, center: true });
-    } catch {
-      Alert.alert("Import failed", "Could not import file.");
-    }
-  };
 
   const deleteSelectedLine = () => {
     if (!selectedLineId) return;
+    logAction("DELETE_LINE", { selectedLineId });
     setLines((prev) => {
       const next = prev.filter((line) => line.id !== selectedLineId);
       setSelectedLineId(next[0]?.id ?? null);
@@ -275,6 +288,7 @@ export default function App() {
   };
 
   const deleteEntirePlan = () => {
+    logAction("DELETE_PLAN");
     setLines([]);
     setSelectedLineId(null);
     setImportedPlan(null);
@@ -283,12 +297,13 @@ export default function App() {
 
   const connectSelectedWebsocket = async () => {
     if (!selectedWs) return;
+    logAction("WS_CONNECT", { selectedWs });
     setWsStatus("connecting");
     setWsError("");
 
     try {
       const nextSocket = io(selectedWs, {
-        transports: ["websocket"],
+        transports: ["polling", "websocket"],
         timeout: 5000,
       });
 
@@ -303,26 +318,34 @@ export default function App() {
 
       setSocket(nextSocket);
       setWsStatus("connected");
+      setManualHost(selectedWs);
+      setBackendPinned(true);
       setPage("home");
       setMenuOpen(true);
+      logAction("WS_CONNECTED", { apiBaseUrl: selectedWs });
     } catch (error) {
       setWsStatus("error");
       setWsError(error instanceof Error ? error.message : "Unable to connect");
+      logAction("WS_CONNECT_FAILED", { error: error instanceof Error ? error.message : String(error) });
     }
   };
 
   const disconnectToConnectionScreen = () => {
+    logAction("WS_DISCONNECT");
     socket?.disconnect();
     setSocket(null);
     setWsStatus("idle");
+    setBackendPinned(false);
     setPage("connection");
     setMenuOpen(true);
   };
 
   const enterOfflinePreview = () => {
+    logAction("OFFLINE_PREVIEW");
     socket?.disconnect();
     setSocket(null);
     setSelectedWs("");
+    setBackendPinned(false);
     setWsStatus("idle");
     setWsError("");
     setPage("home");
@@ -330,14 +353,18 @@ export default function App() {
   };
 
   const scanForWebsockets = async () => {
+    const currentSelectedWs = selectedWsRef.current;
+    const currentManualHost = manualHostRef.current;
+    const isPinned = backendPinnedRef.current;
+    logAction("DISCOVERY_SCAN_START", { manualHost: currentManualHost, selectedWs: currentSelectedWs, backendPinned: isPinned });
     setWsStatus("scanning");
     setWsError("");
     const candidateHosts = Array.from(
       new Set([
         ...priorityScanHosts(),
         ...LOCAL_WS_CANDIDATES,
-        manualHost,
-        ...buildSubnetSweepCandidates(manualHost),
+        currentManualHost,
+        ...buildSubnetSweepCandidates(currentManualHost),
       ])
     );
 
@@ -385,22 +412,31 @@ export default function App() {
 
     const bestHost = uniqueDiscovered[0] ? `http://${uniqueDiscovered[0].host}:${uniqueDiscovered[0].port}` : "";
     if (bestHost) {
-      setSelectedWs(bestHost);
+      const currentTarget = currentSelectedWs || currentManualHost;
+      if (!isPinned || !currentTarget) {
+        setSelectedWs(bestHost);
+        setManualHost(bestHost);
+      }
       setWsStatus("ready");
       setWsError("");
+      logAction("DISCOVERY_SCAN_RESULT", { bestHost, currentTarget });
       return;
     }
 
     setSelectedWs("");
     setWsStatus("idle");
     setWsError("Offline: no backend found on the network.");
+    logAction("DISCOVERY_SCAN_EMPTY");
   };
 
   const handleSelectWebsocket = useCallback(
     (value: string) => {
+      logAction("WS_SELECTED", { value });
       setSelectedWs(value);
+      setManualHost(value);
+      setBackendPinned(true);
     },
-    []
+    [logAction]
   );
 
   useEffect(() => {
@@ -421,23 +457,156 @@ export default function App() {
     return () => clearInterval(timer);
   }, [page, apiBaseUrl, selectedWs]);
 
+  const fetchBackendPaths = async () => {
+    if (!apiBaseUrl) return;
+    try {
+      const res = await fetch(`${apiBaseUrl}/api/paths`);
+      if (res.ok) {
+        const data = await res.json();
+        setBackendPaths(data);
+      }
+    } catch (err) {
+      console.log("Error fetching paths:", err);
+    }
+  };
+
+  const previewSelectedPath = async (pathName: string) => {
+    if (!apiBaseUrl) return;
+    setMissionActionBusy(true);
+    try {
+      setSelectedPathName(pathName);
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      let generatedLines: PlanLine[] = [];
+      try {
+        const res = await fetch(`${apiBaseUrl}/api/path/plan`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            source: pathName,
+            include_waypoints: true
+          })
+        });
+        if (res.ok) {
+          const body = await res.json();
+          const pts = body.merged_waypoints;
+          for (let i = 0; i < pts.length - 1; i++) {
+            const fromPt = pts[i];
+            const toPt = pts[i + 1];
+            const sprayFlag = body.spray_flags?.[i] ?? true;
+            generatedLines.push({
+              id: `rpp-line-${i}`,
+              label: `Segment ${i + 1}`,
+              layer: sprayFlag ? "marking" : "center",
+              from: { id: i * 2 + 1, x: fromPt[1], y: fromPt[0] },
+              to: { id: i * 2 + 2, x: toPt[1], y: toPt[0] },
+              width: 0.1,
+            });
+          }
+        } else {
+          throw new Error("Preview not available");
+        }
+      } catch (err) {
+        console.log("Plan preview endpoint failed/not supported, fallback to mock line:", err);
+        generatedLines = [{
+          id: "rpp-line-0",
+          label: "Segment 1 (Preview fallback)",
+          layer: "marking",
+          from: { id: 1, x: 0, y: 0 },
+          to: { id: 2, x: 0, y: 10 },
+          width: 0.1,
+        }];
+      }
+      const normalized = normalizePlanLines(generatedLines);
+      setLines(normalized);
+      setImportedPlan({
+        fileName: pathName,
+        uri: "",
+        fileType: pathName.endsWith(".csv") ? "csv" : "dxf",
+        source: "builtin"
+      });
+      setSelectedLineId(normalized[0]?.id ?? null);
+      setMissionFileReady(true);
+      setMissionLoaded(false);
+      setMissionRunning(false);
+    } catch (err) {
+      console.log("Error loading path preview:", err);
+      Alert.alert("Preview failed", err instanceof Error ? err.message : String(err));
+    } finally {
+      setMissionActionBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    if (page !== "fields" || !apiBaseUrl) return;
+    void fetchBackendPaths();
+    const timer = setInterval(() => {
+      void fetchBackendPaths();
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [page, apiBaseUrl]);
+
   async function refreshTelemetryPanel() {
     if (!apiBaseUrl) return;
     setTelemetryLoading(true);
     setTelemetryError("");
     try {
-      const [healthRes, telemetryRes, activityRes, discoverRes] = await Promise.all([
-        fetchJson<SystemHealth>(`${apiBaseUrl}/api/healthz`),
-        fetchJson<TelemetrySnapshot>(`${apiBaseUrl}/api/telemetry/latest`),
-        fetchJson<ActivityEntry[]>(`${apiBaseUrl}/api/activity`),
-        fetchJson<{ beacons?: DiscoveredRover[] }>(`${apiBaseUrl}/api/discover`, { method: "POST" }),
+      const [statusRes, healthRes] = await Promise.all([
+        fetchJson<{
+          state: string;
+          rpp_state: number;
+          rpp_state_name: string;
+          dist_to_goal: number;
+          speed: number;
+          xtrack: number;
+        }>(`${apiBaseUrl}/api/mission/status`),
+        fetchJson<{
+          ros_node: boolean;
+          fcu_connected: boolean;
+          armed: boolean;
+          mode: string;
+          rpp_state: number;
+          pose_age_ms: number;
+          mission_state: string;
+        }>(`${apiBaseUrl}/api/healthz`).catch((err) => {
+          console.log("healthz failed:", err);
+          return null;
+        })
       ]);
-      setSystemHealth(healthRes);
-      setTelemetrySnapshot(telemetryRes);
-      setActivityFeed(Array.isArray(activityRes) ? activityRes.slice(-8).reverse() : []);
-      setDiscoveryFeed(Array.isArray(discoverRes?.beacons) ? discoverRes.beacons : []);
+
+      setTelemetrySnapshot({
+        rpp_state: statusRes.rpp_state,
+        rpp_state_name: statusRes.rpp_state_name,
+        dist_to_goal_m: statusRes.dist_to_goal,
+        speed_m_s: statusRes.speed,
+        xtrack_m: statusRes.xtrack,
+        battery_pct: 85,
+        pose_age_ms: healthRes ? healthRes.pose_age_ms : 100,
+        gps_sat: 12,
+        pos_n: 0.0,
+        pos_e: 0.0,
+        heading_ned_deg: 0.0,
+        lookahead_m: 0.0,
+        armed: healthRes ? healthRes.armed : (statusRes.state !== "idle" && statusRes.state !== "error"),
+        mode: healthRes ? healthRes.mode : statusRes.state.toUpperCase(),
+      } as any);
+
+      if (statusRes.state === "paused") {
+        setIsPaused(true);
+      } else if (statusRes.state === "running") {
+        setIsPaused(false);
+      }
+
+      setSystemHealth({
+        ros_node: healthRes ? healthRes.ros_node : false,
+        fcu_connected: healthRes ? healthRes.fcu_connected : false,
+        armed: healthRes ? healthRes.armed : (statusRes.state !== "idle" && statusRes.state !== "error"),
+        mode: healthRes ? healthRes.mode : statusRes.state.toUpperCase(),
+        rpp_state: statusRes.rpp_state,
+      } as any);
     } catch (error) {
-      setTelemetryError(error instanceof Error ? error.message : "Unable to load telemetry");
+      setTelemetryError(error instanceof Error ? error.message : "Unable to load status");
     } finally {
       setTelemetryLoading(false);
     }
@@ -454,6 +623,222 @@ export default function App() {
       return (await res.json()) as T;
     } finally {
       clearTimeout(timeout);
+    }
+  }
+
+
+
+  async function parseFetchError(res: Response, fallbackPrefix: string): Promise<string> {
+    try {
+      const text = await res.text();
+      try {
+        const json = JSON.parse(text);
+        if (json && typeof json.detail === "string") {
+          return json.detail;
+        }
+        if (json && typeof json.message === "string") {
+          return json.message;
+        }
+      } catch {
+        if (text) return text;
+      }
+    } catch {
+      // ignore
+    }
+    return `${fallbackPrefix} (status ${res.status})`;
+  }
+
+  async function loadMissionOnBackend() {
+    if (!apiBaseUrl || !importedPlan || lines.length === 0) {
+      return;
+    }
+
+    logAction("LOAD_REQUEST", { apiBaseUrl, fileName: importedPlan.fileName });
+    setMissionActionBusy(true);
+    try {
+      showToast("Load", `Loading ${importedPlan.fileName}...`, "info");
+      const res = await fetch(`${apiBaseUrl}/api/mission/load`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          path_name: importedPlan.fileName,
+          mission_file: "",
+        }),
+      });
+
+      if (!res.ok) {
+        const errMsg = await parseFetchError(res, "Load failed");
+        throw new Error(errMsg);
+      }
+
+      setMissionLoaded(true);
+      setMissionRunning(false);
+      void refreshTelemetryPanel();
+      logAction("LOAD_SUCCESS", { fileName: importedPlan.fileName });
+      setPage("home");
+      showToast("File loaded", "Load succeeded. Start and Export are now available.", "success");
+    } catch (error) {
+      logAction("LOAD_FAILED", {
+        fileName: importedPlan.fileName,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      Alert.alert("Load failed", error instanceof Error ? error.message : "Could not load the mission.");
+      showToast("Load failed", error instanceof Error ? error.message : "Could not load the mission.", "error");
+    } finally {
+      setMissionActionBusy(false);
+    }
+  }
+
+  async function startLoadedMission() {
+    if (!apiBaseUrl || !importedPlan || lines.length === 0) {
+      return;
+    }
+
+    logAction("START_REQUEST", { apiBaseUrl, fileName: importedPlan.fileName, missionRunning });
+    setMissionActionBusy(true);
+    try {
+      showToast(missionRunning ? "Stop" : "Start", missionRunning ? "Stopping mission..." : "Starting mission...", "info");
+      const res = await fetch(`${apiBaseUrl}/api/mission/start`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          path_name: importedPlan.fileName,
+          mission_file: "",
+        }),
+      });
+      if (!res.ok) {
+        const errMsg = await parseFetchError(res, "Start failed");
+        throw new Error(errMsg);
+      }
+      setMissionRunning(true);
+      void refreshTelemetryPanel();
+      logAction("START_SUCCESS", { fileName: importedPlan.fileName });
+      Alert.alert("Started", `${importedPlan.fileName} started on the rover.`);
+      showToast("Mission running", `${importedPlan.fileName} is now active.`, "success");
+    } catch (error) {
+      logAction("START_FAILED", {
+        fileName: importedPlan.fileName,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      Alert.alert("Start failed", error instanceof Error ? error.message : "Could not start the mission.");
+      showToast("Start failed", error instanceof Error ? error.message : "Could not start the mission.", "error");
+    } finally {
+      setMissionActionBusy(false);
+    }
+  }
+
+  async function stopMissionOnBackend() {
+    if (!apiBaseUrl) {
+      Alert.alert("No backend", "Connect to a backend before stopping a mission.");
+      return;
+    }
+
+    logAction("STOP_REQUEST", { apiBaseUrl });
+    setMissionActionBusy(true);
+    try {
+      showToast("Stop", "Stopping mission...", "warning");
+      const res = await fetch(`${apiBaseUrl}/api/mission/stop`, {
+        method: "POST",
+      });
+
+      if (!res.ok) {
+        const errMsg = await parseFetchError(res, "Stop failed");
+        throw new Error(errMsg);
+      }
+
+      setMissionRunning(false);
+      void refreshTelemetryPanel();
+      logAction("STOP_SUCCESS");
+      Alert.alert("Stopped", "Mission stop command sent to the backend.");
+      showToast("Mission stopped", "Stop command accepted by the backend.", "success");
+    } catch (error) {
+      logAction("STOP_FAILED", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      showToast("Stop failed", error instanceof Error ? error.message : "Could not stop the mission.", "error");
+      Alert.alert("Stop failed", error instanceof Error ? error.message : "Could not stop the mission.");
+    } finally {
+      setMissionActionBusy(false);
+    }
+  }
+
+  async function pauseMissionOnBackend() {
+    if (!apiBaseUrl) return;
+    setMissionActionBusy(true);
+    try {
+      showToast("Pause", "Pausing mission...", "info");
+      const res = await fetch(`${apiBaseUrl}/api/mission/abort`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        const errMsg = await parseFetchError(res, "Pause failed");
+        throw new Error(errMsg);
+      }
+      setIsPaused(true);
+      showToast("Mission paused", "Mission has been paused.", "success");
+      void refreshTelemetryPanel();
+    } catch (error) {
+      Alert.alert("Pause failed", error instanceof Error ? error.message : "Could not pause the mission.");
+      showToast("Pause failed", error instanceof Error ? error.message : "Could not pause.", "error");
+    } finally {
+      setMissionActionBusy(false);
+    }
+  }
+
+
+
+  async function runTemplateOnBackend(name: string, generatedLines: PlanLine[]) {
+    if (!apiBaseUrl) {
+      Alert.alert("No backend", "Connect to a backend before running a template.");
+      return;
+    }
+    const fileName = `${name.replace(/\s+/g, "_").toLowerCase()}_template.dxf`;
+    logAction("LOAD_TEMPLATE_REQUEST", { apiBaseUrl, fileName });
+    setMissionActionBusy(true);
+    try {
+      showToast("Load", `Loading template ${fileName}...`, "info");
+      const res = await fetch(`${apiBaseUrl}/api/mission/load`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          path_name: fileName,
+          mission_file: "",
+        }),
+      });
+
+      if (!res.ok) {
+        const errMsg = await parseFetchError(res, "Load failed");
+        throw new Error(errMsg);
+      }
+
+      setImportedPlan({
+        fileName,
+        uri: "",
+        fileType: "dxf",
+        source: "generated",
+      });
+      setLines(generatedLines);
+      setSelectedLineId(generatedLines[0]?.id ?? null);
+      setMissionLoaded(true);
+      setMissionRunning(false);
+      void refreshTelemetryPanel();
+      setPage("home");
+      showToast("Template loaded", "Template path loaded successfully.", "success");
+    } catch (error) {
+      logAction("LOAD_TEMPLATE_FAILED", {
+        fileName,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      Alert.alert("Load failed", error instanceof Error ? error.message : "Could not load template.");
+      showToast("Load failed", error instanceof Error ? error.message : "Could not load.", "error");
+    } finally {
+      setMissionActionBusy(false);
     }
   }
 
@@ -491,17 +876,39 @@ export default function App() {
   }
 
   function buildSubnetSweepCandidates(seedHost: string) {
-    const parsed = parseHost(seedHost);
-    if (!parsed) return [];
-    const octets = parsed.host.split(".");
-    if (octets.length !== 4) return [];
-    if (!isPrivateLanIp(parsed.host)) return [];
+    const prefixes = new Set<string>();
 
-    const prefix = octets.slice(0, 3).join(".");
-    return Array.from({ length: SUBNET_HOST_MAX - SUBNET_HOST_MIN + 1 }, (_, index) => {
-      const hostOctet = SUBNET_HOST_MIN + index;
-      return `http://${prefix}.${hostOctet}:${DISCOVERY_PORT}`;
-    });
+    // 1. Check seed host if it's a private IP
+    const parsed = parseHost(seedHost);
+    if (parsed && isPrivateLanIp(parsed.host)) {
+      const octets = parsed.host.split(".");
+      if (octets.length === 4) {
+        prefixes.add(octets.slice(0, 3).join("."));
+      }
+    }
+
+    // 2. Check window.location if running in a web environment
+    if (typeof window !== "undefined" && window.location && window.location.hostname) {
+      const host = window.location.hostname;
+      if (isPrivateLanIp(host)) {
+        const octets = host.split(".");
+        if (octets.length === 4) {
+          prefixes.add(octets.slice(0, 3).join("."));
+        }
+      }
+    }
+
+    // 3. Always include common private subnets
+    prefixes.add("192.168.1");
+    prefixes.add("192.168.0");
+
+    const candidates: string[] = [];
+    for (const prefix of prefixes) {
+      for (let hostOctet = SUBNET_HOST_MIN; hostOctet <= SUBNET_HOST_MAX; hostOctet++) {
+        candidates.push(`http://${prefix}.${hostOctet}:${DISCOVERY_PORT}`);
+      }
+    }
+    return candidates;
   }
 
   function isPrivateLanIp(host: string) {
@@ -584,57 +991,64 @@ export default function App() {
             importedPlan={importedPlan}
             lines={lines}
             selectedLineId={selectedLineId}
-            onSelectLine={setSelectedLineId}
-            onDeleteSelectedLine={deleteSelectedLine}
-            onDeleteEntirePlan={deleteEntirePlan}
-            menuOpen={menuOpen}
-            onToggleMenu={() => setMenuOpen((v) => !v)}
-            onNav={(p) => {
-              setPage(p);
-              setMenuOpen(false);
-            }}
+          onSelectLine={setSelectedLineId}
+          onDeleteSelectedLine={deleteSelectedLine}
+          onConfirmDeletePlan={deleteEntirePlan}
+          menuOpen={menuOpen}
+          onToggleMenu={() => setMenuOpen((v) => !v)}
+          onNav={(p) => {
+            logAction("NAVIGATE", { page: p });
+            setPage(p);
+            setMenuOpen(false);
+          }}
           onDisconnect={disconnectToConnectionScreen}
           layerVisibility={layerVisibility}
           setLayerVisibility={setLayerVisibility}
-          telemetryDrawerOpen={telemetryDrawerOpen}
-          onOpenTelemetry={() => setTelemetryDrawerOpen(true)}
-          onCloseTelemetry={() => setTelemetryDrawerOpen(false)}
+          onStopPlan={stopMissionOnBackend}
+          onStartPlan={startLoadedMission}
+          onPausePlan={pauseMissionOnBackend}
+          missionActionBusy={missionActionBusy}
+          missionFileReady={missionFileReady}
+          missionLoaded={missionLoaded}
+          missionRunning={missionRunning}
           systemHealth={systemHealth}
           telemetrySnapshot={telemetrySnapshot}
           activityFeed={activityFeed}
           discoveryFeed={discoveryFeed}
           telemetryError={telemetryError}
           telemetryLoading={telemetryLoading}
+          isPaused={isPaused}
+          setIsPaused={setIsPaused}
         />
-      ) : (
+        ) : (
           <SectionScreen
             title={sectionTitle}
             page={page}
             importedPlan={importedPlan}
             lines={lines}
             selectedLineId={selectedLineId}
-            onBack={() =>
-              setPage(
-                page === "fields_csv_import" || page === "fields_dxf_import"
-                  ? "fields"
-                  : "home"
-              )
-            }
-            onNavigate={setPage}
-            onImport={handleImport}
-            onImportCsv={() => handleImportTyped("csv")}
-            onImportDxf={() => handleImportTyped("dxf")}
-            onOpenFieldGenerator={() => setFieldGeneratorOpen(true)}
+            backendPaths={backendPaths}
+            selectedPathName={selectedPathName}
+            onSelectPath={previewSelectedPath}
+            onLoadSelectedPath={loadMissionOnBackend}
+            missionActionBusy={missionActionBusy}
+            onBack={() => setPage("home")}
             onSelectLine={setSelectedLineId}
             onGenerateTemplate={(name, generatedLines) => {
-              setImportedPlan({ fileName: `${name}.dxf`, uri: "", fileType: "dxf" });
+              setImportedPlan({ fileName: `${name}.dxf`, uri: "", fileType: "dxf", source: "generated" });
               setLines(generatedLines);
               setSelectedLineId(generatedLines[0]?.id ?? null);
+              setMissionFileReady(false);
+              setMissionLoaded(false);
+              setMissionRunning(false);
               setPage("home");
+              showToast("Template ready", `${name}.dxf is ready to upload.`, "success");
             }}
             layerVisibility={layerVisibility}
             setLayerVisibility={setLayerVisibility}
             setImportedPlan={setImportedPlan}
+            onRunTemplate={runTemplateOnBackend}
+            missionFileReady={missionFileReady}
             toggleA={toggleA}
             toggleB={toggleB}
             toggleC={toggleC}
@@ -649,18 +1063,60 @@ export default function App() {
             setDelayB={setDelayB}
           />
       )}
-      <FieldGeneratorModal
-        visible={fieldGeneratorOpen}
-        onClose={() => setFieldGeneratorOpen(false)}
-        onGenerate={(name, generatedLines) => {
-          setImportedPlan({ fileName: `${name}.dxf`, uri: "", fileType: "dxf" });
-          setLines(generatedLines);
-          setSelectedLineId(generatedLines[0]?.id ?? null);
-          setLayerVisibility({ boundary: true, marking: true, center: true });
-          setFieldGeneratorOpen(false);
-          setPage("home");
-        }}
-      />
+
+
+      {toast ? (
+        <View
+          pointerEvents="none"
+          style={{
+            position: "absolute",
+            left: 16,
+            right: 16,
+            bottom: 18,
+            zIndex: 999,
+            alignItems: "center",
+          }}
+        >
+          <View
+            style={{
+              maxWidth: 560,
+              width: "100%",
+              borderRadius: 16,
+              paddingHorizontal: 14,
+              paddingVertical: 12,
+              backgroundColor:
+                toast.tone === "success"
+                  ? "#0f766e"
+                  : toast.tone === "warning"
+                    ? "#b45309"
+                    : toast.tone === "error"
+                      ? "#991b1b"
+                      : "#0f172a",
+              borderWidth: 1,
+              borderColor:
+                toast.tone === "success"
+                  ? "#5eead4"
+                  : toast.tone === "warning"
+                    ? "#fdba74"
+                    : toast.tone === "error"
+                      ? "#fca5a5"
+                      : "#334155",
+              shadowColor: "#000",
+              shadowOpacity: 0.16,
+              shadowRadius: 16,
+              shadowOffset: { width: 0, height: 8 },
+              elevation: 10,
+            }}
+          >
+            <Text style={{ color: "#fff", fontSize: 12, fontWeight: "900", letterSpacing: 0.6, textTransform: "uppercase" }}>
+              {toast.title}
+            </Text>
+            <Text style={{ color: "#e2e8f0", marginTop: 4, fontSize: 13, lineHeight: 18 }}>
+              {toast.message}
+            </Text>
+          </View>
+        </View>
+      ) : null}
     </SafeAreaView>
   </SafeAreaProvider>
   );
@@ -739,273 +1195,508 @@ function HomeView({
   selectedLineId,
   onSelectLine,
   onDeleteSelectedLine,
-  onDeleteEntirePlan,
+  onConfirmDeletePlan,
   menuOpen,
   onToggleMenu,
   onNav,
   onDisconnect,
   layerVisibility,
   setLayerVisibility,
-  telemetryDrawerOpen,
-  onOpenTelemetry,
-  onCloseTelemetry,
+  onStopPlan,
+  onStartPlan,
+  onPausePlan,
+  missionActionBusy,
+  missionFileReady,
+  missionLoaded,
+  missionRunning,
   systemHealth,
   telemetrySnapshot,
   activityFeed,
   discoveryFeed,
   telemetryError,
   telemetryLoading,
+  isPaused,
+  setIsPaused,
 }: {
   importedPlan: ImportedPlan | null;
   lines: PlanLine[];
   selectedLineId: string | null;
   onSelectLine: (id: string | null) => void;
   onDeleteSelectedLine: () => void;
-  onDeleteEntirePlan: () => void;
+  onConfirmDeletePlan: () => void;
   menuOpen: boolean;
   onToggleMenu: () => void;
   onNav: (p: Page) => void;
   onDisconnect: () => void;
   layerVisibility: LayerVisibility;
   setLayerVisibility: React.Dispatch<React.SetStateAction<LayerVisibility>>;
-  telemetryDrawerOpen: boolean;
-  onOpenTelemetry: () => void;
-  onCloseTelemetry: () => void;
+  onStopPlan: () => Promise<void>;
+  onStartPlan: () => Promise<void>;
+  onPausePlan: () => Promise<void>;
+  missionActionBusy: boolean;
+  missionFileReady: boolean;
+  missionLoaded: boolean;
+  missionRunning: boolean;
   systemHealth: SystemHealth | null;
   telemetrySnapshot: TelemetrySnapshot | null;
   activityFeed: ActivityEntry[];
   discoveryFeed: DiscoveredRover[];
   telemetryError: string;
   telemetryLoading: boolean;
+  isPaused: boolean;
+  setIsPaused: React.Dispatch<React.SetStateAction<boolean>>;
 }) {
   const selectedLine = lines.find((line) => line.id === selectedLineId) ?? null;
   const hasPlan = lines.length > 0;
   const hasSelectedLine = Boolean(selectedLine);
+  const [compassExpanded, setCompassExpanded] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteScope, setDeleteScope] = useState<"line" | "plan" | null>(null);
-  const swipeResponder = React.useMemo(
+  const [rightPanelMode, setRightPanelMode] = useState<"system" | "details">("system");
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [exportFileName, setExportFileName] = useState("");
+  const pulse = (label: string, ok: boolean | undefined | null) => ({
+    label,
+    value: ok === undefined || ok === null ? "Unknown" : ok ? "OK" : "Alert",
+    tone: ok ? "#16a34a" : ok === false ? "#dc2626" : "#64748b",
+  });
+  const rightPanelSwipeResponder = React.useMemo(
     () =>
       PanResponder.create({
-        onMoveShouldSetPanResponder: (_, gesture) => gesture.dx < -16 && Math.abs(gesture.dy) < 18,
+        onStartShouldSetPanResponder: () => false,
+        onMoveShouldSetPanResponder: (_, gesture) => Math.abs(gesture.dx) > 8 && Math.abs(gesture.dy) < 18,
+        onPanResponderMove: (_, gesture) => {
+          if (gesture.dx < -20) {
+            setRightPanelMode("details");
+          } else if (gesture.dx > 20) {
+            setRightPanelMode("system");
+          }
+        },
         onPanResponderRelease: (_, gesture) => {
-          if (gesture.dx < -90) {
-            onOpenTelemetry();
+          if (gesture.dx < -70) {
+            setRightPanelMode("details");
+          } else if (gesture.dx > 70) {
+            setRightPanelMode("system");
           }
         },
       }),
-    [onOpenTelemetry]
+    []
   );
 
+  const openExportDialog = () => {
+    if (!importedPlan || lines.length === 0) return;
+    const baseName = importedPlan.fileName.replace(/\.[^/.]+$/, "") || "generated_plan";
+    console.log(`[${new Date().toISOString()}] [UI] EXPORT_OPEN`, { fileName: baseName });
+    setExportFileName(baseName);
+    setExportDialogOpen(true);
+  };
+
+  const saveExportedPlan = async () => {
+    if (!importedPlan || lines.length === 0) return;
+    const cleanedName = exportFileName.trim().replace(/[\\/:*?"<>|]/g, "_") || "generated_plan";
+    const uri = `${FileSystem.documentDirectory ?? ""}${cleanedName}.dxf`;
+    console.log(`[${new Date().toISOString()}] [UI] EXPORT_SAVE`, { fileName: cleanedName, uri });
+    await FileSystem.writeAsStringAsync(uri, linesToDxf(lines, cleanedName), {
+      encoding: FileSystem.EncodingType.UTF8,
+    });
+    setExportDialogOpen(false);
+    Alert.alert("Exported", `DXF saved to ${uri}`);
+  };
+
+  const missionActionButtonStyle = {
+    height: 34,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+  };
+
+
+
   return (
-    <View style={{ flex: 1, backgroundColor: "#f1f5f9" }} {...swipeResponder.panHandlers}>
-      <View style={{ height: 66, backgroundColor: GREEN, flexDirection: "row", alignItems: "center" }}>
-        <View style={{ width: "50%", height: "100%", flexDirection: "row", alignItems: "center" }}>
-          <Pressable
-            onPress={onToggleMenu}
+    <View style={{ flex: 1, backgroundColor: "#ffffff" }}>
+      <View style={{ flex: 1, position: "relative" }}>
+        <View
+          style={{
+            position: "absolute",
+            left: 14,
+            width: "58%",
+            top: 14,
+            height: 52,
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 14,
+            zIndex: 30,
+            elevation: 30,
+            backgroundColor: "transparent",
+          }}
+        >
+          <View
             style={{
-              width: 72,
-              height: "100%",
-              backgroundColor: "#0f172a",
+              flex: 1,
+              flexDirection: "row",
               alignItems: "center",
-              justifyContent: "center",
-              borderRightWidth: 1,
-              borderRightColor: "#cbd5e1",
+              gap: 10,
+              paddingHorizontal: 12,
+              paddingVertical: 8,
+              borderRadius: 16,
+              borderWidth: 0,
+              backgroundColor: "transparent",
             }}
           >
-            <Menu size={36} color="#fff" />
-          </Pressable>
-
-          <View style={{ flex: 1, paddingLeft: 14, paddingRight: 12 }}>
-            {importedPlan ? (
-              <Text style={{ color: "#0f172a", fontSize: 18, fontWeight: "700" }} numberOfLines={1}>
-                {importedPlan.fileName}
-              </Text>
-            ) : null}
-          </View>
-        </View>
-
-        <View style={{ width: "50%", height: "100%", flexDirection: "row", backgroundColor: "#e2e8f0", borderLeftWidth: 1, borderLeftColor: "#cbd5e1" }}>
-          {[
-            <Battery key="battery" size={22} color="#475569" />,
-            <Target key="target" size={22} color="#475569" />,
-            <LocateFixed key="loc" size={22} color="#475569" />,
-            <Car key="car" size={22} color="#475569" />,
-            <Signal key="signal" size={22} color="#475569" />,
-          ].map((icon, i) => (
-            <View
-              key={i}
+            <Pressable
+              onPress={onToggleMenu}
               style={{
-                flex: 1,
-                borderRightWidth: i < 4 ? 1 : 0,
-                borderRightColor: "#cbd5e1",
+                width: 40,
+                height: 40,
+                borderRadius: 12,
                 alignItems: "center",
                 justifyContent: "center",
+                backgroundColor: "#ffffff",
+                borderWidth: 1,
+                borderColor: "#e2e8f0",
               }}
             >
-              {icon}
-            </View>
-          ))}
-        </View>
-      </View>
+              <Menu size={22} color="#0f172a" />
+            </Pressable>
 
-      <View style={{ flex: 1, position: "relative" }}>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              {importedPlan ? (
+                <View style={{ gap: 10 }}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text style={{ color: "#64748b", fontSize: 10, fontWeight: "800", letterSpacing: 1.1, textTransform: "uppercase" }}>
+                        File
+                      </Text>
+                      <Text style={{ color: "#0f172a", fontSize: 18, fontWeight: "800" }} numberOfLines={1}>
+                        {importedPlan.fileName}
+                      </Text>
+                    </View>
+
+                    {missionLoaded ? (
+                      <>
+                        <View
+                          style={{
+                            paddingHorizontal: 10,
+                            height: 34,
+                            borderRadius: 12,
+                            backgroundColor: "#dcfce7",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            borderWidth: 1,
+                            borderColor: "#86efac",
+                          }}
+                        >
+                          <Text style={{ color: "#166534", fontSize: 12, fontWeight: "800" }}>File loaded</Text>
+                        </View>
+                        <Pressable
+                          onPress={onStartPlan}
+                          disabled={missionActionBusy || lines.length === 0}
+                          style={{
+                            ...missionActionButtonStyle,
+                            backgroundColor: missionActionBusy ? "#94a3b8" : "#0b6b68",
+                          }}
+                        >
+                          <Text style={{ color: "#fff", fontSize: 12, fontWeight: "800" }}>
+                            Start
+                          </Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={onPausePlan}
+                          disabled={missionActionBusy || lines.length === 0}
+                          style={{
+                            ...missionActionButtonStyle,
+                            backgroundColor: "#ffffff",
+                            borderWidth: 1,
+                            borderColor: "#cbd5e1",
+                          }}
+                        >
+                          <Text style={{ color: "#0f172a", fontSize: 12, fontWeight: "800" }}>
+                            Pause
+                          </Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={onStopPlan}
+                          disabled={missionActionBusy || lines.length === 0}
+                          style={{
+                            ...missionActionButtonStyle,
+                            backgroundColor: missionActionBusy ? "#94a3b8" : "#dc2626",
+                          }}
+                        >
+                          <Text style={{ color: "#fff", fontSize: 12, fontWeight: "800" }}>
+                            Stop
+                          </Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={openExportDialog}
+                          disabled={lines.length === 0}
+                          style={{
+                            ...missionActionButtonStyle,
+                            backgroundColor: "#ffffff",
+                            borderWidth: 1,
+                            borderColor: "#cbd5e1",
+                          }}
+                        >
+                          <Text style={{ color: "#0f172a", fontSize: 12, fontWeight: "800" }}>
+                            Export
+                          </Text>
+                        </Pressable>
+                      </>
+                    ) : null}
+                  </View>
+                </View>
+              ) : (
+                <Pressable
+                  onPress={() => onNav("fields")}
+                  style={{
+                    alignSelf: "flex-start",
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 10,
+                    paddingHorizontal: 12,
+                    paddingVertical: 8,
+                    borderRadius: 14,
+                    borderWidth: 1,
+                    borderColor: "#d7dee8",
+                    backgroundColor: "#ffffff",
+                  }}
+                >
+                  <View style={{ width: 34, height: 34, borderRadius: 12, backgroundColor: "#f1f5f9", alignItems: "center", justifyContent: "center" }}>
+                    <Text style={{ color: "#0f172a", fontSize: 16, fontWeight: "900" }}>+</Text>
+                  </View>
+                  <View>
+                    <Text style={{ color: "#0f172a", fontSize: 15, fontWeight: "800" }}>No file loaded</Text>
+                    <Text style={{ color: "#64748b", fontSize: 11 }}>Tap to load or create one</Text>
+                  </View>
+                </Pressable>
+              )}
+            </View>
+          </View>
+        </View>
+
         <View style={{ flex: 1, flexDirection: "row" }}>
-          <View style={{ width: "50%", backgroundColor: "#f8fafc" }}>
-            <View style={{ flex: 1, margin: 14, borderRadius: 16, overflow: "hidden", backgroundColor: "#ffffff", borderWidth: 1, borderColor: "#d8e1eb" }}>
-              <PlanPreview lines={lines} visibility={layerVisibility} selectedLineId={selectedLineId} onSelectLine={onSelectLine} />
+          <View style={{ width: "58%", backgroundColor: "#ffffff" }}>
+            <View style={{ flex: 1, margin: 14, marginTop: 72, borderRadius: 20, overflow: "hidden", backgroundColor: "#ffffff", borderWidth: 1, borderColor: "#d8e1eb" }}>
+              <View style={{ flex: 1, position: "relative" }}>
+                <PlanPreview lines={lines} visibility={layerVisibility} selectedLineId={selectedLineId} onSelectLine={onSelectLine} />
+              </View>
             </View>
           </View>
 
-          <View style={{ flex: 1, backgroundColor: "#eef2f7", padding: 14 }}>
+          <View style={{ width: "42%", height: "100%", backgroundColor: "#ffffff", padding: 8, paddingLeft: 0 }}>
             <View
               style={{
                 flex: 1,
-                borderRadius: 20,
+                minHeight: 0,
+                borderRadius: 18,
                 borderWidth: 1,
                 borderColor: "#d8e1eb",
-                backgroundColor: "#f8fafc",
+                backgroundColor: "#0b1220",
                 overflow: "hidden",
                 shadowColor: "#0f172a",
-                shadowOpacity: 0.04,
+                shadowOpacity: 0.08,
                 shadowRadius: 18,
                 shadowOffset: { width: 0, height: 10 },
-                elevation: 2,
+                elevation: 3,
               }}
+              {...rightPanelSwipeResponder.panHandlers}
             >
-              <View style={{ padding: 16, borderBottomWidth: 1, borderBottomColor: "#e2e8f0" }}>
-                <Text style={{ color: "#64748b", fontSize: 11, fontWeight: "800", letterSpacing: 1.4, textTransform: "uppercase" }}>
-                  Line Details
-                </Text>
-                <Text style={{ color: "#0f172a", fontSize: 24, fontWeight: "800", marginTop: 6 }} numberOfLines={2}>
-                  {selectedLine ? selectedLine.label : "No line selected"}
-                </Text>
-                <Text style={{ color: "#64748b", fontSize: 13, marginTop: 4, lineHeight: 18 }}>
-                  {selectedLine
-                    ? "Geometry, metadata, and layer visibility are shown in one compact inspection view."
-                    : "Tap a line in the preview to inspect its measurements and geometry."}
-                </Text>
-              </View>
+              {rightPanelMode === "system" ? (
+                <ScrollView
+                  style={{ flex: 1 }}
+                  contentContainerStyle={{ padding: 14, paddingBottom: 18 }}
+                  showsVerticalScrollIndicator={false}
+                >
+                  <Text style={{ color: "#94a3b8", fontSize: 11, fontWeight: "800", letterSpacing: 1.4, textTransform: "uppercase" }}>
+                    Rover Ops
+                  </Text>
+                  <Text style={{ color: "#fff", fontSize: 24, fontWeight: "900", marginTop: 6 }}>
+                    System Panel
+                  </Text>
+                  <Text style={{ color: "#cbd5e1", fontSize: 13, lineHeight: 19, marginTop: 8, maxWidth: 380 }}>
+                    Live rover health, telemetry, discovery, and activity data.
+                  </Text>
 
-              <View style={{ flex: 1, padding: 16, justifyContent: "space-between" }}>
-                <View style={{ gap: 14 }}>
+                  {telemetryError ? <Text style={drawerStyles.error}>{telemetryError}</Text> : null}
+                  {telemetryLoading ? <Text style={drawerStyles.loading}>Refreshing live data...</Text> : null}
+
+                  <View style={drawerStyles.grid}>
+                    <StatCard label="ROS node" value={pulse("ROS node", systemHealth?.ros_node)} />
+                    <StatCard label="FCU link" value={pulse("FCU link", systemHealth?.fcu_connected)} />
+                    <StatCard label="Armed" value={pulse("Armed", telemetrySnapshot?.armed ?? systemHealth?.armed)} />
+                    <StatCard
+                      label="Mode"
+                      value={{
+                        label: "Control mode",
+                        value: telemetrySnapshot?.mode ?? systemHealth?.mode ?? "UNKNOWN",
+                        tone: "#0f172a",
+                      }}
+                    />
+                  </View>
+
+                  <View style={drawerStyles.stripRow}>
+                    <StripMetric
+                      label="Battery"
+                      value={telemetrySnapshot?.battery_pct == null ? "n/a" : `${telemetrySnapshot.battery_pct.toFixed(0)}%`}
+                      tone={telemetrySnapshot?.battery_pct == null ? "#64748b" : telemetrySnapshot.battery_pct >= 55 ? "#16a34a" : telemetrySnapshot.battery_pct >= 25 ? "#d97706" : "#dc2626"}
+                    />
+                    <StripMetric
+                      label="Pose age"
+                      value={telemetrySnapshot?.pose_age_ms == null ? "n/a" : `${telemetrySnapshot.pose_age_ms.toFixed(0)} ms`}
+                      tone={telemetrySnapshot?.pose_age_ms == null ? "#64748b" : telemetrySnapshot.pose_age_ms <= 500 ? "#16a34a" : telemetrySnapshot.pose_age_ms <= 1500 ? "#d97706" : "#dc2626"}
+                    />
+                    <StripMetric
+                      label="RPP"
+                      value={telemetrySnapshot?.rpp_state_name ?? String(telemetrySnapshot?.rpp_state ?? systemHealth?.rpp_state ?? "n/a")}
+                      tone="#0f172a"
+                    />
+                  </View>
+
+                  <View style={drawerStyles.section}>
+                    <SectionTitle title="Telemetry snapshot" />
+                    <MiniGrid
+                      items={[
+                        ["Speed", telemetrySnapshot?.speed_m_s == null ? "n/a" : `${telemetrySnapshot.speed_m_s.toFixed(2)} m/s`],
+                        ["Heading", telemetrySnapshot?.heading_ned_deg == null ? "n/a" : `${telemetrySnapshot.heading_ned_deg.toFixed(1)}°`],
+                        ["Cross-track", telemetrySnapshot?.xtrack_m == null ? "n/a" : `${telemetrySnapshot.xtrack_m.toFixed(2)} m`],
+                        ["Goal dist", telemetrySnapshot?.dist_to_goal_m == null ? "n/a" : `${telemetrySnapshot.dist_to_goal_m.toFixed(2)} m`],
+                        ["Lookahead", telemetrySnapshot?.lookahead_m == null ? "n/a" : `${telemetrySnapshot.lookahead_m.toFixed(2)} m`],
+                        ["Satellites", telemetrySnapshot?.gps_sat == null ? "n/a" : `${telemetrySnapshot.gps_sat}`],
+                      ]}
+                    />
+                  </View>
+
+                  <View style={drawerStyles.section}>
+                    <SectionTitle title="Discover" />
+                    <View style={drawerStyles.list}>
+                      {discoveryFeed.length > 0 ? discoveryFeed.slice(0, 4).map((item) => (
+                        <ListRow
+                          key={item.id}
+                          left={`${item.name}`}
+                          right={`${item.host}:${item.port}`}
+                          tone="#16a34a"
+                        />
+                      )) : (
+                        <EmptyLine text="No beacons discovered on the LAN." />
+                      )}
+                    </View>
+                  </View>
+
+                  <View style={drawerStyles.section}>
+                    <SectionTitle title="Activity" />
+                    <View style={drawerStyles.list}>
+                      {activityFeed.length > 0 ? activityFeed.slice(0, 5).map((item, index) => (
+                        <ListRow
+                          key={`${item.timestamp}-${index}`}
+                          left={item.message}
+                          right={item.level.toUpperCase()}
+                          tone={item.level === "error" ? "#dc2626" : item.level === "warn" ? "#d97706" : "#16a34a"}
+                        />
+                      )) : (
+                        <EmptyLine text="Activity log is empty right now." />
+                      )}
+                    </View>
+                  </View>
+                </ScrollView>
+              ) : (
+                <ScrollView
+                  style={{ flex: 1 }}
+                  contentContainerStyle={{ padding: 14, paddingBottom: 18 }}
+                  showsVerticalScrollIndicator={false}
+                >
+                  <Text style={{ color: "#94a3b8", fontSize: 11, fontWeight: "800", letterSpacing: 1.4, textTransform: "uppercase" }}>
+                    Rover Ops
+                  </Text>
+                  <Text style={{ color: "#fff", fontSize: 24, fontWeight: "900", marginTop: 6 }}>
+                    Line Details
+                  </Text>
+                  <Text style={{ color: "#cbd5e1", fontSize: 13, lineHeight: 19, marginTop: 8, maxWidth: 380 }}>
+                    Swipe right to inspect the selected line in a focused side panel.
+                  </Text>
+
                   {selectedLine ? (
                     <>
-                      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}>
-                        <MetricChip label="Layer" value={selectedLine.layer} />
-                        <MetricChip label="Length" value={`${lineLength(selectedLine).toFixed(2)} m`} />
-                        <MetricChip label="Angle" value={`${lineAngle(selectedLine).toFixed(2)}°`} />
-                        <MetricChip label="Width" value={`${selectedLine.width.toFixed(2)} m`} />
+                      <View style={drawerStyles.grid}>
+                        <StatCard
+                          label="Selection"
+                          value={{
+                            label: "Current line",
+                            value: selectedLine.label,
+                            tone: "#fff",
+                          }}
+                        />
+                        <StatCard
+                          label="Status"
+                          value={{
+                            label: "Drawer state",
+                            value: "Loaded",
+                            tone: "#16a34a",
+                          }}
+                        />
+                        <StatCard
+                          label="Layer"
+                          value={{
+                            label: "Visible layers",
+                            value: hasPlan ? "Available" : "No plan",
+                            tone: hasPlan ? "#fff" : "#94a3b8",
+                          }}
+                        />
+                        <StatCard
+                          label="Info"
+                          value={{
+                            label: "Line geometry",
+                            value: `${lineLength(selectedLine).toFixed(2)} m`,
+                            tone: "#fff",
+                          }}
+                        />
                       </View>
 
-                      <View style={{ gap: 10 }}>
-                        <MetricRow label="From" value={`(${selectedLine.from.x.toFixed(2)}, ${selectedLine.from.y.toFixed(2)})`} />
-                        <MetricRow label="To" value={`(${selectedLine.to.x.toFixed(2)}, ${selectedLine.to.y.toFixed(2)})`} />
-                        <MetricRow label="Point IDs" value={`${selectedLine.from.id} -> ${selectedLine.to.id}`} />
-                        <MetricRow label="Line ID" value={selectedLine.id} />
-                        <MetricRow label="Label" value={selectedLine.label} />
+                      <View style={drawerStyles.stripRow}>
+                        <StripMetric label="Length" value={`${lineLength(selectedLine).toFixed(2)} m`} tone="#fff" />
+                        <StripMetric label="Angle" value={`${lineAngle(selectedLine).toFixed(2)}°`} tone="#fff" />
+                        <StripMetric label="Width" value={`${selectedLine.width.toFixed(2)} m`} tone="#fff" />
+                      </View>
+
+                      <View style={drawerStyles.section}>
+                        <SectionTitle title="Geometry" />
+                        <View style={{ borderRadius: 16, padding: 12, backgroundColor: "#111827", borderWidth: 1, borderColor: "rgba(148,163,184,0.16)", gap: 10 }}>
+                          <ListRow left="Line label" right={selectedLine.label} tone="#fff" />
+                          <ListRow left="Layer" right={selectedLine.layer} tone="#fff" />
+                          <ListRow left="From" right={`(${selectedLine.from.x.toFixed(2)}, ${selectedLine.from.y.toFixed(2)})`} tone="#fff" />
+                          <ListRow left="To" right={`(${selectedLine.to.x.toFixed(2)}, ${selectedLine.to.y.toFixed(2)})`} tone="#fff" />
+                          <ListRow left="Point IDs" right={`${selectedLine.from.id} -> ${selectedLine.to.id}`} tone="#fff" />
+                          <ListRow left="Line ID" right={selectedLine.id} tone="#fff" />
+                        </View>
+                      </View>
+
+                      <View style={drawerStyles.section}>
+                        <SectionTitle title="Visible layers" />
+                        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                          <CompactLayerToggle
+                            label="Boundary"
+                            value={layerVisibility.boundary}
+                            onToggle={() => setLayerVisibility((prev) => ({ ...prev, boundary: !prev.boundary }))}
+                          />
+                          <CompactLayerToggle
+                            label="Marking"
+                            value={layerVisibility.marking}
+                            onToggle={() => setLayerVisibility((prev) => ({ ...prev, marking: !prev.marking }))}
+                          />
+                          <CompactLayerToggle
+                            label="Center"
+                            value={layerVisibility.center}
+                            onToggle={() => setLayerVisibility((prev) => ({ ...prev, center: !prev.center }))}
+                          />
+                        </View>
                       </View>
                     </>
                   ) : (
-                    <View
-                      style={{
-                        flex: 1,
-                        minHeight: 180,
-                        padding: 16,
-                        borderRadius: 16,
-                        backgroundColor: "#ffffff",
-                        borderWidth: 1,
-                        borderColor: "#e2e8f0",
-                        justifyContent: "center",
-                      }}
-                    >
-                      <Text style={{ color: "#334155", fontSize: 15, lineHeight: 22 }}>
-                        The plan view is ready. Select any boundary, marking, or center line to inspect it here.
-                      </Text>
+                    <View style={[drawerStyles.section, { marginTop: 18 }]}>
+                      <EmptyLine text="Tap a highlighted line in the canvas to see its details here." />
                     </View>
                   )}
-                </View>
-
-                {hasPlan ? (
-                  <View
-                    style={{
-                      marginTop: 16,
-                      paddingTop: 14,
-                      borderTopWidth: 1,
-                      borderTopColor: "#e2e8f0",
-                    }}
-                  >
-                    <Text style={{ color: "#64748b", fontSize: 12, fontWeight: "800", marginBottom: 10, letterSpacing: 0.8, textTransform: "uppercase" }}>
-                      Visible Layers
-                    </Text>
-                    <View style={{ flexDirection: "row", gap: 10, flexWrap: "wrap" }}>
-                      <CompactLayerToggle
-                        label="Boundary"
-                        value={layerVisibility.boundary}
-                        onToggle={() => setLayerVisibility((prev) => ({ ...prev, boundary: !prev.boundary }))}
-                      />
-                      <CompactLayerToggle
-                        label="Marking"
-                        value={layerVisibility.marking}
-                        onToggle={() => setLayerVisibility((prev) => ({ ...prev, marking: !prev.marking }))}
-                      />
-                      <CompactLayerToggle
-                        label="Center"
-                        value={layerVisibility.center}
-                        onToggle={() => setLayerVisibility((prev) => ({ ...prev, center: !prev.center }))}
-                      />
-                    </View>
-                  </View>
-                ) : null}
-              </View>
-            </View>
-            <View style={{ marginTop: 16, marginBottom: 12, paddingHorizontal: 4 }}>
-              <Pressable
-                onPress={onOpenTelemetry}
-                style={telemetryCtaStyles.outer}
-              >
-                <View style={telemetryCtaStyles.inner}>
-                  <View style={telemetryCtaStyles.leftRail}>
-                    <View style={telemetryCtaStyles.dot} />
-                    <View style={telemetryCtaStyles.line} />
-                  </View>
-                  <View style={{ flex: 1, paddingRight: 10 }}>
-                    <Text style={telemetryCtaStyles.title}>System Panel</Text>
-                    <Text style={telemetryCtaStyles.subtitle}>
-                      Swipe right or tap for health, telemetry, discovery, and activity
-                    </Text>
-                  </View>
-                  <View style={telemetryCtaStyles.chevronWrap}>
-                    <ChevronRight size={18} color="#e2e8f0" />
-                  </View>
-                </View>
-              </Pressable>
-            </View>
-
-            <View style={{ height: 66, backgroundColor: "#e2e8f0", borderTopWidth: 1, borderTopColor: "#cbd5e1", flexDirection: "row" }}>
-              {[
-                <LocateFixed key="b-loc" size={22} color="#475569" />,
-                <Copy key="b-copy" size={22} color="#475569" />,
-                <List key="b-lines" size={22} color="#475569" />,
-                <Trash2 key="b-del" size={22} color="#475569" />,
-                <Signal key="b-signal" size={22} color="#475569" />,
-              ].map((icon, i) => (
-                <Pressable
-                  key={i}
-                  onPress={i === 3 ? () => setDeleteDialogOpen(true) : undefined}
-                  style={{
-                    flex: 1,
-                    borderRightWidth: i < 4 ? 1 : 0,
-                    borderRightColor: "#cbd5e1",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    backgroundColor: i === 3 && hasPlan ? "#b91c1c" : "transparent",
-                  }}
-                >
-                  {i === 3 && hasPlan && React.isValidElement(icon)
-                    ? React.cloneElement(icon as React.ReactElement<{ color?: string }>, { color: "#fff" })
-                    : icon}
-                </Pressable>
-              ))}
+                </ScrollView>
+              )}
             </View>
           </View>
         </View>
@@ -1112,7 +1803,7 @@ function HomeView({
                     if (deleteScope === "line") {
                       onDeleteSelectedLine();
                     } else if (deleteScope === "plan") {
-                      onDeleteEntirePlan();
+                      onConfirmDeletePlan();
                     }
                     setDeleteDialogOpen(false);
                     setDeleteScope(null);
@@ -1138,12 +1829,14 @@ function HomeView({
             style={{
               position: "absolute",
               left: 0,
-              top: 0,
+              top: 64,
               bottom: 0,
               width: "50%",
               backgroundColor: "#0f172a",
               paddingVertical: 14,
               paddingHorizontal: 12,
+              zIndex: 20,
+              elevation: 20,
             }}
           >
             {MENU_ITEMS.map((item) => (
@@ -1192,19 +1885,329 @@ function HomeView({
         ) : null}
       </View>
 
-      <TelemetryDrawer
-        visible={telemetryDrawerOpen}
-        onClose={onCloseTelemetry}
-        systemHealth={systemHealth}
-        telemetrySnapshot={telemetrySnapshot}
-        activityFeed={activityFeed}
-        discoveryFeed={discoveryFeed}
-        telemetryError={telemetryError}
-        telemetryLoading={telemetryLoading}
-      />
+      <Modal transparent visible={exportDialogOpen} animationType="fade" onRequestClose={() => setExportDialogOpen(false)}>
+        <Pressable
+          onPress={() => setExportDialogOpen(false)}
+          style={{
+            flex: 1,
+            backgroundColor: "rgba(15,23,42,0.45)",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 24,
+          }}
+        >
+          <Pressable
+            onPress={() => {}}
+            style={{
+              width: "100%",
+              maxWidth: 360,
+              borderRadius: 16,
+              backgroundColor: "#ffffff",
+              padding: 16,
+              borderWidth: 1,
+              borderColor: "#d8e1eb",
+            }}
+          >
+            <Text style={{ color: "#0f172a", fontSize: 18, fontWeight: "900" }}>Export File</Text>
+            <Text style={{ color: "#64748b", fontSize: 12, marginTop: 6 }}>
+              Choose the filename for the exported DXF.
+            </Text>
+            <TextInput
+              value={exportFileName}
+              onChangeText={setExportFileName}
+              autoCapitalize="none"
+              autoCorrect={false}
+              placeholder="generated_plan"
+              style={{
+                marginTop: 12,
+                height: 44,
+                borderWidth: 1,
+                borderColor: "#cbd5e1",
+                borderRadius: 12,
+                paddingHorizontal: 12,
+                backgroundColor: "#f8fafc",
+                color: "#0f172a",
+              }}
+            />
+            <View style={{ flexDirection: "row", gap: 8, marginTop: 14 }}>
+              <Pressable
+                onPress={() => setExportDialogOpen(false)}
+                style={{
+                  flex: 1,
+                  height: 42,
+                  borderRadius: 12,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  backgroundColor: "#e2e8f0",
+                }}
+              >
+                <Text style={{ color: "#0f172a", fontWeight: "800" }}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                onPress={saveExportedPlan}
+                style={{
+                  flex: 1,
+                  height: 42,
+                  borderRadius: 12,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  backgroundColor: "#0b6b68",
+                }}
+              >
+                <Text style={{ color: "#fff", fontWeight: "800" }}>Save</Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
     </View>
   );
 }
+
+function HeaderTelemetryPill({
+  icon,
+  label,
+  value,
+  tone,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  tone: string;
+}) {
+  return (
+    <View style={headerTelemetryStyles.pill}>
+      <View style={headerTelemetryStyles.iconWrap}>{icon}</View>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={headerTelemetryStyles.label}>{label}</Text>
+        <Text style={[headerTelemetryStyles.value, { color: tone }]} numberOfLines={1}>
+          {value}
+        </Text>
+      </View>
+
+    </View>
+  );
+}
+
+function CompassOverlay({
+  telemetrySnapshot,
+  expanded,
+  onToggleExpanded,
+}: {
+  telemetrySnapshot: TelemetrySnapshot | null;
+  expanded: boolean;
+  onToggleExpanded: () => void;
+}) {
+  const hasPosition = telemetrySnapshot?.pos_n != null || telemetrySnapshot?.pos_e != null;
+
+  return (
+    <Pressable style={compassStyles.wrap} hitSlop={10} onPress={onToggleExpanded}>
+      <View style={compassStyles.header}>
+        <View style={compassStyles.dot} />
+        <Text style={compassStyles.title}>{hasPosition ? "Position" : "Compass"}</Text>
+      </View>
+      <View style={compassStyles.body}>
+        <View style={compassStyles.northTick} />
+        <View style={compassStyles.centerRing}>
+          <Text style={compassStyles.centerText}>
+            {expanded ? "N/E" : hasPosition ? "Tap map" : "Tap"}
+          </Text>
+        </View>
+      </View>
+      <View style={compassStyles.values}>
+        {expanded ? (
+          <>
+            <Text style={compassStyles.valueText}>
+              North {telemetrySnapshot?.pos_n == null ? "--" : telemetrySnapshot.pos_n.toFixed(2)}
+            </Text>
+            <Text style={compassStyles.valueText}>
+              East {telemetrySnapshot?.pos_e == null ? "--" : telemetrySnapshot.pos_e.toFixed(2)}
+            </Text>
+          </>
+        ) : (
+          <>
+            <Text style={compassStyles.valueText}>
+              N {telemetrySnapshot?.pos_n == null ? "--" : telemetrySnapshot.pos_n.toFixed(2)}
+            </Text>
+            <Text style={compassStyles.valueText}>
+              E {telemetrySnapshot?.pos_e == null ? "--" : telemetrySnapshot.pos_e.toFixed(2)}
+            </Text>
+          </>
+        )}
+      </View>
+    </Pressable>
+  );
+}
+
+function TelemetryStat({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone: string;
+}) {
+  return (
+    <View style={telemetryStatStyles.card}>
+      <Text style={telemetryStatStyles.label}>{label}</Text>
+      <Text style={[telemetryStatStyles.value, { color: tone }]}>{value}</Text>
+    </View>
+  );
+}
+
+function boolText(value: boolean | null | undefined) {
+  if (value == null) return "n/a";
+  return value ? "YES" : "NO";
+}
+
+function boolTone(value: boolean | null | undefined) {
+  if (value == null) return "#94a3b8";
+  return value ? "#22c55e" : "#ef4444";
+}
+
+function telemetryTone(value: number | null | undefined, lowGood: number, highGood: number) {
+  if (value == null) return "#94a3b8";
+  if (value >= highGood) return "#22c55e";
+  if (value >= lowGood) return "#d97706";
+  return "#ef4444";
+}
+
+const compassStyles = {
+  wrap: {
+    position: "absolute" as const,
+    left: 12,
+    bottom: 12,
+    width: 160,
+    borderRadius: 18,
+    backgroundColor: "rgba(15,23,42,0.9)",
+    borderWidth: 1,
+    borderColor: "rgba(148,163,184,0.24)",
+    padding: 12,
+  },
+  header: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 8,
+  },
+  dot: {
+    width: 8,
+    height: 8,
+    borderRadius: 99,
+    backgroundColor: "#22c55e",
+  },
+  title: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "800" as const,
+    letterSpacing: 0.8,
+    textTransform: "uppercase" as const,
+  },
+  body: {
+    marginTop: 10,
+    height: 58,
+    borderRadius: 16,
+    backgroundColor: "rgba(255,255,255,0.05)",
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    position: "relative" as const,
+  },
+  northTick: {
+    position: "absolute" as const,
+    top: 7,
+    width: 2,
+    height: 12,
+    borderRadius: 99,
+    backgroundColor: "#38bdf8",
+  },
+  centerRing: {
+    width: 36,
+    height: 36,
+    borderRadius: 99,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.24)",
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+  },
+  centerText: {
+    color: "#cbd5e1",
+    fontSize: 10,
+    fontWeight: "700" as const,
+  },
+  values: {
+    marginTop: 10,
+    gap: 2,
+  },
+  valueText: {
+    color: "#e2e8f0",
+    fontSize: 11,
+    fontWeight: "700" as const,
+  },
+} as const;
+
+const telemetryStatStyles = {
+  card: {
+    minWidth: 92,
+    flexGrow: 1,
+    flexBasis: "30%" as const,
+    borderRadius: 14,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  label: {
+    color: "#94a3b8",
+    fontSize: 10,
+    fontWeight: "800" as const,
+    letterSpacing: 0.5,
+    textTransform: "uppercase" as const,
+  },
+  value: {
+    color: "#fff",
+    fontSize: 13,
+    fontWeight: "800" as const,
+    marginTop: 4,
+  },
+} as const;
+
+const headerTelemetryStyles = {
+  pill: {
+    minWidth: 94,
+    flex: 1,
+    flexBasis: "48%" as const,
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 12,
+    backgroundColor: "#f8fafc",
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+  },
+  iconWrap: {
+    width: 28,
+    height: 28,
+    borderRadius: 10,
+    backgroundColor: "#e2e8f0",
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+  },
+  label: {
+    color: "#64748b",
+    fontSize: 9,
+    fontWeight: "800" as const,
+    letterSpacing: 0.7,
+    textTransform: "uppercase" as const,
+  },
+  value: {
+    color: "#0f172a",
+    fontSize: 11,
+    fontWeight: "800" as const,
+    marginTop: 2,
+  },
+} as const;
 
 const telemetryCtaStyles = {
   outer: {
@@ -1270,35 +2273,21 @@ const telemetryCtaStyles = {
   },
 } as const;
 
-function TelemetryDrawer({
+function LineDetailsDrawer({
   visible,
   onClose,
-  systemHealth,
-  telemetrySnapshot,
-  activityFeed,
-  discoveryFeed,
-  telemetryError,
-  telemetryLoading,
+  selectedLine,
+  hasPlan,
+  layerVisibility,
+  setLayerVisibility,
 }: {
   visible: boolean;
   onClose: () => void;
-  systemHealth: SystemHealth | null;
-  telemetrySnapshot: TelemetrySnapshot | null;
-  activityFeed: ActivityEntry[];
-  discoveryFeed: DiscoveredRover[];
-  telemetryError: string;
-  telemetryLoading: boolean;
+  selectedLine: PlanLine | null;
+  hasPlan: boolean;
+  layerVisibility: LayerVisibility;
+  setLayerVisibility: React.Dispatch<React.SetStateAction<LayerVisibility>>;
 }) {
-  const pulse = (label: string, ok: boolean | undefined | null) => ({
-    label,
-    value: ok === undefined || ok === null ? "Unknown" : ok ? "OK" : "Alert",
-    tone: ok ? "#16a34a" : ok === false ? "#dc2626" : "#64748b",
-  });
-  const battery = telemetrySnapshot?.battery_pct;
-  const batteryTone = battery == null ? "#64748b" : battery >= 55 ? "#16a34a" : battery >= 25 ? "#d97706" : "#dc2626";
-  const poseAge = telemetrySnapshot?.pose_age_ms ?? systemHealth?.pose_age_ms ?? null;
-  const poseTone = poseAge == null ? "#64748b" : poseAge <= 500 ? "#16a34a" : poseAge <= 1500 ? "#d97706" : "#dc2626";
-
   return (
     <Modal transparent visible={visible} animationType="slide" onRequestClose={onClose}>
       <Pressable style={{ flex: 1, backgroundColor: "rgba(15,23,42,0.2)" }} onPress={onClose}>
@@ -1307,79 +2296,92 @@ function TelemetryDrawer({
             <Text style={drawerStyles.closeText}>×</Text>
           </Pressable>
           <Text style={drawerStyles.kicker}>Rover Ops</Text>
-          <Text style={drawerStyles.title}>Live system panel</Text>
+          <Text style={drawerStyles.title}>Line Details</Text>
           <Text style={drawerStyles.subtitle}>
-            Compact health, telemetry, discovery, and activity data tuned for the tablet side rail.
+            Swipe right to inspect the selected line in a focused side panel.
           </Text>
 
-          {telemetryError ? <Text style={drawerStyles.error}>{telemetryError}</Text> : null}
-          {telemetryLoading ? <Text style={drawerStyles.loading}>Refreshing live data...</Text> : null}
-
           <View style={drawerStyles.grid}>
-            <StatCard label="ROS node" value={pulse("ROS node", systemHealth?.ros_node)} />
-            <StatCard label="FCU link" value={pulse("FCU link", systemHealth?.fcu_connected)} />
-            <StatCard label="Armed" value={pulse("Armed", telemetrySnapshot?.armed ?? systemHealth?.armed)} />
             <StatCard
-              label="Mode"
+              label="Selection"
               value={{
-                label: "Control mode",
-                value: telemetrySnapshot?.mode ?? systemHealth?.mode ?? "UNKNOWN",
+                label: "Current line",
+                value: selectedLine ? selectedLine.label : "No line selected",
+                tone: selectedLine ? "#0f172a" : "#64748b",
+              }}
+            />
+            <StatCard
+              label="Status"
+              value={{
+                label: "Drawer state",
+                value: selectedLine ? "Loaded" : "Empty",
+                tone: selectedLine ? "#16a34a" : "#d97706",
+              }}
+            />
+            <StatCard
+              label="Layer"
+              value={{
+                label: "Visible layers",
+                value: hasPlan ? "Available" : "No plan",
+                tone: hasPlan ? "#0f172a" : "#64748b",
+              }}
+            />
+            <StatCard
+              label="Info"
+              value={{
+                label: "Line geometry",
+                value: selectedLine ? `${lineLength(selectedLine).toFixed(2)} m` : "n/a",
                 tone: "#0f172a",
               }}
             />
           </View>
 
-          <View style={drawerStyles.stripRow}>
-            <StripMetric label="Battery" value={battery == null ? "n/a" : `${battery.toFixed(0)}%`} tone={batteryTone} />
-            <StripMetric label="Pose age" value={poseAge == null ? "n/a" : `${poseAge.toFixed(0)} ms`} tone={poseTone} />
-            <StripMetric label="RPP" value={telemetrySnapshot?.rpp_state_name ?? String(telemetrySnapshot?.rpp_state ?? systemHealth?.rpp_state ?? "n/a")} tone="#0f172a" />
-          </View>
+          {selectedLine ? (
+            <>
+              <View style={drawerStyles.stripRow}>
+                <StripMetric label="Length" value={`${lineLength(selectedLine).toFixed(2)} m`} tone="#0f172a" />
+                <StripMetric label="Angle" value={`${lineAngle(selectedLine).toFixed(2)}°`} tone="#0f172a" />
+                <StripMetric label="Width" value={`${selectedLine.width.toFixed(2)} m`} tone="#0f172a" />
+              </View>
 
-          <View style={drawerStyles.section}>
-            <SectionTitle title="Telemetry snapshot" />
-            <MiniGrid
-              items={[
-                ["Speed", telemetrySnapshot?.speed_m_s == null ? "n/a" : `${telemetrySnapshot.speed_m_s.toFixed(2)} m/s`],
-                ["Heading", telemetrySnapshot?.heading_ned_deg == null ? "n/a" : `${telemetrySnapshot.heading_ned_deg.toFixed(1)}°`],
-                ["Cross-track", telemetrySnapshot?.xtrack_m == null ? "n/a" : `${telemetrySnapshot.xtrack_m.toFixed(2)} m`],
-                ["Goal dist", telemetrySnapshot?.dist_to_goal_m == null ? "n/a" : `${telemetrySnapshot.dist_to_goal_m.toFixed(2)} m`],
-                ["Lookahead", telemetrySnapshot?.lookahead_m == null ? "n/a" : `${telemetrySnapshot.lookahead_m.toFixed(2)} m`],
-                ["Satellites", telemetrySnapshot?.gps_sat == null ? "n/a" : `${telemetrySnapshot.gps_sat}`],
-              ]}
-            />
-          </View>
+              <View style={drawerStyles.section}>
+                <SectionTitle title="Geometry" />
+                <View style={{ borderRadius: 16, padding: 12, backgroundColor: "#111827", borderWidth: 1, borderColor: "rgba(148,163,184,0.16)", gap: 10 }}>
+                  <ListRow left="Line label" right={selectedLine.label} tone="#fff" />
+                  <ListRow left="Layer" right={selectedLine.layer} tone="#fff" />
+                  <ListRow left="From" right={`(${selectedLine.from.x.toFixed(2)}, ${selectedLine.from.y.toFixed(2)})`} tone="#fff" />
+                  <ListRow left="To" right={`(${selectedLine.to.x.toFixed(2)}, ${selectedLine.to.y.toFixed(2)})`} tone="#fff" />
+                  <ListRow left="Point IDs" right={`${selectedLine.from.id} -> ${selectedLine.to.id}`} tone="#fff" />
+                  <ListRow left="Line ID" right={selectedLine.id} tone="#fff" />
+                </View>
+              </View>
 
-          <View style={drawerStyles.section}>
-            <SectionTitle title="Discover" />
-            <View style={drawerStyles.list}>
-              {discoveryFeed.length > 0 ? discoveryFeed.slice(0, 4).map((item) => (
-                <ListRow
-                  key={item.id}
-                  left={`${item.name}`}
-                  right={`${item.host}:${item.port}`}
-                  tone="#16a34a"
-                />
-              )) : (
-                <EmptyLine text="No beacons discovered on the LAN." />
-              )}
+              <View style={drawerStyles.section}>
+                <SectionTitle title="Visible layers" />
+                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                  <CompactLayerToggle
+                    label="Boundary"
+                    value={layerVisibility.boundary}
+                    onToggle={() => setLayerVisibility((prev) => ({ ...prev, boundary: !prev.boundary }))}
+                  />
+                  <CompactLayerToggle
+                    label="Marking"
+                    value={layerVisibility.marking}
+                    onToggle={() => setLayerVisibility((prev) => ({ ...prev, marking: !prev.marking }))}
+                  />
+                  <CompactLayerToggle
+                    label="Center"
+                    value={layerVisibility.center}
+                    onToggle={() => setLayerVisibility((prev) => ({ ...prev, center: !prev.center }))}
+                  />
+                </View>
+              </View>
+            </>
+          ) : (
+            <View style={[drawerStyles.section, { marginTop: 18 }]}>
+              <EmptyLine text="Tap a highlighted line in the canvas to see its details here." />
             </View>
-          </View>
-
-          <View style={drawerStyles.section}>
-            <SectionTitle title="Activity" />
-            <View style={drawerStyles.list}>
-              {activityFeed.length > 0 ? activityFeed.slice(0, 5).map((item, index) => (
-                <ListRow
-                  key={`${item.timestamp}-${index}`}
-                  left={item.message}
-                  right={item.level.toUpperCase()}
-                  tone={item.level === "error" ? "#dc2626" : item.level === "warn" ? "#d97706" : "#16a34a"}
-                />
-              )) : (
-                <EmptyLine text="Activity log is empty right now." />
-              )}
-            </View>
-          </View>
+          )}
         </View>
       </Pressable>
     </Modal>
@@ -1535,47 +2537,66 @@ function CompactLayerToggle({
   );
 }
 
-function MetricChip({ label, value }: { label: string; value: string }) {
+function DetailStatCard({ label, value }: { label: string; value: string }) {
   return (
     <View
       style={{
+        flexBasis: "48%",
         flexGrow: 1,
-        minWidth: 112,
-        borderRadius: 14,
+        minWidth: 120,
+        borderRadius: 16,
         borderWidth: 1,
         borderColor: "#d8e1eb",
         backgroundColor: "#ffffff",
         paddingHorizontal: 12,
-        paddingVertical: 10,
+        paddingVertical: 12,
+        gap: 6,
       }}
     >
-      <Text style={{ color: "#64748b", fontSize: 11, fontWeight: "800", textTransform: "uppercase", letterSpacing: 0.6 }}>
+      <Text style={{ color: "#64748b", fontSize: 10, fontWeight: "800", textTransform: "uppercase", letterSpacing: 0.8 }}>
         {label}
       </Text>
-      <Text style={{ color: "#0f172a", fontSize: 15, fontWeight: "700", marginTop: 4 }}>
+      <Text style={{ color: "#0f172a", fontSize: 15, fontWeight: "800" }}>
         {value}
       </Text>
     </View>
   );
 }
 
-function MetricRow({ label, value }: { label: string; value: string }) {
+function DetailLine({ label, value }: { label: string; value: string }) {
   return (
     <View
       style={{
-        paddingHorizontal: 12,
-        paddingVertical: 11,
-        borderRadius: 14,
-        backgroundColor: "#ffffff",
-        borderWidth: 1,
-        borderColor: "#e2e8f0",
         flexDirection: "row",
+        alignItems: "center",
         justifyContent: "space-between",
-        gap: 12,
+        gap: 16,
       }}
     >
-      <Text style={{ color: "#64748b", fontSize: 13, fontWeight: "700" }}>{label}</Text>
-      <Text style={{ color: "#0f172a", fontSize: 13, fontWeight: "700", flexShrink: 1, textAlign: "right" }}>{value}</Text>
+      <Text
+        style={{
+          color: "#64748b",
+          fontSize: 12,
+          fontWeight: "800",
+          textTransform: "uppercase",
+          letterSpacing: 0.5,
+          width: 92,
+          flexShrink: 0,
+        }}
+      >
+        {label}
+      </Text>
+      <Text
+        style={{
+          color: "#0f172a",
+          fontSize: 13,
+          fontWeight: "700",
+          flex: 1,
+          textAlign: "right",
+        }}
+      >
+        {value}
+      </Text>
     </View>
   );
 }
@@ -1586,16 +2607,13 @@ function SectionScreen(props: {
   lines: PlanLine[];
   selectedLineId: string | null;
   onBack: () => void;
-  onNavigate: (p: Page) => void;
-  onImport: () => void;
-  onImportCsv: () => void;
-  onImportDxf: () => void;
   onSelectLine: (id: string | null) => void;
   onGenerateTemplate: (name: string, lines: PlanLine[]) => void;
-  onOpenFieldGenerator: () => void;
   layerVisibility: LayerVisibility;
   setLayerVisibility: React.Dispatch<React.SetStateAction<LayerVisibility>>;
   setImportedPlan: React.Dispatch<React.SetStateAction<ImportedPlan | null>>;
+  onRunTemplate: (name: string, lines: PlanLine[]) => Promise<void>;
+  missionFileReady: boolean;
   toggleA: boolean;
   toggleB: boolean;
   toggleC: boolean;
@@ -1608,56 +2626,26 @@ function SectionScreen(props: {
   setToggleD: (v: boolean) => void;
   setDelayA: (v: number) => void;
   setDelayB: (v: number) => void;
+  backendPaths: any[];
+  selectedPathName: string | null;
+  onSelectPath: (name: string) => void;
+  onLoadSelectedPath: () => void;
+  missionActionBusy: boolean;
 }) {
   const { title, page, onBack } = props;
-  const [moreOpen, setMoreOpen] = useState(false);
 
   return (
     <View style={{ flex: 1, backgroundColor: BG }}>
-      <TopBar
-        title={title}
-        onBack={onBack}
-        onMorePress={
-          page === "fields" ? () => setMoreOpen(true) : undefined
-        }
-      />
+      <TopBar title={title} onBack={onBack} />
 
       {page === "fields" ? <FieldsPage {...props} /> : null}
-      {page === "fields_csv_import" ? <FieldsImportPage {...props} importType="csv" /> : null}
-      {page === "fields_dxf_import" ? <FieldsImportPage {...props} importType="dxf" /> : null}
-      {page === "templates" ? <TemplatesPage onGenerateTemplate={props.onGenerateTemplate} /> : null}
+      {page === "templates" ? <TemplatesPage onGenerateTemplate={props.onGenerateTemplate} onRunTemplate={props.onRunTemplate} /> : null}
       {page === "swozi" ? <SwoziPage {...props} /> : null}
       {page === "status" ? <StatusPage /> : null}
       {page === "positioning" ? <PositioningPage {...props} /> : null}
       {page === "settings" ? <SettingsPage {...props} /> : null}
       {page === "howto" ? <HowToPage /> : null}
       {page === "about" ? <AboutPage /> : null}
-
-      <Modal transparent visible={moreOpen} animationType="fade" onRequestClose={() => setMoreOpen(false)}>
-        <Pressable style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.15)" }} onPress={() => setMoreOpen(false)}>
-          <View style={{ position: "absolute", right: 12, top: 72, width: 220, backgroundColor: "#fff", borderRadius: 12, borderWidth: 1, borderColor: "#ddd", overflow: "hidden" }}>
-            <Pressable
-              onPress={() => {
-                setMoreOpen(false);
-                props.onNavigate("fields_csv_import");
-              }}
-              style={{ paddingVertical: 12, paddingHorizontal: 14 }}
-            >
-              <Text style={{ color: "#111", fontSize: 16 }}>CSV import</Text>
-            </Pressable>
-            <View style={{ height: 1, backgroundColor: "#eee" }} />
-            <Pressable
-              onPress={() => {
-                setMoreOpen(false);
-                props.onNavigate("fields_dxf_import");
-              }}
-              style={{ paddingVertical: 12, paddingHorizontal: 14 }}
-            >
-              <Text style={{ color: "#111", fontSize: 16 }}>DXF import</Text>
-            </Pressable>
-          </View>
-        </Pressable>
-      </Modal>
     </View>
   );
 }
@@ -1722,7 +2710,7 @@ function ConnectionView({
             elevation: 5,
           }}
         >
-            <View style={{ gap: 14 }}>
+          <View style={{ gap: 14 }}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
               <View
                 style={{
@@ -1791,7 +2779,7 @@ function ConnectionView({
                 How it works
               </Text>
               <Text style={{ color: "#94a3b8", fontSize: 13, lineHeight: 20, marginTop: 6 }}>
-                The connection screen auto-scans the network, shows any discovered rover targets, and keeps a manual address fallback if discovery does not find the server.
+                The connection screen auto-scans the network, shows any discovered rover targets, and lets you connect dynamically.
               </Text>
             </View>
           </View>
@@ -1813,67 +2801,32 @@ function ConnectionView({
           }}
         >
           <View style={{ flex: 1, justifyContent: "space-between", gap: 14 }}>
-            <View style={{ gap: 12 }}>
-              <View>
-                <Text style={{ color: "#0f172a", fontSize: 18, fontWeight: "800" }}>Manual backend address</Text>
-                <Text style={{ color: "#64748b", marginTop: 4, lineHeight: 20 }}>
-                  Type the laptop IP if the backend is not auto-discovered.
-                </Text>
-              </View>
-
-              <TextInput
-                value={manualHost}
-                onChangeText={onManualHostChange}
-                placeholder="http://192.168.1.28:5001"
-                placeholderTextColor="#94a3b8"
-                style={{
-                  borderWidth: 1,
-                  borderColor: "#cbd5e1",
-                  borderRadius: 16,
-                  paddingHorizontal: 14,
-                  paddingVertical: 14,
-                  color: "#0f172a",
-                  backgroundColor: "#f8fafc",
-                }}
-              />
-
-              <View style={{ flexDirection: "row", gap: 10, flexWrap: "wrap" }}>
-                <Pressable
-                  onPress={() => onSelect(manualHost)}
-                  style={{
-                    backgroundColor: "#0f172a",
-                    paddingHorizontal: 16,
-                    paddingVertical: 13,
-                    borderRadius: 16,
-                  }}
-                >
-                  <Text style={{ color: "#fff", fontWeight: "800" }}>Use manual address</Text>
-                </Pressable>
+            <View style={{ flex: 1, minHeight: 0 }}>
+              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
+                <View style={{ flex: 1, minWidth: 150 }}>
+                  <Text style={{ color: "#0f172a", fontSize: 18, fontWeight: "800" }}>Available Connections</Text>
+                  <Text style={{ color: "#64748b", marginTop: 4, fontSize: 13, lineHeight: 18 }}>
+                    Select an active rover backend discovered on your network.
+                  </Text>
+                </View>
                 <Pressable
                   onPress={onRefresh}
+                  disabled={wsStatus === "scanning"}
                   style={{
                     backgroundColor: "#e2e8f0",
-                    paddingHorizontal: 16,
-                    paddingVertical: 13,
-                    borderRadius: 16,
+                    paddingHorizontal: 12,
+                    paddingVertical: 8,
+                    borderRadius: 12,
+                    alignSelf: "flex-start",
                   }}
                 >
-                  <Text style={{ color: "#0f172a", fontWeight: "800" }}>
+                  <Text style={{ color: "#0f172a", fontSize: 12, fontWeight: "800" }}>
                     {wsStatus === "scanning" ? "Scanning..." : "Refresh scan"}
                   </Text>
                 </Pressable>
               </View>
-            </View>
 
-            <View style={{ flex: 1, minHeight: 0 }}>
-              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                <Text style={{ color: "#0f172a", fontSize: 18, fontWeight: "800" }}>Discovered backend</Text>
-                <Text style={{ color: "#64748b", fontSize: 12, fontWeight: "700" }}>
-                  {discoveredRovers.length} found
-                </Text>
-              </View>
-
-              <View style={{ flex: 1, gap: 10 }}>
+              <View style={{ flex: 1, gap: 10, marginTop: 8 }}>
                 {discoveredRovers.length > 0 ? (
                   <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
                     {discoveredRovers.map((rover) => {
@@ -1927,10 +2880,11 @@ function ConnectionView({
                       backgroundColor: "#f8fafc",
                       padding: 16,
                       justifyContent: "center",
+                      alignItems: "center",
                     }}
                   >
-                    <Text style={{ color: "#334155", fontSize: 15, lineHeight: 22 }}>
-                      No backend found yet. Keep the backend running and tap Refresh to scan again.
+                    <Text style={{ color: "#334155", fontSize: 15, lineHeight: 22, textAlign: "center" }}>
+                      No active backend found. Ensure the server is running on the laptop and tap "Refresh scan" above.
                     </Text>
                   </View>
                 )}
@@ -2065,123 +3019,24 @@ const connectionStyles = {
 };
 
 function FieldsPage({
-  importedPlan,
   lines,
   selectedLineId,
-  onImport,
-  onOpenFieldGenerator,
   layerVisibility,
+  backendPaths,
+  selectedPathName,
+  onSelectPath,
+  onLoadSelectedPath,
+  missionActionBusy,
 }: {
-  importedPlan: ImportedPlan | null;
   lines: PlanLine[];
   selectedLineId: string | null;
-  onImport: () => void;
-  onOpenFieldGenerator: () => void;
   layerVisibility: LayerVisibility;
-  }) {
-  return (
-    <View style={{ flex: 1, flexDirection: "row", padding: 16, gap: 14 }}>
-      <View
-        style={{
-          flex: 1.1,
-          backgroundColor: "#f8fafc",
-          borderRadius: 18,
-          overflow: "hidden",
-          borderWidth: 1,
-          borderColor: "#d8e1eb",
-          shadowColor: "#0f172a",
-          shadowOpacity: 0.05,
-          shadowRadius: 16,
-          shadowOffset: { width: 0, height: 8 },
-          elevation: 2,
-        }}
-      >
-        <PlanPreview lines={lines} visibility={layerVisibility} selectedLineId={selectedLineId} />
-      </View>
-      <View style={{ flex: 1, gap: 10 }}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-          <View style={{ width: 82, height: 82, borderWidth: 2, borderColor: "#111", borderRadius: 12, backgroundColor: "#f11212", alignItems: "center", justifyContent: "center" }}>
-            <Text style={{ color: "#fff", fontSize: 38 / 2 }}>☁</Text>
-          </View>
-          <Text style={{ color: "#666", fontSize: 24 / 2 }}>Account credentials are not valid.</Text>
-        </View>
-        <Text style={{ color: "#666", fontSize: 24 / 2 }}>Select Field.</Text>
-        <View style={{ height: 50, backgroundColor: "#cdcdcf" }} />
-        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-          <Text style={{ color: "#888", fontSize: 22 / 2 }}>☑ Show All</Text>
-          <Text style={{ color: "#888", fontSize: 22 / 2 }}>Sort by Distance ⏽</Text>
-        </View>
-        <Text style={{ color: "#555", fontSize: 42 / 2, marginTop: 8 }}>
-          File: {importedPlan?.fileName ?? "soccer_pitch_fifa_edited.dxf"}
-        </Text>
-        <Text style={{ color: "#555", fontSize: 42 / 2 }}>Units: Meters</Text>
-        <Text style={{ color: "#555", fontSize: 42 / 2 }}>CRS: No Coordinate Reference System</Text>
-        <Text style={{ color: "#555", fontSize: 42 / 2 }}>Layers: CENTER</Text>
-        <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
-          {["＋", "🗑", "✎", "⧉", "▢", "▭"].map((t, i) => (
-            <View key={i} style={{ flex: 1, height: 110 / 2, borderWidth: 1, borderColor: "#bbb", backgroundColor: "#d6d6d7", justifyContent: "center", alignItems: "center" }}>
-              <Text style={{ color: "#b8b8b8", fontSize: 32 / 2 }}>{t}</Text>
-            </View>
-          ))}
-        </View>
-        <Pressable
-          onPress={onOpenFieldGenerator}
-          style={{
-            height: 48,
-            marginTop: 8,
-            backgroundColor: "#eef2f7",
-            borderRadius: 12,
-            borderWidth: 1,
-            borderColor: "#cbd5e1",
-            alignItems: "center",
-            justifyContent: "center",
-            flexDirection: "row",
-            gap: 8,
-          }}
-        >
-          <FilePenLine size={18} color="#0f172a" />
-          <Text style={{ color: "#0f172a", fontSize: 15, fontWeight: "700" }}>Field Generator</Text>
-        </Pressable>
-      </View>
-    </View>
-  );
-}
-
-function FieldsImportPage({
-  importType,
-  importedPlan,
-  lines,
-  selectedLineId,
-  onImportCsv,
-  onImportDxf,
-  layerVisibility,
-  setLayerVisibility,
-  setImportedPlan,
-}: {
-  importType: "csv" | "dxf";
-  importedPlan: ImportedPlan | null;
-  lines: PlanLine[];
-  selectedLineId: string | null;
-  onImportCsv: () => void;
-  onImportDxf: () => void;
-  layerVisibility: LayerVisibility;
-  setLayerVisibility: React.Dispatch<React.SetStateAction<LayerVisibility>>;
-  setImportedPlan: React.Dispatch<React.SetStateAction<ImportedPlan | null>>;
+  backendPaths: any[];
+  selectedPathName: string | null;
+  onSelectPath: (name: string) => void;
+  onLoadSelectedPath: () => void;
+  missionActionBusy: boolean;
 }) {
-  const units =
-    importedPlan?.fileName?.toLowerCase().includes("inch") ||
-    importedPlan?.fileName?.toLowerCase().includes("inches")
-      ? "Inches"
-      : "Meters";
-
-  const unitLabel = importType === "dxf" ? "DXF Units" : "CSV Units";
-
-  const onImportPress = importType === "dxf" ? onImportDxf : onImportCsv;
-
-  const toggleLayer = (key: keyof LayerVisibility) => {
-    setLayerVisibility((prev) => ({ ...prev, [key]: !prev[key] }));
-  };
-
   return (
     <View style={{ flex: 1, flexDirection: "row", padding: 16, gap: 14 }}>
       <View
@@ -2201,215 +3056,93 @@ function FieldsImportPage({
       >
         <PlanPreview lines={lines} visibility={layerVisibility} selectedLineId={selectedLineId} />
       </View>
-
-      <View style={{ flex: 1, gap: 10 }}>
-        <Text style={{ color: "#666", fontSize: 24 / 2 }}>Current field name</Text>
-        <Text style={{ color: "#555", fontSize: 42 / 2, fontWeight: "700" }}>
-          {importedPlan?.fileName ?? "No file imported"}
-        </Text>
-
-        <Text style={{ color: "#666", fontSize: 24 / 2, marginTop: 6 }}>Rename file</Text>
-        <TextInput
-          value={importedPlan?.fileName ?? ""}
-          onChangeText={(text) =>
-            setImportedPlan((prev) => (prev ? { ...prev, fileName: text } : prev))
-          }
-          placeholder="Enter file name"
-          style={{
-            height: 44,
-            borderWidth: 1,
-            borderColor: "#bbb",
-            backgroundColor: "#fff",
-            paddingHorizontal: 12,
-            borderRadius: 10,
-            color: "#111",
-          }}
-        />
-
-        <Text style={{ color: "#555", fontSize: 42 / 2 }}>
-          {unitLabel}: {units}
-        </Text>
-        <Text style={{ color: "#555", fontSize: 42 / 2 }}>CRS: No Coordinate Reference System</Text>
-
-        <View style={{ marginTop: 8 }}>
-          <Text style={{ color: "#555", fontSize: 42 / 2, marginBottom: 8 }}>Layers</Text>
-          <LayerRow label="Boundary" value={layerVisibility.boundary} onToggle={() => toggleLayer("boundary")} />
-          <LayerRow label="Markings" value={layerVisibility.marking} onToggle={() => toggleLayer("marking")} />
-          <LayerRow label="Center" value={layerVisibility.center} onToggle={() => toggleLayer("center")} />
-        </View>
-
-        <Pressable
-          onPress={onImportPress}
-          style={{
-            marginTop: 12,
-            height: 48,
-            backgroundColor: "#111",
-            borderRadius: 12,
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          <Text style={{ color: "#fff", fontSize: 16, fontWeight: "700" }}>
-            Import {importType.toUpperCase()}
+      <View style={{ flex: 1, gap: 12 }}>
+        <View style={{ borderRadius: 14, padding: 14, backgroundColor: "#0f172a" }}>
+          <Text style={{ color: "#94a3b8", fontSize: 11, fontWeight: "800", letterSpacing: 1.2, textTransform: "uppercase" }}>
+            Field Workspace
           </Text>
-        </Pressable>
-      </View>
-    </View>
-  );
-}
+          <Text style={{ color: "#fff", fontSize: 18, fontWeight: "900", marginTop: 5 }}>
+            Select Rover Path
+          </Text>
+          <Text style={{ color: "#cbd5e1", fontSize: 12, lineHeight: 17, marginTop: 6 }}>
+            Select a path from the list below to preview it and load it on the rover.
+          </Text>
+        </View>
 
-const FIELD_GENERATOR_PRESETS = [
-  { name: "Reference Sample", width: 100, height: 60 },
-  { name: "Football", width: 100, height: 64 },
-  { name: "Hockey", width: 91.4, height: 55 },
-  { name: "Cricket Pitch", width: 20.12, height: 3.05 },
-  { name: "Volleyball", width: 18, height: 9 },
-  { name: "Badminton", width: 13.4, height: 6.1 },
-  { name: "Kabaddi", width: 13, height: 10 },
-  { name: "Kho-Kho", width: 27, height: 16 },
-] as const;
-
-function FieldGeneratorModal({
-  visible,
-  onClose,
-  onGenerate,
-}: {
-  visible: boolean;
-  onClose: () => void;
-  onGenerate: (name: string, lines: PlanLine[]) => void;
-}) {
-  const presets = FIELD_GENERATOR_PRESETS;
-  const [selected, setSelected] = useState<(typeof FIELD_GENERATOR_PRESETS)[number]>(presets[0]);
-  const [useDefault, setUseDefault] = useState(true);
-  const [customWidth, setCustomWidth] = useState(String(presets[0].width));
-  const [customHeight, setCustomHeight] = useState(String(presets[0].height));
-
-  useEffect(() => {
-    const preset = presets.find((item) => item.name === selected.name) ?? presets[0];
-    if (useDefault) {
-      setCustomWidth(String(preset.width));
-      setCustomHeight(String(preset.height));
-    }
-  }, [selected, useDefault]);
-
-  const selectPreset = (preset: typeof presets[number]) => {
-    setSelected(preset);
-    if (useDefault) {
-      setCustomWidth(String(preset.width));
-      setCustomHeight(String(preset.height));
-    }
-  };
-
-  const handleGenerate = () => {
-    const width = useDefault ? selected.width : Number(customWidth) || selected.width;
-    const height = useDefault ? selected.height : Number(customHeight) || selected.height;
-    const lines = buildTemplate(selected.name, width, height);
-    onGenerate(selected.name, lines);
-  };
-
-  return (
-    <Modal transparent visible={visible} animationType="fade" onRequestClose={onClose}>
-      <Pressable style={generatorStyles.backdrop} onPress={onClose}>
-        <Pressable style={generatorStyles.sheet} onPress={() => {}}>
-          <View style={generatorStyles.sheetHeader}>
-            <View style={{ flex: 1 }}>
-              <Text style={generatorStyles.sheetTitle}>Field Generator</Text>
-              <Text style={generatorStyles.sheetSubtitle}>
-                Pick a sport, use the default size or enter your own dimensions.
+        <View style={{ flex: 1, borderRadius: 14, padding: 14, backgroundColor: "#ffffff", borderWidth: 1, borderColor: "#d8e1eb", minHeight: 180 }}>
+          <Text style={{ color: "#64748b", fontSize: 11, fontWeight: "800", letterSpacing: 1, textTransform: "uppercase", marginBottom: 8 }}>
+            Select Path from Rover
+          </Text>
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ gap: 8 }}>
+            {backendPaths.length === 0 ? (
+              <Text style={{ color: "#64748b", fontSize: 13, fontStyle: "italic", textAlign: "center", marginTop: 20 }}>
+                No paths found on rover or offline.
               </Text>
-            </View>
-            <Pressable onPress={onClose} hitSlop={12} style={generatorStyles.closePill}>
-              <Text style={generatorStyles.closeText}>×</Text>
-            </Pressable>
-          </View>
-
-          <View style={generatorStyles.toggleRow}>
-            <Pressable
-              onPress={() => setUseDefault(true)}
-              style={[generatorStyles.toggleChip, useDefault && generatorStyles.toggleChipActive]}
-            >
-              <Text style={[generatorStyles.toggleChipText, useDefault && generatorStyles.toggleChipTextActive]}>
-                Default size
-              </Text>
-            </Pressable>
-            <Pressable
-              onPress={() => setUseDefault(false)}
-              style={[generatorStyles.toggleChip, !useDefault && generatorStyles.toggleChipActive]}
-            >
-              <Text style={[generatorStyles.toggleChipText, !useDefault && generatorStyles.toggleChipTextActive]}>
-                Custom size
-              </Text>
-            </Pressable>
-          </View>
-
-          <ScrollView style={{ maxHeight: 260 }} showsVerticalScrollIndicator={false}>
-            <View style={generatorStyles.presetGrid}>
-              {presets.map((preset) => {
-                const active = preset.name === selected.name;
+            ) : (
+              backendPaths.map((path) => {
+                const isSelected = selectedPathName === path.name;
                 return (
                   <Pressable
-                    key={preset.name}
-                    onPress={() => selectPreset(preset)}
-                    style={[generatorStyles.presetCard, active && generatorStyles.presetCardActive]}
+                    key={path.name}
+                    onPress={() => onSelectPath(path.name)}
+                    style={{
+                      borderRadius: 10,
+                      padding: 10,
+                      backgroundColor: isSelected ? "#0b6b68" : "#f8fafc",
+                      borderWidth: 1,
+                      borderColor: isSelected ? "#0b6b68" : "#e2e8f0",
+                    }}
                   >
-                    <Text style={[generatorStyles.presetTitle, active && generatorStyles.presetTitleActive]}>
-                      {preset.name}
+                    <Text style={{ color: isSelected ? "#ffffff" : "#0f172a", fontWeight: "800", fontSize: 14 }}>
+                      {path.name}
                     </Text>
-                    <Text style={[generatorStyles.presetMeta, active && generatorStyles.presetMetaActive]}>
-                      {preset.width} m x {preset.height} m
+                    <Text style={{ color: isSelected ? "#d1fae5" : "#64748b", fontSize: 11, marginTop: 2 }}>
+                      {path.description || `Points: ${path.num_points}`}
                     </Text>
                   </Pressable>
                 );
-              })}
-            </View>
+              })
+            )}
           </ScrollView>
-
-          {!useDefault ? (
-            <View style={{ gap: 10, marginTop: 14 }}>
-              <View style={generatorStyles.inputRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={generatorStyles.inputLabel}>Width (m)</Text>
-                  <TextInput
-                    value={customWidth}
-                    onChangeText={setCustomWidth}
-                    keyboardType="numeric"
-                    style={generatorStyles.input}
-                    placeholder="Custom width"
-                  />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={generatorStyles.inputLabel}>Height (m)</Text>
-                  <TextInput
-                    value={customHeight}
-                    onChangeText={setCustomHeight}
-                    keyboardType="numeric"
-                    style={generatorStyles.input}
-                    placeholder="Custom height"
-                  />
-                </View>
-              </View>
-            </View>
+          {selectedPathName ? (
+            <Pressable
+              onPress={onLoadSelectedPath}
+              disabled={missionActionBusy}
+              style={{
+                marginTop: 10,
+                height: 44,
+                borderRadius: 12,
+                alignItems: "center",
+                justifyContent: "center",
+                backgroundColor: missionActionBusy ? "#94a3b8" : "#2563eb",
+              }}
+            >
+              <Text style={{ color: "#fff", fontSize: 14, fontWeight: "800" }}>
+                {missionActionBusy ? "Loading..." : "Load Path"}
+              </Text>
+            </Pressable>
           ) : null}
-
-          <Pressable onPress={handleGenerate} style={generatorStyles.generateButton}>
-            <Text style={generatorStyles.generateButtonText}>Generate Field</Text>
-          </Pressable>
-        </Pressable>
-      </Pressable>
-    </Modal>
+        </View>
+      </View>
+    </View>
   );
 }
 
+
+
 function TemplatesPage({
   onGenerateTemplate,
+  onRunTemplate,
 }: {
   onGenerateTemplate: (name: string, lines: PlanLine[]) => void;
+  onRunTemplate: (name: string, lines: PlanLine[]) => Promise<void>;
 }) {
   const [selected, setSelected] = useState("Football");
   const [useDefault, setUseDefault] = useState(true);
   const [customW, setCustomW] = useState("100");
   const [customH, setCustomH] = useState("64");
   const [generated, setGenerated] = useState<PlanLine[] | null>(null);
+  const [busy, setBusy] = useState(false);
 
   const templates = ["Reference Sample", "Football", "Volleyball", "Badminton", "Kabaddi", "Kho-Kho", "Hockey", "Cricket Pitch"];
 
@@ -2435,36 +3168,78 @@ function TemplatesPage({
     Alert.alert("Exported", `DXF saved to ${uri}`);
   };
 
+  const uploadAndRun = async () => {
+    const lines = generated ?? (useDefault ? buildTemplate(selected, defaultDimensions(selected).width, defaultDimensions(selected).height) : buildTemplate(selected, Number(customW) || 10, Number(customH) || 10));
+    setGenerated(lines);
+    onGenerateTemplate(selected, lines);
+    setBusy(true);
+    try {
+      await onRunTemplate(selected, lines);
+    } catch (error) {
+      Alert.alert("Run failed", error instanceof Error ? error.message : "Could not upload and start the template.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <ScrollView style={{ flex: 1, padding: 18 }}>
-      <Text style={secH}>Templates</Text>
-      <Text style={itemT}>Pick a preset field and generate its default or custom layout.</Text>
-      {templates.map((template) => (
-        <Pressable
-          key={template}
-          onPress={() => setSelected(template)}
-          style={{ marginTop: 10, padding: 14, borderRadius: 12, backgroundColor: "#fff", borderWidth: 1, borderColor: "#ccc" }}
-        >
-          <Text style={itemH}>{template}</Text>
-          <Text style={itemT}>{selected === template ? "Selected" : "Tap to select"}</Text>
-        </Pressable>
-      ))}
-      <View style={{ marginTop: 16, padding: 14, borderRadius: 12, backgroundColor: "#fff", borderWidth: 1, borderColor: "#ccc" }}>
+      <View style={{ borderRadius: 20, padding: 18, backgroundColor: "#0f172a", marginBottom: 16 }}>
+        <Text style={{ color: "#94a3b8", fontSize: 11, fontWeight: "800", letterSpacing: 1.2, textTransform: "uppercase" }}>
+          Templates
+        </Text>
+        <Text style={{ color: "#fff", fontSize: 24, fontWeight: "900", marginTop: 6 }}>
+          Generate, export, and run field layouts
+        </Text>
+        <Text style={{ color: "#cbd5e1", fontSize: 13, lineHeight: 19, marginTop: 8 }}>
+          The selected layout can be uploaded to the backend and started immediately.
+        </Text>
+      </View>
+
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}>
+        {templates.map((template) => (
+          <Pressable
+            key={template}
+            onPress={() => setSelected(template)}
+            style={{
+              flexBasis: "48%",
+              minWidth: 160,
+              padding: 14,
+              borderRadius: 16,
+              backgroundColor: selected === template ? "#0f172a" : "#ffffff",
+              borderWidth: 1,
+              borderColor: selected === template ? "#0f172a" : "#d8e1eb",
+            }}
+          >
+            <Text style={{ color: selected === template ? "#fff" : "#0f172a", fontSize: 15, fontWeight: "800" }}>{template}</Text>
+            <Text style={{ color: selected === template ? "#cbd5e1" : "#64748b", fontSize: 12, marginTop: 4 }}>
+              {selected === template ? "Selected" : "Tap to select"}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+
+      <View style={{ marginTop: 16, padding: 16, borderRadius: 18, backgroundColor: "#ffffff", borderWidth: 1, borderColor: "#d8e1eb" }}>
         <RowToggle label="Default size" value={useDefault} onChange={setUseDefault} />
         {!useDefault ? (
-          <View style={{ gap: 8, marginTop: 12 }}>
+          <View style={{ gap: 10, marginTop: 12 }}>
             <TextInput value={customW} onChangeText={setCustomW} placeholder="Width (m)" keyboardType="numeric" style={inputStyle} />
             <TextInput value={customH} onChangeText={setCustomH} placeholder="Height (m)" keyboardType="numeric" style={inputStyle} />
           </View>
         ) : null}
-        <Pressable onPress={generate} style={{ marginTop: 14, padding: 14, backgroundColor: "#111", borderRadius: 12 }}>
-          <Text style={{ color: "#fff", textAlign: "center", fontWeight: "700" }}>Generate Template</Text>
-        </Pressable>
-        {generated ? (
-          <Pressable onPress={exportDxf} style={{ marginTop: 10, padding: 14, backgroundColor: "#0f988f", borderRadius: 12 }}>
-            <Text style={{ color: "#fff", textAlign: "center", fontWeight: "700" }}>Export DXF</Text>
+
+        <View style={{ flexDirection: "row", gap: 10, marginTop: 14 }}>
+          <Pressable onPress={generate} style={{ flex: 1, padding: 14, backgroundColor: "#0f172a", borderRadius: 14 }}>
+            <Text style={{ color: "#fff", textAlign: "center", fontWeight: "800" }}>Generate</Text>
           </Pressable>
-        ) : null}
+          <Pressable onPress={uploadAndRun} disabled={busy} style={{ flex: 1, padding: 14, backgroundColor: busy ? "#94a3b8" : "#0b6b68", borderRadius: 14 }}>
+            <Text style={{ color: "#fff", textAlign: "center", fontWeight: "800" }}>{busy ? "Running..." : "Upload & Start"}</Text>
+          </Pressable>
+        </View>
+
+        <Pressable onPress={exportDxf} style={{ marginTop: 10, padding: 14, backgroundColor: "#eef2f7", borderRadius: 14, borderWidth: 1, borderColor: "#cbd5e1" }}>
+          <Text style={{ color: "#0f172a", textAlign: "center", fontWeight: "700" }}>Export DXF</Text>
+        </Pressable>
       </View>
     </ScrollView>
   );
@@ -2488,6 +3263,123 @@ function LayerRow({ label, value, onToggle }: { label: string; value: boolean; o
         {value ? <Text style={{ color: "#fff", fontSize: 14, fontWeight: "800" }}>✓</Text> : null}
       </View>
       <Text style={{ color: "#333", fontSize: 16 }}>{label}</Text>
+    </Pressable>
+  );
+}
+
+function ActionBar({
+  title,
+  subtitle,
+  icon,
+  onPress,
+  tone,
+}: {
+  title: string;
+  subtitle: string;
+  icon: React.ReactNode;
+  onPress: () => void;
+  tone: "light" | "dark" | "teal";
+}) {
+  const palette =
+    tone === "light"
+      ? { bg: "#e2e8f0", fg: "#0f172a", sub: "#475569" }
+      : tone === "teal"
+        ? { bg: "#0b6b68", fg: "#fff", sub: "#cdeeed" }
+        : { bg: "#0f172a", fg: "#fff", sub: "#cbd5e1" };
+  return (
+    <Pressable
+      onPress={onPress}
+      style={{
+        flex: 1,
+        minWidth: 110,
+        borderRadius: 14,
+        paddingHorizontal: 12,
+        paddingVertical: 12,
+        minHeight: 86,
+        backgroundColor: palette.bg,
+        justifyContent: "space-between",
+        borderWidth: 1,
+        borderColor: tone === "light" ? "#cbd5e1" : "rgba(255,255,255,0.12)",
+      }}
+    >
+      <View style={{ width: 28, height: 28, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: tone === "light" ? "#fff" : "rgba(255,255,255,0.12)" }}>
+        {icon}
+      </View>
+      <View style={{ marginTop: 8 }}>
+        <Text style={{ color: palette.fg, fontSize: 13, fontWeight: "800" }} numberOfLines={1}>
+          {title}
+        </Text>
+        <Text style={{ color: palette.sub, fontSize: 11, lineHeight: 15, marginTop: 3 }} numberOfLines={2}>
+          {subtitle}
+        </Text>
+      </View>
+    </Pressable>
+  );
+}
+
+function InfoRow({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+      <Text style={{ color: "#64748b", fontSize: 12, fontWeight: "800", textTransform: "uppercase", letterSpacing: 0.6 }}>
+        {label}
+      </Text>
+      <Text style={{ color: "#0f172a", fontSize: 13, fontWeight: "700", flex: 1, textAlign: "right" }}>
+        {value}
+      </Text>
+    </View>
+  );
+}
+
+function ActionTile({
+  title,
+  subtitle,
+  icon,
+  onPress,
+  accent,
+  foreground,
+}: {
+  title: string;
+  subtitle: string;
+  icon: React.ReactNode;
+  onPress: () => void;
+  accent: string;
+  foreground: string;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={{
+        flex: 1,
+        minWidth: 110,
+        padding: 14,
+        borderRadius: 18,
+        backgroundColor: accent,
+        borderWidth: 1,
+        borderColor: "rgba(148,163,184,0.16)",
+        justifyContent: "space-between",
+        minHeight: 112,
+      }}
+    >
+      <View
+        style={{
+          width: 34,
+          height: 34,
+          borderRadius: 12,
+          backgroundColor: foreground === "#fff" ? "rgba(255,255,255,0.16)" : "rgba(15,23,42,0.08)",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        {icon}
+      </View>
+      <View style={{ marginTop: 12 }}>
+        <Text style={{ color: foreground, fontSize: 14, fontWeight: "800" }} numberOfLines={1}>
+          {title}
+        </Text>
+        <Text style={{ color: foreground === "#fff" ? "#cbd5e1" : "#64748b", fontSize: 11, lineHeight: 15, marginTop: 4 }}>
+          {subtitle}
+        </Text>
+      </View>
     </Pressable>
   );
 }
@@ -2807,47 +3699,7 @@ function PlanPreview({
         </Svg>
       )}
 
-      <View
-        pointerEvents="none"
-        style={{
-          position: "absolute",
-          left: 14,
-          right: 14,
-          bottom: 12,
-          flexDirection: "row",
-          justifyContent: "space-between",
-          alignItems: "center",
-        }}
-      >
-        <View
-          style={{
-            backgroundColor: "rgba(255,255,255,0.82)",
-            borderRadius: 999,
-            paddingHorizontal: 12,
-            paddingVertical: 7,
-            borderWidth: 1,
-            borderColor: "rgba(148,163,184,0.35)",
-          }}
-        >
-          <Text style={{ color: "#334155", fontSize: 11, fontWeight: "600" }}>
-            Drag to pan • Pinch to zoom
-          </Text>
-        </View>
-        <View
-          style={{
-            backgroundColor: "rgba(255,255,255,0.82)",
-            borderRadius: 999,
-            paddingHorizontal: 12,
-            paddingVertical: 7,
-            borderWidth: 1,
-            borderColor: "rgba(148,163,184,0.35)",
-          }}
-        >
-          <Text style={{ color: "#334155", fontSize: 11, fontWeight: "600" }}>
-            {selectedLineId ? "Tap a line to inspect details" : `${filtered.length} segments`}
-          </Text>
-        </View>
-      </View>
+      
     </View>
   );
 }
