@@ -97,6 +97,7 @@ type TelemetrySnapshot = {
   lat?: number | null;
   lon?: number | null;
   alt?: number | null;
+  mission_state?: string | null;
 };
 
 type ActivityEntry = {
@@ -592,6 +593,7 @@ export default function App() {
         lookahead_m: 0.0,
         armed: healthRes ? healthRes.armed : (statusRes.state !== "idle" && statusRes.state !== "error"),
         mode: healthRes ? healthRes.mode : statusRes.state.toUpperCase(),
+        mission_state: statusRes.state,
       } as any);
 
       if (statusRes.state === "paused") {
@@ -606,6 +608,7 @@ export default function App() {
         armed: healthRes ? healthRes.armed : (statusRes.state !== "idle" && statusRes.state !== "error"),
         mode: healthRes ? healthRes.mode : statusRes.state.toUpperCase(),
         rpp_state: statusRes.rpp_state,
+        mission_state: statusRes.state,
       } as any);
     } catch (error) {
       setTelemetryError(error instanceof Error ? error.message : "Unable to load status");
@@ -1532,6 +1535,14 @@ function HomeView({
                         label: "Control mode",
                         value: telemetrySnapshot?.mode ?? systemHealth?.mode ?? "UNKNOWN",
                         tone: "#ffffff",
+                      }}
+                    />
+                    <StatCard
+                      label="State"
+                      value={{
+                        label: "Mission state",
+                        value: (telemetrySnapshot?.mission_state ?? systemHealth?.mission_state ?? "UNKNOWN").toUpperCase(),
+                        tone: (telemetrySnapshot?.mission_state ?? systemHealth?.mission_state) === "error" ? "#dc2626" : "#ffffff",
                       }}
                     />
                   </View>
