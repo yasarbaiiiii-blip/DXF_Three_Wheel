@@ -3,15 +3,27 @@ import "./global.css";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
+  Animated,
+  LayoutAnimation,
   Modal,
   PanResponder,
+  Platform,
   Pressable,
   ScrollView,
   Switch,
   Text,
   TextInput,
+  UIManager,
   View,
 } from "react-native";
+
+if (
+  Platform.OS === "android" &&
+  UIManager.setLayoutAnimationEnabledExperimental
+) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
+
 import Slider from "@react-native-community/slider";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
@@ -555,7 +567,7 @@ export default function App() {
     setTelemetryLoading(true);
     setTelemetryError("");
     try {
-      const [statusRes, healthRes] = await Promise.all([
+      const [statusRes, healthRes, telemetryRes] = await Promise.all([
         fetchJson<{
           state: string;
           rpp_state: number;
@@ -575,24 +587,58 @@ export default function App() {
         }>(`${apiBaseUrl}/api/healthz`).catch((err) => {
           console.log("healthz failed:", err);
           return null;
+        }),
+        fetchJson<{
+          pos_n: number;
+          pos_e: number;
+          heading_ned_deg: number;
+          xtrack_m: number;
+          heading_err_deg: number;
+          lookahead_m: number;
+          speed_m_s: number;
+          kappa: number;
+          dist_to_goal_m: number;
+          pose_age_ms: number;
+          rpp_state: number;
+          rpp_state_name: string;
+          armed: boolean;
+          mode: string;
+          connected: boolean;
+          battery_v: number;
+          battery_pct: number;
+          gps_fix: number;
+          gps_sat: number;
+          lat: number;
+          lon: number;
+          alt: number;
+        }>(`${apiBaseUrl}/api/telemetry/latest`).catch((err) => {
+          console.log("telemetry/latest failed:", err);
+          return null;
         })
       ]);
 
       setTelemetrySnapshot({
-        rpp_state: statusRes.rpp_state,
-        rpp_state_name: statusRes.rpp_state_name,
-        dist_to_goal_m: statusRes.dist_to_goal,
-        speed_m_s: statusRes.speed,
-        xtrack_m: statusRes.xtrack,
-        battery_pct: 85,
-        pose_age_ms: healthRes ? healthRes.pose_age_ms : 100,
-        gps_sat: 12,
-        pos_n: 0.0,
-        pos_e: 0.0,
-        heading_ned_deg: 0.0,
-        lookahead_m: 0.0,
-        armed: healthRes ? healthRes.armed : (statusRes.state !== "idle" && statusRes.state !== "error"),
-        mode: healthRes ? healthRes.mode : statusRes.state.toUpperCase(),
+        rpp_state: telemetryRes ? telemetryRes.rpp_state : statusRes.rpp_state,
+        rpp_state_name: telemetryRes ? telemetryRes.rpp_state_name : statusRes.rpp_state_name,
+        dist_to_goal_m: telemetryRes ? telemetryRes.dist_to_goal_m : statusRes.dist_to_goal,
+        speed_m_s: telemetryRes ? telemetryRes.speed_m_s : statusRes.speed,
+        xtrack_m: telemetryRes ? telemetryRes.xtrack_m : statusRes.xtrack,
+        battery_pct: telemetryRes ? telemetryRes.battery_pct : 85,
+        battery_v: telemetryRes ? telemetryRes.battery_v : null,
+        pose_age_ms: telemetryRes ? telemetryRes.pose_age_ms : (healthRes ? healthRes.pose_age_ms : 100),
+        gps_sat: telemetryRes ? telemetryRes.gps_sat : 12,
+        gps_fix: telemetryRes ? telemetryRes.gps_fix : null,
+        pos_n: telemetryRes ? telemetryRes.pos_n : 0.0,
+        pos_e: telemetryRes ? telemetryRes.pos_e : 0.0,
+        heading_ned_deg: telemetryRes ? telemetryRes.heading_ned_deg : 0.0,
+        heading_err_deg: telemetryRes ? telemetryRes.heading_err_deg : null,
+        lookahead_m: telemetryRes ? telemetryRes.lookahead_m : 0.0,
+        kappa: telemetryRes ? telemetryRes.kappa : null,
+        lat: telemetryRes ? telemetryRes.lat : null,
+        lon: telemetryRes ? telemetryRes.lon : null,
+        alt: telemetryRes ? telemetryRes.alt : null,
+        armed: telemetryRes ? telemetryRes.armed : (healthRes ? healthRes.armed : (statusRes.state !== "idle" && statusRes.state !== "error")),
+        mode: telemetryRes ? telemetryRes.mode : (healthRes ? healthRes.mode : statusRes.state.toUpperCase()),
         mission_state: statusRes.state,
       } as any);
 
@@ -603,11 +649,11 @@ export default function App() {
       }
 
       setSystemHealth({
-        ros_node: healthRes ? healthRes.ros_node : false,
-        fcu_connected: healthRes ? healthRes.fcu_connected : false,
-        armed: healthRes ? healthRes.armed : (statusRes.state !== "idle" && statusRes.state !== "error"),
-        mode: healthRes ? healthRes.mode : statusRes.state.toUpperCase(),
-        rpp_state: statusRes.rpp_state,
+        ros_node: healthRes ? healthRes.ros_node : (telemetryRes ? telemetryRes.connected : false),
+        fcu_connected: healthRes ? healthRes.fcu_connected : (telemetryRes ? telemetryRes.connected : false),
+        armed: telemetryRes ? telemetryRes.armed : (healthRes ? healthRes.armed : (statusRes.state !== "idle" && statusRes.state !== "error")),
+        mode: telemetryRes ? telemetryRes.mode : (healthRes ? healthRes.mode : statusRes.state.toUpperCase()),
+        rpp_state: telemetryRes ? telemetryRes.rpp_state : statusRes.rpp_state,
         mission_state: statusRes.state,
       } as any);
     } catch (error) {
@@ -794,7 +840,72 @@ export default function App() {
     }
   }
 
+  async function armVehicle(arm: boolean) {
+    if (!apiBaseUrl) {
+      Alert.alert("No backend", "Connect to a backend before sending commands.");
+      return;
+    }
+    logAction("ARM_REQUEST", { apiBaseUrl, arm });
+    setMissionActionBusy(true);
+    try {
+      showToast(arm ? "Arm" : "Disarm", arm ? "Arming vehicle..." : "Disarming vehicle...", "info");
+      const res = await fetch(`${apiBaseUrl}/api/arm`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ arm }),
+      });
+      if (!res.ok) {
+        const errMsg = await parseFetchError(res, arm ? "Arm failed" : "Disarm failed");
+        throw new Error(errMsg);
+      }
+      void refreshTelemetryPanel();
+      logAction("ARM_SUCCESS", { arm });
+      Alert.alert(arm ? "Armed" : "Disarmed", `Vehicle was successfully ${arm ? "armed" : "disarmed"}.`);
+      showToast(arm ? "Armed" : "Disarmed", `Vehicle is now ${arm ? "armed" : "disarmed"}.`, "success");
+    } catch (error) {
+      logAction("ARM_FAILED", {
+        arm,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      Alert.alert(arm ? "Arm failed" : "Disarm failed", error instanceof Error ? error.message : "Command rejected.");
+      showToast(arm ? "Arm failed" : "Disarm failed", error instanceof Error ? error.message : "Command rejected.", "error");
+    } finally {
+      setMissionActionBusy(false);
+    }
+  }
 
+  async function estopVehicle() {
+    if (!apiBaseUrl) {
+      Alert.alert("No backend", "Connect to a backend before sending commands.");
+      return;
+    }
+    logAction("ESTOP_REQUEST", { apiBaseUrl });
+    setMissionActionBusy(true);
+    try {
+      showToast("E-Stop", "Sending EMERGENCY STOP...", "error");
+      const res = await fetch(`${apiBaseUrl}/api/estop`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        const errMsg = await parseFetchError(res, "E-Stop failed");
+        throw new Error(errMsg);
+      }
+      void refreshTelemetryPanel();
+      logAction("ESTOP_SUCCESS");
+      Alert.alert("E-STOP Sent", "Emergency Stop command accepted.");
+      showToast("E-STOP Sent", "Emergency Stop command active.", "success");
+    } catch (error) {
+      logAction("ESTOP_FAILED", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      Alert.alert("E-Stop failed", error instanceof Error ? error.message : "Command rejected.");
+      showToast("E-Stop failed", error instanceof Error ? error.message : "Command rejected.", "error");
+    } finally {
+      setMissionActionBusy(false);
+    }
+  }
 
   async function runTemplateOnBackend(name: string, generatedLines: PlanLine[]) {
     if (!apiBaseUrl) {
@@ -1012,6 +1123,8 @@ export default function App() {
           onStopPlan={stopMissionOnBackend}
           onStartPlan={startLoadedMission}
           onPausePlan={pauseMissionOnBackend}
+          onArmVehicle={armVehicle}
+          onEstopVehicle={estopVehicle}
           missionActionBusy={missionActionBusy}
           missionFileReady={missionFileReady}
           missionLoaded={missionLoaded}
@@ -1210,6 +1323,8 @@ function HomeView({
   onStopPlan,
   onStartPlan,
   onPausePlan,
+  onArmVehicle,
+  onEstopVehicle,
   missionActionBusy,
   missionFileReady,
   missionLoaded,
@@ -1238,6 +1353,8 @@ function HomeView({
   onStopPlan: () => Promise<void>;
   onStartPlan: () => Promise<void>;
   onPausePlan: () => Promise<void>;
+  onArmVehicle: (arm: boolean) => Promise<void>;
+  onEstopVehicle: () => Promise<void>;
   missionActionBusy: boolean;
   missionFileReady: boolean;
   missionLoaded: boolean;
@@ -1254,6 +1371,7 @@ function HomeView({
   const selectedLine = lines.find((line) => line.id === selectedLineId) ?? null;
   const hasPlan = lines.length > 0;
   const hasSelectedLine = Boolean(selectedLine);
+  const [safetyControlsEnabled, setSafetyControlsEnabled] = useState(false);
   const [compassExpanded, setCompassExpanded] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteScope, setDeleteScope] = useState<"line" | "plan" | null>(null);
@@ -1395,44 +1513,6 @@ function HomeView({
                           <Text style={{ color: "#166534", fontSize: 12, fontWeight: "800" }}>File loaded</Text>
                         </View>
                         <Pressable
-                          onPress={onStartPlan}
-                          disabled={missionActionBusy || lines.length === 0}
-                          style={{
-                            ...missionActionButtonStyle,
-                            backgroundColor: missionActionBusy ? "#94a3b8" : "#0b6b68",
-                          }}
-                        >
-                          <Text style={{ color: "#fff", fontSize: 12, fontWeight: "800" }}>
-                            Start
-                          </Text>
-                        </Pressable>
-                        <Pressable
-                          onPress={onPausePlan}
-                          disabled={missionActionBusy || lines.length === 0}
-                          style={{
-                            ...missionActionButtonStyle,
-                            backgroundColor: "#ffffff",
-                            borderWidth: 1,
-                            borderColor: "#cbd5e1",
-                          }}
-                        >
-                          <Text style={{ color: "#0f172a", fontSize: 12, fontWeight: "800" }}>
-                            Pause
-                          </Text>
-                        </Pressable>
-                        <Pressable
-                          onPress={onStopPlan}
-                          disabled={missionActionBusy || lines.length === 0}
-                          style={{
-                            ...missionActionButtonStyle,
-                            backgroundColor: missionActionBusy ? "#94a3b8" : "#dc2626",
-                          }}
-                        >
-                          <Text style={{ color: "#fff", fontSize: 12, fontWeight: "800" }}>
-                            Stop
-                          </Text>
-                        </Pressable>
-                        <Pressable
                           onPress={openExportDialog}
                           disabled={lines.length === 0}
                           style={{
@@ -1440,6 +1520,7 @@ function HomeView({
                             backgroundColor: "#ffffff",
                             borderWidth: 1,
                             borderColor: "#cbd5e1",
+                            marginRight: 20,
                           }}
                         >
                           <Text style={{ color: "#0f172a", fontSize: 12, fontWeight: "800" }}>
@@ -1488,231 +1569,434 @@ function HomeView({
             </View>
           </View>
 
-          <View style={{ width: "42%", height: "100%", backgroundColor: "#ffffff", padding: 8, paddingLeft: 0 }}>
+          <View style={{ width: "42%", height: "100%", backgroundColor: "transparent", padding: 8, paddingLeft: 0 }}>
             <View
               style={{
                 flex: 1,
                 minHeight: 0,
-                borderRadius: 18,
-                borderWidth: 1,
-                borderColor: "#d8e1eb",
-                backgroundColor: "#0b1220",
-                overflow: "hidden",
-                shadowColor: "#0f172a",
-                shadowOpacity: 0.08,
-                shadowRadius: 18,
-                shadowOffset: { width: 0, height: 10 },
-                elevation: 3,
+                backgroundColor: "transparent",
               }}
               {...rightPanelSwipeResponder.panHandlers}
             >
               {rightPanelMode === "system" ? (
-                <ScrollView
-                  style={{ flex: 1 }}
-                  contentContainerStyle={{ padding: 14, paddingBottom: 18 }}
-                  showsVerticalScrollIndicator={false}
-                >
-                  <Text style={{ color: "#94a3b8", fontSize: 11, fontWeight: "800", letterSpacing: 1.4, textTransform: "uppercase" }}>
-                    Rover Ops
-                  </Text>
-                  <Text style={{ color: "#fff", fontSize: 24, fontWeight: "900", marginTop: 6 }}>
-                    System Panel
-                  </Text>
-                  <Text style={{ color: "#cbd5e1", fontSize: 13, lineHeight: 19, marginTop: 8, maxWidth: 380 }}>
-                    Live rover health, telemetry, discovery, and activity data.
-                  </Text>
+                <View style={{ flex: 1 }}>
+                  {/* Top Card: Diagnostics (Light Theme) */}
+                  <View style={{
+                    flex: 1,
+                    borderRadius: 18,
+                    backgroundColor: "#ffffff",
+                    borderWidth: 1,
+                    borderColor: "#e2e8f0",
+                    overflow: "hidden",
+                  }}>
+                    <ScrollView
+                      style={{ flex: 1 }}
+                      contentContainerStyle={{ padding: 14, paddingBottom: 18 }}
+                      showsVerticalScrollIndicator={false}
+                    >
+                      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
+                        <View>
+                          <Text style={{ color: "#64748b", fontSize: 9.5, fontWeight: "800", letterSpacing: 1.4, textTransform: "uppercase" }}>
+                            Rover Ops
+                          </Text>
+                          <Text style={{ color: "#0f172a", fontSize: 22, fontWeight: "900", marginTop: 2 }}>
+                            System Panel
+                          </Text>
+                        </View>
+                        <View style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          backgroundColor: (!telemetryError && (systemHealth?.ros_node || systemHealth?.fcu_connected || telemetrySnapshot !== null)) ? "rgba(22, 163, 74, 0.08)" : "rgba(220, 38, 38, 0.08)",
+                          paddingHorizontal: 8,
+                          paddingVertical: 4,
+                          borderRadius: 999,
+                          borderWidth: 1,
+                          borderColor: (!telemetryError && (systemHealth?.ros_node || systemHealth?.fcu_connected || telemetrySnapshot !== null)) ? "rgba(22, 163, 74, 0.15)" : "rgba(220, 38, 38, 0.15)",
+                          gap: 6,
+                        }}>
+                          <View style={{
+                            width: 6,
+                            height: 6,
+                            borderRadius: 3,
+                            backgroundColor: (!telemetryError && (systemHealth?.ros_node || systemHealth?.fcu_connected || telemetrySnapshot !== null)) ? "#16a34a" : "#dc2626",
+                          }} />
+                          <Text style={{
+                            color: (!telemetryError && (systemHealth?.ros_node || systemHealth?.fcu_connected || telemetrySnapshot !== null)) ? "#16a34a" : "#dc2626",
+                            fontSize: 10,
+                            fontWeight: "800",
+                            textTransform: "uppercase",
+                            letterSpacing: 0.5,
+                          }}>
+                            {(!telemetryError && (systemHealth?.ros_node || systemHealth?.fcu_connected || telemetrySnapshot !== null)) ? "Live" : "Offline"}
+                          </Text>
+                        </View>
+                      </View>
+                      <Text style={{ color: "#475569", fontSize: 12, lineHeight: 17, marginTop: 6, marginBottom: 4 }}>
+                        Real-time diagnostics and status feed.
+                      </Text>
 
-                  {telemetryError ? <Text style={drawerStyles.error}>{telemetryError}</Text> : null}
-                  {telemetryLoading ? <Text style={drawerStyles.loading}>Refreshing live data...</Text> : null}
+                      {telemetryError ? <Text style={[drawerStyles.error, { color: "#b91c1c" }]}>{telemetryError}</Text> : null}
+                      {telemetryLoading ? <Text style={[drawerStyles.loading, { color: "#2563eb" }]}>Refreshing live data...</Text> : null}
 
-                  <View style={drawerStyles.grid}>
-                    <StatCard label="ROS node" value={pulse("ROS node", systemHealth?.ros_node)} />
-                    <StatCard label="FCU link" value={pulse("FCU link", systemHealth?.fcu_connected)} />
-                    <StatCard label="Armed" value={pulse("Armed", telemetrySnapshot?.armed ?? systemHealth?.armed)} />
-                    <StatCard
-                      label="Mode"
-                      value={{
-                        label: "Control mode",
-                        value: telemetrySnapshot?.mode ?? systemHealth?.mode ?? "UNKNOWN",
-                        tone: "#ffffff",
-                      }}
-                    />
-                    <StatCard
-                      label="State"
-                      value={{
-                        label: "Mission state",
-                        value: (telemetrySnapshot?.mission_state ?? systemHealth?.mission_state ?? "UNKNOWN").toUpperCase(),
-                        tone: (telemetrySnapshot?.mission_state ?? systemHealth?.mission_state) === "error" ? "#dc2626" : "#ffffff",
-                      }}
-                    />
-                  </View>
-
-                  <View style={drawerStyles.stripRow}>
-                    <StripMetric
-                      label="Battery"
-                      value={telemetrySnapshot?.battery_pct == null ? "n/a" : `${telemetrySnapshot.battery_pct.toFixed(0)}%`}
-                      tone={telemetrySnapshot?.battery_pct == null ? "#64748b" : telemetrySnapshot.battery_pct >= 55 ? "#16a34a" : telemetrySnapshot.battery_pct >= 25 ? "#d97706" : "#dc2626"}
-                    />
-                    <StripMetric
-                      label="Pose age"
-                      value={telemetrySnapshot?.pose_age_ms == null ? "n/a" : `${telemetrySnapshot.pose_age_ms.toFixed(0)} ms`}
-                      tone={telemetrySnapshot?.pose_age_ms == null ? "#64748b" : telemetrySnapshot.pose_age_ms <= 500 ? "#16a34a" : telemetrySnapshot.pose_age_ms <= 1500 ? "#d97706" : "#dc2626"}
-                    />
-                    <StripMetric
-                      label="RPP State"
-                      value={
-                        telemetrySnapshot?.rpp_state_name && telemetrySnapshot?.rpp_state != null
-                          ? `${telemetrySnapshot.rpp_state_name} (${telemetrySnapshot.rpp_state})`
-                          : telemetrySnapshot?.rpp_state_name || String(telemetrySnapshot?.rpp_state ?? systemHealth?.rpp_state ?? "n/a")
-                      }
-                      tone="#ffffff"
-                    />
-                  </View>
-
-                  <View style={drawerStyles.section}>
-                    <SectionTitle title="Telemetry snapshot" />
-                    <MiniGrid
-                      items={[
-                        ["Speed", telemetrySnapshot?.speed_m_s == null ? "n/a" : `${telemetrySnapshot.speed_m_s.toFixed(2)} m/s`],
-                        ["Heading", telemetrySnapshot?.heading_ned_deg == null ? "n/a" : `${telemetrySnapshot.heading_ned_deg.toFixed(1)}°`],
-                        ["Cross-track", telemetrySnapshot?.xtrack_m == null ? "n/a" : `${telemetrySnapshot.xtrack_m.toFixed(2)} m`],
-                        ["Goal dist", telemetrySnapshot?.dist_to_goal_m == null ? "n/a" : `${telemetrySnapshot.dist_to_goal_m.toFixed(2)} m`],
-                        ["Lookahead", telemetrySnapshot?.lookahead_m == null ? "n/a" : `${telemetrySnapshot.lookahead_m.toFixed(2)} m`],
-                        ["Satellites", telemetrySnapshot?.gps_sat == null ? "n/a" : `${telemetrySnapshot.gps_sat}`],
-                      ]}
-                    />
-                  </View>
-
-                  <View style={drawerStyles.section}>
-                    <SectionTitle title="Discover" />
-                    <View style={drawerStyles.list}>
-                      {discoveryFeed.length > 0 ? discoveryFeed.slice(0, 4).map((item) => (
-                        <ListRow
-                          key={item.id}
-                          left={`${item.name}`}
-                          right={`${item.host}:${item.port}`}
-                          tone="#16a34a"
-                        />
-                      )) : (
-                        <EmptyLine text="No beacons discovered on the LAN." />
-                      )}
-                    </View>
-                  </View>
-
-                  <View style={drawerStyles.section}>
-                    <SectionTitle title="Activity" />
-                    <View style={drawerStyles.list}>
-                      {activityFeed.length > 0 ? activityFeed.slice(0, 5).map((item, index) => (
-                        <ListRow
-                          key={`${item.timestamp}-${index}`}
-                          left={item.message}
-                          right={item.level.toUpperCase()}
-                          tone={item.level === "error" ? "#dc2626" : item.level === "warn" ? "#d97706" : "#16a34a"}
-                        />
-                      )) : (
-                        <EmptyLine text="Activity log is empty right now." />
-                      )}
-                    </View>
-                  </View>
-                </ScrollView>
-              ) : (
-                <ScrollView
-                  style={{ flex: 1 }}
-                  contentContainerStyle={{ padding: 14, paddingBottom: 18 }}
-                  showsVerticalScrollIndicator={false}
-                >
-                  <Text style={{ color: "#94a3b8", fontSize: 11, fontWeight: "800", letterSpacing: 1.4, textTransform: "uppercase" }}>
-                    Rover Ops
-                  </Text>
-                  <Text style={{ color: "#fff", fontSize: 24, fontWeight: "900", marginTop: 6 }}>
-                    Line Details
-                  </Text>
-                  <Text style={{ color: "#cbd5e1", fontSize: 13, lineHeight: 19, marginTop: 8, maxWidth: 380 }}>
-                    Swipe right to inspect the selected line in a focused side panel.
-                  </Text>
-
-                  {selectedLine ? (
-                    <>
                       <View style={drawerStyles.grid}>
+                        <StatCard label="ROS node" value={pulse("ROS node", systemHealth?.ros_node)} light />
+                        <StatCard label="FCU link" value={pulse("FCU link", systemHealth?.fcu_connected)} light />
+                        <StatCard label="Armed" value={pulse("Armed", telemetrySnapshot?.armed ?? systemHealth?.armed)} light />
                         <StatCard
-                          label="Selection"
+                          label="Mode"
                           value={{
-                            label: "Current line",
-                            value: selectedLine.label,
-                            tone: "#fff",
+                            label: "Control mode",
+                            value: telemetrySnapshot?.mode ?? systemHealth?.mode ?? "UNKNOWN",
+                            tone: "#0f172a",
                           }}
+                          light
                         />
                         <StatCard
-                          label="Status"
+                          label="State"
                           value={{
-                            label: "Drawer state",
-                            value: "Loaded",
-                            tone: "#16a34a",
+                            label: "Mission state",
+                            value: (telemetrySnapshot?.mission_state ?? systemHealth?.mission_state ?? "UNKNOWN").toUpperCase(),
+                            tone: (telemetrySnapshot?.mission_state ?? systemHealth?.mission_state) === "error" ? "#dc2626" : "#0f172a",
                           }}
-                        />
-                        <StatCard
-                          label="Layer"
-                          value={{
-                            label: "Visible layers",
-                            value: hasPlan ? "Available" : "No plan",
-                            tone: hasPlan ? "#fff" : "#94a3b8",
-                          }}
-                        />
-                        <StatCard
-                          label="Info"
-                          value={{
-                            label: "Line geometry",
-                            value: `${lineLength(selectedLine).toFixed(2)} m`,
-                            tone: "#fff",
-                          }}
+                          fullWidth
+                          light
                         />
                       </View>
 
                       <View style={drawerStyles.stripRow}>
-                        <StripMetric label="Length" value={`${lineLength(selectedLine).toFixed(2)} m`} tone="#fff" />
-                        <StripMetric label="Angle" value={`${lineAngle(selectedLine).toFixed(2)}°`} tone="#fff" />
-                        <StripMetric label="Width" value={`${selectedLine.width.toFixed(2)} m`} tone="#fff" />
+                        <StripMetric
+                          label="Battery"
+                          value={telemetrySnapshot?.battery_pct == null ? "n/a" : `${telemetrySnapshot.battery_pct.toFixed(0)}%`}
+                          tone={telemetrySnapshot?.battery_pct == null ? "#64748b" : telemetrySnapshot.battery_pct >= 55 ? "#16a34a" : telemetrySnapshot.battery_pct >= 25 ? "#d97706" : "#dc2626"}
+                          icon={<Battery size={13} color="#64748b" />}
+                          progressPct={telemetrySnapshot?.battery_pct ?? undefined}
+                          light
+                        />
+                        <StripMetric
+                          label="Pose age"
+                          value={telemetrySnapshot?.pose_age_ms == null ? "n/a" : `${telemetrySnapshot.pose_age_ms.toFixed(0)} ms`}
+                          tone={telemetrySnapshot?.pose_age_ms == null ? "#64748b" : telemetrySnapshot.pose_age_ms <= 500 ? "#16a34a" : telemetrySnapshot.pose_age_ms <= 1500 ? "#d97706" : "#dc2626"}
+                          icon={<Signal size={13} color="#64748b" />}
+                          light
+                        />
+                        <StripMetric
+                          label="RPP State"
+                          value={
+                            telemetrySnapshot?.rpp_state_name && telemetrySnapshot?.rpp_state != null
+                              ? `${telemetrySnapshot.rpp_state_name} (${telemetrySnapshot.rpp_state})`
+                              : telemetrySnapshot?.rpp_state_name || String(telemetrySnapshot?.rpp_state ?? systemHealth?.rpp_state ?? "n/a")
+                          }
+                          tone="#0f172a"
+                          icon={<Tractor size={13} color="#64748b" />}
+                          light
+                        />
                       </View>
 
                       <View style={drawerStyles.section}>
-                        <SectionTitle title="Geometry" />
-                        <View style={{ borderRadius: 16, padding: 12, backgroundColor: "#111827", borderWidth: 1, borderColor: "rgba(148,163,184,0.16)", gap: 10 }}>
-                          <ListRow left="Line label" right={selectedLine.label} tone="#fff" />
-                          <ListRow left="Layer" right={selectedLine.layer} tone="#fff" />
-                          <ListRow left="From" right={`(${selectedLine.from.x.toFixed(2)}, ${selectedLine.from.y.toFixed(2)})`} tone="#fff" />
-                          <ListRow left="To" right={`(${selectedLine.to.x.toFixed(2)}, ${selectedLine.to.y.toFixed(2)})`} tone="#fff" />
-                          <ListRow left="Point IDs" right={`${selectedLine.from.id} -> ${selectedLine.to.id}`} tone="#fff" />
-                          <ListRow left="Line ID" right={selectedLine.id} tone="#fff" />
-                        </View>
+                        <SectionTitle title="Telemetry snapshot" light />
+                        <MiniGrid
+                          items={[
+                            ["Speed", telemetrySnapshot?.speed_m_s == null ? "n/a" : `${telemetrySnapshot.speed_m_s.toFixed(2)} m/s`],
+                            ["Heading", telemetrySnapshot?.heading_ned_deg == null ? "n/a" : `${telemetrySnapshot.heading_ned_deg.toFixed(1)}°`],
+                            ["Cross-track", telemetrySnapshot?.xtrack_m == null ? "n/a" : `${telemetrySnapshot.xtrack_m.toFixed(2)} m`],
+                            ["Goal dist", telemetrySnapshot?.dist_to_goal_m == null ? "n/a" : `${telemetrySnapshot.dist_to_goal_m.toFixed(2)} m`],
+                            ["Lookahead", telemetrySnapshot?.lookahead_m == null ? "n/a" : `${telemetrySnapshot.lookahead_m.toFixed(2)} m`],
+                            ["Satellites", telemetrySnapshot?.gps_sat == null ? "n/a" : `${telemetrySnapshot.gps_sat}`],
+                          ]}
+                          light
+                        />
                       </View>
 
                       <View style={drawerStyles.section}>
-                        <SectionTitle title="Visible layers" />
-                        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-                          <CompactLayerToggle
-                            label="Boundary"
-                            value={layerVisibility.boundary}
-                            onToggle={() => setLayerVisibility((prev) => ({ ...prev, boundary: !prev.boundary }))}
-                          />
-                          <CompactLayerToggle
-                            label="Marking"
-                            value={layerVisibility.marking}
-                            onToggle={() => setLayerVisibility((prev) => ({ ...prev, marking: !prev.marking }))}
-                          />
-                          <CompactLayerToggle
-                            label="Center"
-                            value={layerVisibility.center}
-                            onToggle={() => setLayerVisibility((prev) => ({ ...prev, center: !prev.center }))}
-                          />
-                        </View>
+                        <SectionTitle title="Position & Coordinates" light />
+                        <MiniGrid
+                          items={[
+                            ["North (N)", telemetrySnapshot?.pos_n == null ? "n/a" : `${telemetrySnapshot.pos_n.toFixed(2)} m`],
+                            ["East (E)", telemetrySnapshot?.pos_e == null ? "n/a" : `${telemetrySnapshot.pos_e.toFixed(2)} m`],
+                            ["Latitude", telemetrySnapshot?.lat == null ? "n/a" : telemetrySnapshot.lat.toFixed(6)],
+                            ["Longitude", telemetrySnapshot?.lon == null ? "n/a" : telemetrySnapshot.lon.toFixed(6)],
+                            ["Altitude", telemetrySnapshot?.alt == null ? "n/a" : `${telemetrySnapshot.alt.toFixed(2)} m`],
+                            ["GPS Fix Type", telemetrySnapshot?.gps_fix == null ? "n/a" : telemetrySnapshot.gps_fix === 0 ? "No Fix (0)" : telemetrySnapshot.gps_fix === 4 ? "DGPS (4)" : telemetrySnapshot.gps_fix === 5 ? "RTK Float (5)" : telemetrySnapshot.gps_fix === 6 ? "RTK Fixed (6)" : `Fix (${telemetrySnapshot.gps_fix})`],
+                          ]}
+                          light
+                        />
                       </View>
-                    </>
-                  ) : (
-                    <View style={[drawerStyles.section, { marginTop: 18 }]}>
-                      <EmptyLine text="Tap a highlighted line in the canvas to see its details here." />
+
+                      <View style={drawerStyles.section}>
+                        <SectionTitle title="Guidance & Status" light />
+                        <MiniGrid
+                          items={[
+                            ["Heading Err", telemetrySnapshot?.heading_err_deg == null ? "n/a" : `${telemetrySnapshot.heading_err_deg.toFixed(1)}°`],
+                            ["Curvature (K)", telemetrySnapshot?.kappa == null ? "n/a" : telemetrySnapshot.kappa.toFixed(4)],
+                            ["Battery V", telemetrySnapshot?.battery_v == null ? "n/a" : `${telemetrySnapshot.battery_v.toFixed(2)} V`],
+                            ["Pose Age", telemetrySnapshot?.pose_age_ms == null ? "n/a" : `${telemetrySnapshot.pose_age_ms.toFixed(0)} ms`],
+                            ["RPP State", telemetrySnapshot?.rpp_state_name ?? "n/a"],
+                            ["FCU Connection", systemHealth?.fcu_connected ? "Connected" : "Disconnected"],
+                          ]}
+                          light
+                        />
+                      </View>
+                    </ScrollView>
+                  </View>
+
+                  {/* Bottom Card: Controls (Dark Theme) */}
+                  <View style={{
+                    borderRadius: 18,
+                    backgroundColor: "#070c17",
+                    padding: 14,
+                    borderWidth: 1,
+                    borderColor: "rgba(255,255,255,0.08)",
+                    marginTop: 10,
+                  }}>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 5, marginBottom: 10, marginTop: 2 }}>
+                      <View style={{ width: 3, height: 10, backgroundColor: "#10b981", borderRadius: 1.5 }} />
+                      <Text style={{ color: "#94a3b8", fontSize: 9.5, fontWeight: "800", textTransform: "uppercase", letterSpacing: 0.8 }}>
+                        Mission Controls
+                      </Text>
                     </View>
-                  )}
-                </ScrollView>
+
+                    <Pressable
+                      onPress={() => setSafetyControlsEnabled(!safetyControlsEnabled)}
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 8,
+                        marginBottom: 10,
+                        paddingVertical: 4,
+                      }}
+                    >
+                      <View style={{
+                        width: 14,
+                        height: 14,
+                        borderRadius: 3,
+                        borderWidth: 1.5,
+                        borderColor: safetyControlsEnabled ? "#3b82f6" : "#475569",
+                        backgroundColor: safetyControlsEnabled ? "#3b82f6" : "transparent",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}>
+                        {safetyControlsEnabled && (
+                          <View style={{
+                            width: 6,
+                            height: 6,
+                            borderRadius: 1,
+                            backgroundColor: "#ffffff",
+                          }} />
+                        )}
+                      </View>
+                      <Text style={{ color: "#94a3b8", fontSize: 11, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                        Show Safety Controls
+                      </Text>
+                    </Pressable>
+
+                    <View style={{ flexDirection: "row", gap: 8 }}>
+                      <Pressable
+                        onPress={onStartPlan}
+                        disabled={missionActionBusy || lines.length === 0}
+                        style={{
+                          flex: 1,
+                          height: 38,
+                          borderRadius: 8,
+                          backgroundColor: (missionActionBusy || lines.length === 0) ? "#1e293b" : "#0d9488",
+                          alignItems: "center",
+                          justifyContent: "center",
+                        }}
+                      >
+                        <Text style={{ color: (missionActionBusy || lines.length === 0) ? "#64748b" : "#ffffff", fontSize: 12, fontWeight: "800" }}>
+                          Start
+                        </Text>
+                      </Pressable>
+                      <Pressable
+                        onPress={onPausePlan}
+                        disabled={missionActionBusy || lines.length === 0}
+                        style={{
+                          flex: 1,
+                          height: 38,
+                          borderRadius: 8,
+                          backgroundColor: (missionActionBusy || lines.length === 0) ? "#1e293b" : "rgba(255,255,255,0.08)",
+                          borderWidth: 1,
+                          borderColor: "rgba(255,255,255,0.12)",
+                          alignItems: "center",
+                          justifyContent: "center",
+                        }}
+                      >
+                        <Text style={{ color: (missionActionBusy || lines.length === 0) ? "#64748b" : "#ffffff", fontSize: 12, fontWeight: "800" }}>
+                          Pause
+                        </Text>
+                      </Pressable>
+                      <Pressable
+                        onPress={onStopPlan}
+                        disabled={missionActionBusy || lines.length === 0}
+                        style={{
+                          flex: 1,
+                          height: 38,
+                          borderRadius: 8,
+                          backgroundColor: (missionActionBusy || lines.length === 0) ? "#1e293b" : "#e11d48",
+                          alignItems: "center",
+                          justifyContent: "center",
+                        }}
+                      >
+                        <Text style={{ color: (missionActionBusy || lines.length === 0) ? "#64748b" : "#ffffff", fontSize: 12, fontWeight: "800" }}>
+                          Stop
+                        </Text>
+                      </Pressable>
+                    </View>
+
+                    {safetyControlsEnabled && (
+                      <View style={{
+                        flexDirection: "row",
+                        gap: 8,
+                        marginTop: 8,
+                        borderTopWidth: 1,
+                        borderTopColor: "rgba(255, 255, 255, 0.05)",
+                        paddingTop: 8,
+                      }}>
+                        <Pressable
+                          onPress={() => onArmVehicle?.(!(telemetrySnapshot?.armed ?? systemHealth?.armed))}
+                          disabled={missionActionBusy}
+                          style={{
+                            flex: 1,
+                            height: 38,
+                            borderRadius: 8,
+                            backgroundColor: (telemetrySnapshot?.armed ?? systemHealth?.armed) ? "#b91c1c" : "#2563eb",
+                            alignItems: "center",
+                            justifyContent: "center",
+                          }}
+                        >
+                          <Text style={{ color: "#ffffff", fontSize: 12, fontWeight: "800" }}>
+                            {(telemetrySnapshot?.armed ?? systemHealth?.armed) ? "Disarm" : "Arm"}
+                          </Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={onEstopVehicle}
+                          disabled={missionActionBusy}
+                          style={{
+                            flex: 1,
+                            height: 38,
+                            borderRadius: 8,
+                            backgroundColor: "#dc2626",
+                            alignItems: "center",
+                            justifyContent: "center",
+                          }}
+                        >
+                          <Text style={{ color: "#ffffff", fontSize: 12, fontWeight: "900" }}>
+                            E-Stop
+                          </Text>
+                        </Pressable>
+                      </View>
+                    )}
+                  </View>
+                </View>
+              ) : (
+                /* Alternate/Fallback Card (Dark Theme) */
+                <View style={{
+                  flex: 1,
+                  borderRadius: 18,
+                  backgroundColor: "#070c17",
+                  borderWidth: 1,
+                  borderColor: "rgba(255,255,255,0.08)",
+                  overflow: "hidden",
+                }}>
+                  <ScrollView
+                    style={{ flex: 1 }}
+                    contentContainerStyle={{ padding: 14, paddingBottom: 18 }}
+                    showsVerticalScrollIndicator={false}
+                  >
+                    <View style={{ marginTop: 4 }}>
+                      <Text style={{ color: "#64748b", fontSize: 9.5, fontWeight: "800", letterSpacing: 1.4, textTransform: "uppercase" }}>
+                        Rover Ops
+                      </Text>
+                      <Text style={{ color: "#fff", fontSize: 22, fontWeight: "900", marginTop: 2 }}>
+                        Line Details
+                      </Text>
+                    </View>
+                    <Text style={{ color: "#94a3b8", fontSize: 12, lineHeight: 17, marginTop: 6, marginBottom: 4 }}>
+                      Swipe right to inspect the selected line in a focused side panel.
+                    </Text>
+
+                    {selectedLine ? (
+                      <>
+                        <View style={drawerStyles.grid}>
+                          <StatCard
+                            label="Selection"
+                            value={{
+                              label: "Current line",
+                              value: selectedLine.label,
+                              tone: "#fff",
+                            }}
+                          />
+                          <StatCard
+                            label="Status"
+                            value={{
+                              label: "Drawer state",
+                              value: "Loaded",
+                              tone: "#16a34a",
+                            }}
+                          />
+                          <StatCard
+                            label="Layer"
+                            value={{
+                              label: "Visible layers",
+                              value: hasPlan ? "Available" : "No plan",
+                              tone: hasPlan ? "#fff" : "#94a3b8",
+                            }}
+                          />
+                          <StatCard
+                            label="Info"
+                            value={{
+                              label: "Line geometry",
+                              value: `${lineLength(selectedLine).toFixed(2)} m`,
+                              tone: "#fff",
+                            }}
+                          />
+                        </View>
+
+                        <View style={drawerStyles.stripRow}>
+                          <StripMetric label="Length" value={`${lineLength(selectedLine).toFixed(2)} m`} tone="#fff" />
+                          <StripMetric label="Angle" value={`${lineAngle(selectedLine).toFixed(2)}°`} tone="#fff" />
+                          <StripMetric label="Width" value={`${selectedLine.width.toFixed(2)} m`} tone="#fff" />
+                        </View>
+
+                        <View style={drawerStyles.section}>
+                          <SectionTitle title="Geometry" />
+                          <View style={{ borderRadius: 16, padding: 12, backgroundColor: "#111827", borderWidth: 1, borderColor: "rgba(148,163,184,0.16)", gap: 10 }}>
+                            <ListRow left="Line label" right={selectedLine.label} tone="#fff" />
+                            <ListRow left="Layer" right={selectedLine.layer} tone="#fff" />
+                            <ListRow left="From" right={`(${selectedLine.from.x.toFixed(2)}, ${selectedLine.from.y.toFixed(2)})`} tone="#fff" />
+                            <ListRow left="To" right={`(${selectedLine.to.x.toFixed(2)}, ${selectedLine.to.y.toFixed(2)})`} tone="#fff" />
+                            <ListRow left="Point IDs" right={`${selectedLine.from.id} -> ${selectedLine.to.id}`} tone="#fff" />
+                            <ListRow left="Line ID" right={selectedLine.id} tone="#fff" />
+                          </View>
+                        </View>
+
+                        <View style={drawerStyles.section}>
+                          <SectionTitle title="Visible layers" />
+                          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                            <CompactLayerToggle
+                              label="Boundary"
+                              value={layerVisibility.boundary}
+                              onToggle={() => setLayerVisibility((prev) => ({ ...prev, boundary: !prev.boundary }))}
+                            />
+                            <CompactLayerToggle
+                              label="Marking"
+                              value={layerVisibility.marking}
+                              onToggle={() => setLayerVisibility((prev) => ({ ...prev, marking: !prev.marking }))}
+                            />
+                            <CompactLayerToggle
+                              label="Center"
+                              value={layerVisibility.center}
+                              onToggle={() => setLayerVisibility((prev) => ({ ...prev, center: !prev.center }))}
+                            />
+                          </View>
+                        </View>
+                      </>
+                    ) : (
+                      <View style={[drawerStyles.section, { marginTop: 18 }]}>
+                        <EmptyLine text="Tap a highlighted line in the canvas to see its details here." />
+                      </View>
+                    )}
+                  </ScrollView>
+                </View>
               )}
             </View>
           </View>
@@ -2312,9 +2596,15 @@ function LineDetailsDrawer({
           <Pressable style={drawerStyles.close} onPress={onClose}>
             <Text style={drawerStyles.closeText}>×</Text>
           </Pressable>
-          <Text style={drawerStyles.kicker}>Rover Ops</Text>
-          <Text style={drawerStyles.title}>Line Details</Text>
-          <Text style={drawerStyles.subtitle}>
+          <View style={{ marginTop: 4 }}>
+            <Text style={{ color: "#64748b", fontSize: 9.5, fontWeight: "800", letterSpacing: 1.4, textTransform: "uppercase" }}>
+              Rover Ops
+            </Text>
+            <Text style={{ color: "#fff", fontSize: 22, fontWeight: "900", marginTop: 2 }}>
+              Line Details
+            </Text>
+          </View>
+          <Text style={{ color: "#94a3b8", fontSize: 12, lineHeight: 17, marginTop: 6, marginBottom: 4 }}>
             Swipe right to inspect the selected line in a focused side panel.
           </Text>
 
@@ -2324,7 +2614,7 @@ function LineDetailsDrawer({
               value={{
                 label: "Current line",
                 value: selectedLine ? selectedLine.label : "No line selected",
-                tone: selectedLine ? "#0f172a" : "#64748b",
+                tone: selectedLine ? "#ffffff" : "#64748b",
               }}
             />
             <StatCard
@@ -2340,7 +2630,7 @@ function LineDetailsDrawer({
               value={{
                 label: "Visible layers",
                 value: hasPlan ? "Available" : "No plan",
-                tone: hasPlan ? "#0f172a" : "#64748b",
+                tone: hasPlan ? "#ffffff" : "#64748b",
               }}
             />
             <StatCard
@@ -2348,7 +2638,7 @@ function LineDetailsDrawer({
               value={{
                 label: "Line geometry",
                 value: selectedLine ? `${lineLength(selectedLine).toFixed(2)} m` : "n/a",
-                tone: "#0f172a",
+                tone: "#ffffff",
               }}
             />
           </View>
@@ -2356,9 +2646,9 @@ function LineDetailsDrawer({
           {selectedLine ? (
             <>
               <View style={drawerStyles.stripRow}>
-                <StripMetric label="Length" value={`${lineLength(selectedLine).toFixed(2)} m`} tone="#0f172a" />
-                <StripMetric label="Angle" value={`${lineAngle(selectedLine).toFixed(2)}°`} tone="#0f172a" />
-                <StripMetric label="Width" value={`${selectedLine.width.toFixed(2)} m`} tone="#0f172a" />
+                <StripMetric label="Length" value={`${lineLength(selectedLine).toFixed(2)} m`} tone="#ffffff" />
+                <StripMetric label="Angle" value={`${lineAngle(selectedLine).toFixed(2)}°`} tone="#ffffff" />
+                <StripMetric label="Width" value={`${selectedLine.width.toFixed(2)} m`} tone="#ffffff" />
               </View>
 
               <View style={drawerStyles.section}>
@@ -2405,38 +2695,97 @@ function LineDetailsDrawer({
   );
 }
 
-function StatCard({ label, value }: { label: string; value: { label: string; value: string; tone: string } }) {
+function StatCard({ label, value, fullWidth, light }: { label: string; value: { label: string; value: string; tone: string }; fullWidth?: boolean; light?: boolean }) {
+  const accentColor = (value.tone === "#ffffff" || value.tone === "#fff" || value.tone === "#0f172a") ? "#3b82f6" : value.tone || "#475569";
   return (
-    <View style={drawerStyles.card}>
-      <Text style={drawerStyles.cardLabel}>{label}</Text>
-      <Text style={[drawerStyles.cardValue, { color: value.tone }]}>{value.value}</Text>
-      <Text style={drawerStyles.cardMeta}>{value.label}</Text>
+    <View style={[
+      light ? drawerStyles.lightCard : drawerStyles.card,
+      fullWidth && { width: "100%", flexBasis: "100%" },
+      { borderLeftWidth: 3, borderLeftColor: accentColor }
+    ]}>
+      <Text style={light ? drawerStyles.lightCardLabel : drawerStyles.cardLabel}>{label}</Text>
+      <Text style={[light ? drawerStyles.lightCardValue : drawerStyles.cardValue, { color: light ? "#0f172a" : "#ffffff" }]}>{value.value}</Text>
+      <Text style={light ? drawerStyles.lightCardMeta : drawerStyles.cardMeta}>{value.label}</Text>
     </View>
   );
 }
 
-function StripMetric({ label, value, tone }: { label: string; value: string; tone: string }) {
+function StripMetric({ label, value, tone, icon, progressPct, light }: { label: string; value: string; tone: string; icon?: React.ReactNode; progressPct?: number; light?: boolean }) {
+  const isLightText = tone === "#ffffff" || tone === "#fff";
+  const displayTone = light && isLightText ? "#0f172a" : tone;
   return (
-    <View style={drawerStyles.strip}>
-      <Text style={drawerStyles.stripLabel}>{label}</Text>
-      <Text style={[drawerStyles.stripValue, { color: tone }]}>{value}</Text>
-    </View>
-  );
-}
-
-function SectionTitle({ title }: { title: string }) {
-  return <Text style={drawerStyles.sectionTitle}>{title}</Text>;
-}
-
-function MiniGrid({ items }: { items: Array<[string, string]> }) {
-  return (
-    <View style={drawerStyles.miniGrid}>
-      {items.map(([label, value]) => (
-        <View key={label} style={drawerStyles.miniCell}>
-          <Text style={drawerStyles.miniLabel}>{label}</Text>
-          <Text style={drawerStyles.miniValue}>{value}</Text>
+    <View style={[light ? drawerStyles.lightStrip : drawerStyles.strip, { position: "relative", overflow: "hidden" }]}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+        {icon}
+        <Text style={light ? drawerStyles.lightStripLabel : drawerStyles.stripLabel}>{label}</Text>
+      </View>
+      <Text style={[light ? drawerStyles.lightStripValue : drawerStyles.stripValue, { color: displayTone }]}>{value}</Text>
+      {progressPct !== undefined && (
+        <View style={{
+          position: "absolute",
+          left: 0,
+          right: 0,
+          bottom: 0,
+          height: 3,
+          backgroundColor: light ? "rgba(0,0,0,0.05)" : "rgba(255,255,255,0.06)",
+        }}>
+          <View style={{
+            width: `${Math.min(100, Math.max(0, progressPct))}%`,
+            height: "100%",
+            backgroundColor: displayTone,
+          }} />
         </View>
-      ))}
+      )}
+    </View>
+  );
+}
+
+function SectionTitle({ title, light }: { title: string; light?: boolean }) {
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 6, marginTop: 8 }}>
+      <View style={{ width: 3, height: 10, backgroundColor: "#3b82f6", borderRadius: 1.5 }} />
+      <Text style={light ? drawerStyles.lightSectionTitle : drawerStyles.sectionTitle}>{title}</Text>
+    </View>
+  );
+}
+
+function MiniGrid({ items, light }: { items: Array<[string, string]>; light?: boolean }) {
+  return (
+    <View style={{
+      borderRadius: 12,
+      backgroundColor: light ? "#f8fafc" : "#111827",
+      borderWidth: 1,
+      borderColor: light ? "#e2e8f0" : "rgba(255, 255, 255, 0.05)",
+      overflow: "hidden",
+      marginTop: 4,
+    }}>
+      <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
+        {items.map(([label, value], index) => {
+          const isRightColumn = index % 2 === 1;
+          const isBottomRow = index >= items.length - 2;
+          return (
+            <View
+              key={label}
+              style={{
+                width: "50%",
+                paddingVertical: 8,
+                paddingHorizontal: 12,
+                borderRightWidth: isRightColumn ? 0 : 1,
+                borderRightColor: light ? "#e2e8f0" : "rgba(255, 255, 255, 0.05)",
+                borderBottomWidth: isBottomRow ? 0 : 1,
+                borderBottomColor: light ? "#e2e8f0" : "rgba(255, 255, 255, 0.05)",
+              }}
+            >
+              <Text style={{ color: "#64748b", fontSize: 8.5, fontWeight: "800", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                {label}
+              </Text>
+              <Text style={{ color: light ? "#0f172a" : "#ffffff", fontSize: 12, fontWeight: "800", marginTop: 2 }}>
+                {value}
+              </Text>
+            </View>
+          );
+        })}
+      </View>
     </View>
   );
 }
@@ -2463,10 +2812,10 @@ const drawerStyles = {
     width: "42%",
     minWidth: 340,
     maxWidth: 520,
-    backgroundColor: "#0b1220",
-    padding: 18,
+    backgroundColor: "#070c17",
+    padding: 14,
     borderLeftWidth: 1,
-    borderLeftColor: "rgba(148,163,184,0.2)",
+    borderLeftColor: "rgba(255,255,255,0.08)",
     shadowColor: "#000",
     shadowOpacity: 0.2,
     shadowRadius: 18,
@@ -2481,7 +2830,7 @@ const drawerStyles = {
     backgroundColor: "rgba(148,163,184,0.12)",
     alignItems: "center" as const,
     justifyContent: "center" as const,
-    marginBottom: 12,
+    marginBottom: 8,
   },
   closeText: { color: "#fff", fontSize: 22, lineHeight: 22, marginTop: -2 },
   kicker: { color: "#94a3b8", fontSize: 11, fontWeight: "800", letterSpacing: 1.6, textTransform: "uppercase" as const },
@@ -2489,24 +2838,32 @@ const drawerStyles = {
   subtitle: { color: "#cbd5e1", fontSize: 13, lineHeight: 19, marginTop: 8, maxWidth: 380 },
   error: { color: "#fecaca", marginTop: 10, fontWeight: "700" as const },
   loading: { color: "#bfdbfe", marginTop: 10, fontWeight: "700" as const },
-  grid: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: 10, marginTop: 14 },
-  card: { width: "48%", minWidth: 130, borderRadius: 16, backgroundColor: "#111827", borderWidth: 1, borderColor: "rgba(148,163,184,0.18)", padding: 12 },
-  cardLabel: { color: "#94a3b8", fontSize: 11, fontWeight: "800" as const, letterSpacing: 0.6, textTransform: "uppercase" as const },
-  cardValue: { color: "#fff", fontSize: 19, fontWeight: "900" as const, marginTop: 6 },
-  cardMeta: { color: "#cbd5e1", fontSize: 11, marginTop: 4 },
-  stripRow: { flexDirection: "row" as const, gap: 10, marginTop: 10 },
-  strip: { flex: 1, borderRadius: 14, backgroundColor: "#111827", padding: 12, borderWidth: 1, borderColor: "rgba(148,163,184,0.16)" },
-  stripLabel: { color: "#94a3b8", fontSize: 10, fontWeight: "800" as const, textTransform: "uppercase" as const },
-  stripValue: { color: "#fff", fontSize: 16, fontWeight: "900" as const, marginTop: 4 },
-  section: { marginTop: 14 },
-  sectionTitle: { color: "#fff", fontSize: 13, fontWeight: "800" as const, letterSpacing: 0.8, textTransform: "uppercase" as const, marginBottom: 8 },
+  grid: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: 8, marginTop: 10 },
+  card: { flexGrow: 1, width: "48%", minWidth: 120, borderRadius: 12, backgroundColor: "#111827", borderWidth: 1, borderColor: "rgba(255,255,255,0.06)", paddingVertical: 10, paddingHorizontal: 12, flexDirection: "column" as const, overflow: "hidden" as const },
+  cardLabel: { color: "#64748b", fontSize: 9, fontWeight: "800" as const, letterSpacing: 0.8, textTransform: "uppercase" as const },
+  cardValue: { color: "#fff", fontSize: 15, fontWeight: "800" as const, marginTop: 4 },
+  cardMeta: { color: "#94a3b8", fontSize: 9.5, marginTop: 2 },
+  lightCard: { flexGrow: 1, width: "48%", minWidth: 120, borderRadius: 12, backgroundColor: "#f8fafc", borderWidth: 1, borderColor: "#e2e8f0", paddingVertical: 10, paddingHorizontal: 12, flexDirection: "column" as const, overflow: "hidden" as const },
+  lightCardLabel: { color: "#64748b", fontSize: 9, fontWeight: "800" as const, letterSpacing: 0.8, textTransform: "uppercase" as const },
+  lightCardValue: { color: "#0f172a", fontSize: 15, fontWeight: "800" as const, marginTop: 4 },
+  lightCardMeta: { color: "#475569", fontSize: 9.5, marginTop: 2 },
+  stripRow: { flexDirection: "row" as const, gap: 8, marginTop: 8 },
+  strip: { flex: 1, borderRadius: 10, backgroundColor: "#111827", paddingVertical: 8, paddingHorizontal: 10, borderWidth: 1, borderColor: "rgba(255,255,255,0.05)" },
+  stripLabel: { color: "#64748b", fontSize: 8.5, fontWeight: "800" as const, textTransform: "uppercase" as const },
+  stripValue: { color: "#fff", fontSize: 12.5, fontWeight: "800" as const, marginTop: 3 },
+  lightStrip: { flex: 1, borderRadius: 10, backgroundColor: "#f8fafc", paddingVertical: 8, paddingHorizontal: 10, borderWidth: 1, borderColor: "#e2e8f0" },
+  lightStripLabel: { color: "#64748b", fontSize: 8.5, fontWeight: "800" as const, textTransform: "uppercase" as const },
+  lightStripValue: { color: "#0f172a", fontSize: 12.5, fontWeight: "800" as const, marginTop: 3 },
+  section: { marginTop: 12 },
+  sectionTitle: { color: "#94a3b8", fontSize: 10.5, fontWeight: "800" as const, letterSpacing: 1, textTransform: "uppercase" as const, marginBottom: 0 },
+  lightSectionTitle: { color: "#0f172a", fontSize: 10.5, fontWeight: "800" as const, letterSpacing: 1, textTransform: "uppercase" as const, marginBottom: 0 },
   miniGrid: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: 8 },
-  miniCell: { width: "31.5%", minWidth: 94, borderRadius: 12, backgroundColor: "#111827", padding: 10, borderWidth: 1, borderColor: "rgba(148,163,184,0.16)" },
-  miniLabel: { color: "#94a3b8", fontSize: 10, fontWeight: "800" as const, textTransform: "uppercase" as const },
-  miniValue: { color: "#fff", fontSize: 13, fontWeight: "800" as const, marginTop: 6 },
-  list: { gap: 8 },
-  row: { flexDirection: "row" as const, justifyContent: "space-between", gap: 10, borderRadius: 12, backgroundColor: "#111827", paddingHorizontal: 12, paddingVertical: 10, borderWidth: 1, borderColor: "rgba(148,163,184,0.14)" },
-  rowLeft: { color: "#e2e8f0", fontSize: 12, flexShrink: 1, paddingRight: 8 },
+  miniCell: { width: "31.5%", minWidth: 88, borderRadius: 10, backgroundColor: "#111827", padding: 8, borderWidth: 1, borderColor: "rgba(255,255,255,0.05)" },
+  miniLabel: { color: "#64748b", fontSize: 9, fontWeight: "800" as const, textTransform: "uppercase" as const },
+  miniValue: { color: "#fff", fontSize: 12, fontWeight: "800" as const, marginTop: 4 },
+  list: { gap: 6 },
+  row: { flexDirection: "row" as const, justifyContent: "space-between", gap: 10, borderRadius: 8, backgroundColor: "#111827", paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderColor: "rgba(255,255,255,0.05)" },
+  rowLeft: { color: "#e2e8f0", fontSize: 11.5, flexShrink: 1, paddingRight: 8 },
   rowRight: { color: "#fff", fontSize: 11, fontWeight: "800" as const },
   empty: { color: "#94a3b8", fontSize: 12, paddingVertical: 8 },
 } as const;
