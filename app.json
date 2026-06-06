@@ -7,6 +7,15 @@
     "userInterfaceStyle": "automatic",
     "assetBundlePatterns": [
       "**/*"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "63e79af6-e534-48c3-9550-6ab6161e40bc"
+      }
+    },
+    "android": {
+      "package": "com.yasarrrrr.roverthreewheelnative",
+      "usesCleartextTraffic": true
+    }
   }
 }
