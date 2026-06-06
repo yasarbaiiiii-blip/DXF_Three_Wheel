@@ -1594,46 +1594,48 @@ function HomeView({
                       contentContainerStyle={{ padding: 14, paddingBottom: 18 }}
                       showsVerticalScrollIndicator={false}
                     >
-                      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
-                        <View>
-                          <Text style={{ color: "#64748b", fontSize: 9.5, fontWeight: "800", letterSpacing: 1.4, textTransform: "uppercase" }}>
-                            Rover Ops
-                          </Text>
-                          <Text style={{ color: "#0f172a", fontSize: 22, fontWeight: "900", marginTop: 2 }}>
-                            System Panel
-                          </Text>
-                        </View>
-                        <View style={{
-                          flexDirection: "row",
-                          alignItems: "center",
-                          backgroundColor: (!telemetryError && (systemHealth?.ros_node || systemHealth?.fcu_connected || telemetrySnapshot !== null)) ? "rgba(22, 163, 74, 0.08)" : "rgba(220, 38, 38, 0.08)",
-                          paddingHorizontal: 8,
-                          paddingVertical: 4,
-                          borderRadius: 999,
-                          borderWidth: 1,
-                          borderColor: (!telemetryError && (systemHealth?.ros_node || systemHealth?.fcu_connected || telemetrySnapshot !== null)) ? "rgba(22, 163, 74, 0.15)" : "rgba(220, 38, 38, 0.15)",
-                          gap: 6,
-                        }}>
+                      <View style={{ borderBottomWidth: 1, borderBottomColor: "#f1f5f9", paddingBottom: 12, marginBottom: 12 }}>
+                        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
+                          <View>
+                            <Text style={{ color: "#64748b", fontSize: 9.5, fontWeight: "800", letterSpacing: 1.4, textTransform: "uppercase" }}>
+                              Rover Ops
+                            </Text>
+                            <Text style={{ color: "#0f172a", fontSize: 22, fontWeight: "900", marginTop: 2 }}>
+                              System Panel
+                            </Text>
+                          </View>
                           <View style={{
-                            width: 6,
-                            height: 6,
-                            borderRadius: 3,
-                            backgroundColor: (!telemetryError && (systemHealth?.ros_node || systemHealth?.fcu_connected || telemetrySnapshot !== null)) ? "#16a34a" : "#dc2626",
-                          }} />
-                          <Text style={{
-                            color: (!telemetryError && (systemHealth?.ros_node || systemHealth?.fcu_connected || telemetrySnapshot !== null)) ? "#16a34a" : "#dc2626",
-                            fontSize: 10,
-                            fontWeight: "800",
-                            textTransform: "uppercase",
-                            letterSpacing: 0.5,
+                            flexDirection: "row",
+                            alignItems: "center",
+                            backgroundColor: (!telemetryError && (systemHealth?.ros_node || systemHealth?.fcu_connected || telemetrySnapshot !== null)) ? "rgba(22, 163, 74, 0.08)" : "rgba(220, 38, 38, 0.08)",
+                            paddingHorizontal: 8,
+                            paddingVertical: 4,
+                            borderRadius: 999,
+                            borderWidth: 1,
+                            borderColor: (!telemetryError && (systemHealth?.ros_node || systemHealth?.fcu_connected || telemetrySnapshot !== null)) ? "rgba(22, 163, 74, 0.15)" : "rgba(220, 38, 38, 0.15)",
+                            gap: 6,
                           }}>
-                            {(!telemetryError && (systemHealth?.ros_node || systemHealth?.fcu_connected || telemetrySnapshot !== null)) ? "Live" : "Offline"}
-                          </Text>
+                            <View style={{
+                              width: 6,
+                              height: 6,
+                              borderRadius: 3,
+                              backgroundColor: (!telemetryError && (systemHealth?.ros_node || systemHealth?.fcu_connected || telemetrySnapshot !== null)) ? "#16a34a" : "#dc2626",
+                            }} />
+                            <Text style={{
+                              color: (!telemetryError && (systemHealth?.ros_node || systemHealth?.fcu_connected || telemetrySnapshot !== null)) ? "#16a34a" : "#dc2626",
+                              fontSize: 10,
+                              fontWeight: "800",
+                              textTransform: "uppercase",
+                              letterSpacing: 0.5,
+                            }}>
+                              {(!telemetryError && (systemHealth?.ros_node || systemHealth?.fcu_connected || telemetrySnapshot !== null)) ? "Live" : "Offline"}
+                            </Text>
+                          </View>
                         </View>
+                        <Text style={{ color: "#475569", fontSize: 12, lineHeight: 17, marginTop: 6 }}>
+                          Real-time diagnostics and status feed.
+                        </Text>
                       </View>
-                      <Text style={{ color: "#475569", fontSize: 12, lineHeight: 17, marginTop: 6, marginBottom: 4 }}>
-                        Real-time diagnostics and status feed.
-                      </Text>
 
                       {telemetryError ? <Text style={[drawerStyles.error, { color: "#b91c1c" }]}>{telemetryError}</Text> : null}
                       {telemetryLoading ? <Text style={[drawerStyles.loading, { color: "#2563eb" }]}>Refreshing live data...</Text> : null}
@@ -2697,9 +2699,22 @@ function LineDetailsDrawer({
 
 function StatCard({ label, value, fullWidth, light }: { label: string; value: { label: string; value: string; tone: string }; fullWidth?: boolean; light?: boolean }) {
   const accentColor = (value.tone === "#ffffff" || value.tone === "#fff" || value.tone === "#0f172a") ? "#3b82f6" : value.tone || "#475569";
+  
+  let cardBg = undefined;
+  if (light) {
+    if (value.tone === "#16a34a") {
+      cardBg = "#f0fdf4"; // Very soft green tint
+    } else if (value.tone === "#dc2626") {
+      cardBg = "#fef2f2"; // Very soft red tint
+    } else if (value.tone === "#d97706") {
+      cardBg = "#fffbeb"; // Very soft amber tint
+    }
+  }
+
   return (
     <View style={[
       light ? drawerStyles.lightCard : drawerStyles.card,
+      cardBg && { backgroundColor: cardBg },
       fullWidth && { width: "100%", flexBasis: "100%" },
       { borderLeftWidth: 3, borderLeftColor: accentColor }
     ]}>
@@ -2726,8 +2741,8 @@ function StripMetric({ label, value, tone, icon, progressPct, light }: { label: 
           left: 0,
           right: 0,
           bottom: 0,
-          height: 3,
-          backgroundColor: light ? "rgba(0,0,0,0.05)" : "rgba(255,255,255,0.06)",
+          height: 4,
+          backgroundColor: light ? "#e2e8f0" : "rgba(255,255,255,0.06)",
         }}>
           <View style={{
             width: `${Math.min(100, Math.max(0, progressPct))}%`,
@@ -2742,9 +2757,12 @@ function StripMetric({ label, value, tone, icon, progressPct, light }: { label: 
 
 function SectionTitle({ title, light }: { title: string; light?: boolean }) {
   return (
-    <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 6, marginTop: 8 }}>
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8, marginTop: 12 }}>
       <View style={{ width: 3, height: 10, backgroundColor: "#3b82f6", borderRadius: 1.5 }} />
       <Text style={light ? drawerStyles.lightSectionTitle : drawerStyles.sectionTitle}>{title}</Text>
+      {light && (
+        <View style={{ flex: 1, height: 1, backgroundColor: "#e2e8f0", marginLeft: 4 }} />
+      )}
     </View>
   );
 }
