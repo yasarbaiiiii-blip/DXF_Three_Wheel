@@ -14,12 +14,13 @@ import {
   FileUp,
   Hand,
   RotateCw,
+  RotateCcw,
   Search,
   Trash2,
   ZoomIn,
   ZoomOut,
 } from "lucide-react-native";
-import Svg, { Circle, G, Line } from "react-native-svg";
+import Svg, { Circle, G, Line, Polygon, Text as SvgText } from "react-native-svg";
 
 import type { Palette } from "../theme/colors";
 import type { ImportedPlan, MarkingStyle, PlanLine } from "../types/plan";
@@ -361,6 +362,41 @@ export function GeometryViewport({
                 </Svg>
               </View>
 
+              {/* Floating Compass Overlay */}
+              <View
+                style={{
+                  position: "absolute",
+                  top: 14,
+                  right: 14,
+                  width: 54,
+                  height: 54,
+                  zIndex: 40,
+                  elevation: 40,
+                  backgroundColor: "transparent",
+                }}
+              >
+                <Svg width={54} height={54} viewBox="0 0 54 54">
+                  {/* Outer circle */}
+                  <Circle cx={27} cy={27} r={24} fill="rgba(15,23,42,0.85)" stroke={palette.border} strokeWidth={1.5} />
+                  
+                  {/* Cardinal labels */}
+                  <SvgText x={27} y={12} fontSize={8} fill="#ef4444" fontWeight="900" textAnchor="middle">N</SvgText>
+                  <SvgText x={27} y={48} fontSize={7} fill={palette.mutedForeground} fontWeight="700" textAnchor="middle">S</SvgText>
+                  <SvgText x={47} y={30} fontSize={7} fill={palette.mutedForeground} fontWeight="700" textAnchor="middle">E</SvgText>
+                  <SvgText x={7} y={30} fontSize={7} fill={palette.mutedForeground} fontWeight="700" textAnchor="middle">W</SvgText>
+                  
+                  {/* Rotating needle */}
+                  <G transform={`rotate(${rotation} 27 27)`}>
+                    {/* North Pointer */}
+                    <Polygon points="27,15 31,27 23,27" fill="#ef4444" />
+                    {/* South Pointer */}
+                    <Polygon points="27,39 31,27 23,27" fill="#cbd5e1" />
+                    {/* Center pin */}
+                    <Circle cx={27} cy={27} r={2.5} fill="#0f172a" stroke="#fff" strokeWidth={1} />
+                  </G>
+                </Svg>
+              </View>
+
               <View
                 className="absolute left-6 right-6 top-6 flex-row items-start justify-between rounded-2xl px-4 py-4"
                 style={{ backgroundColor: palette.background, gap: 16 }}
@@ -518,6 +554,18 @@ export function GeometryViewport({
                 label="Zoom +"
                 palette={palette}
                 onPress={() => setZoom((current) => Math.min(2.6, current + 0.15))}
+              />
+              <LabeledToolButton
+                icon={<RotateCcw size={24} color={palette.foreground} />}
+                label="Rot CCW"
+                palette={palette}
+                onPress={() => onRotationChange(((rotation - 15) % 360 + 360) % 360)}
+              />
+              <LabeledToolButton
+                icon={<RotateCw size={24} color={palette.foreground} />}
+                label="Rot CW"
+                palette={palette}
+                onPress={() => onRotationChange(((rotation + 15) % 360 + 360) % 360)}
               />
               <Pressable
                 onPress={() => {
