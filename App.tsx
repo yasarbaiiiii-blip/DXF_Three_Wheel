@@ -200,6 +200,8 @@ export default function App() {
   const [rtkUsername, setRtkUsername] = useState("");
   const [rtkPassword, setRtkPassword] = useState("");
   const [rtkConnecting, setRtkConnecting] = useState(false);
+  const [rtkRunning, setRtkRunning] = useState(false);
+  const [rtkHealthy, setRtkHealthy] = useState(false);
   const [toggleA, setToggleA] = useState(false);
   const [toggleB, setToggleB] = useState(false);
   const [toggleC, setToggleC] = useState(true);
@@ -896,43 +898,83 @@ export default function App() {
 
   async function connectRtkCaster() {
     if (!apiBaseUrl) return;
-    if (!rtkCaster || !rtkPort || !rtkMountPoint || !rtkUsername || !rtkPassword) {
-      Alert.alert("Missing fields", "Please fill in all 5 RTK caster credentials.");
-      return;
-    }
     setRtkConnecting(true);
-    logAction("RTK_CONNECT_REQUEST", { caster: rtkCaster, port: rtkPort, mountpoint: rtkMountPoint });
     try {
-      showToast("RTK Injection", "Connecting to NTRIP caster...", "info");
-      const res = await fetch(`${apiBaseUrl}/api/ntrip/connect`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          caster: rtkCaster,
-          port: parseInt(rtkPort, 10),
-          mountpoint: rtkMountPoint,
-          username: rtkUsername,
-          password: rtkPassword,
-        }),
-      });
-      if (!res.ok) {
-        const txt = await res.text();
-        throw new Error(txt || "NTRIP caster connection failed.");
+      if (rtkRunning) {
+        showToast("RTK Injection", "Stopping RTK stream...", "warning");
+        logAction("RTK_STOP_REQUEST");
+        const res = await fetch(`${apiBaseUrl}/api/rtk/stop`, {
+          method: "POST",
+        });
+        if (!res.ok) {
+          const txt = await res.text();
+          throw new Error(txt || "Failed to stop RTK correction stream.");
+        }
+        setRtkRunning(false);
+        logAction("RTK_STOP_SUCCESS");
+        Alert.alert("RTK Stopped", "NTRIP RTK correction stream stopped successfully.");
+        showToast("RTK Stopped", "RTK stream stopped.", "success");
+        setRtkModalOpen(false);
+      } else {
+        if (!rtkCaster || !rtkPort || !rtkMountPoint || !rtkUsername || !rtkPassword) {
+          Alert.alert("Missing fields", "Please fill in all 5 RTK caster credentials.");
+          setRtkConnecting(false);
+          return;
+        }
+        logAction("RTK_CONNECT_REQUEST", { caster: rtkCaster, port: rtkPort, mountpoint: rtkMountPoint });
+        showToast("RTK Injection", "Connecting to NTRIP caster...", "info");
+        const res = await fetch(`${apiBaseUrl}/api/rtk/ntrip/start`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            host: rtkCaster,
+            port: parseInt(rtkPort, 10),
+            mountpoint: rtkMountPoint,
+            user: rtkUsername,
+            pass: rtkPassword,
+          }),
+        });
+        if (!res.ok) {
+          const txt = await res.text();
+          throw new Error(txt || "NTRIP start failed.");
+        }
+        const data = await res.json();
+        setRtkRunning(data.running);
+        setRtkHealthy(data.healthy);
+        logAction("RTK_CONNECT_SUCCESS", { caster: rtkCaster });
+        Alert.alert("RTK Started", "NTRIP RTK caster started successfully.");
+        showToast("RTK Started", "NTRIP RTK stream active.", "success");
+        setRtkModalOpen(false);
       }
-      logAction("RTK_CONNECT_SUCCESS", { caster: rtkCaster });
-      Alert.alert("RTK Connected", "NTRIP RTK caster connected successfully.");
-      showToast("RTK Connected", "NTRIP RTK stream active.", "success");
-      setRtkModalOpen(false);
     } catch (error) {
-      logAction("RTK_CONNECT_FAILED", { error: error instanceof Error ? error.message : String(error) });
-      Alert.alert("Connection failed", error instanceof Error ? error.message : "Failed to connect to NTRIP caster.");
-      showToast("RTK Failed", error instanceof Error ? error.message : "Failed to connect to NTRIP caster.", "error");
+      logAction("RTK_ACTION_FAILED", { error: error instanceof Error ? error.message : String(error) });
+      Alert.alert("RTK Action Failed", error instanceof Error ? error.message : "Failed to perform RTK action.");
+      showToast("RTK Failed", error instanceof Error ? error.message : "Failed to perform RTK action.", "error");
     } finally {
       setRtkConnecting(false);
     }
   }
+
+  useEffect(() => {
+    if (!apiBaseUrl) return;
+    const fetchRtkStatus = async () => {
+      try {
+        const res = await fetch(`${apiBaseUrl}/api/rtk/status`);
+        if (res.ok) {
+          const data = await res.json();
+          setRtkRunning(data.running);
+          setRtkHealthy(data.healthy);
+        }
+      } catch (err) {
+        console.log("Failed to fetch RTK status:", err);
+      }
+    };
+    void fetchRtkStatus();
+    const interval = setInterval(fetchRtkStatus, 3000);
+    return () => clearInterval(interval);
+  }, [apiBaseUrl]);
 
   async function stopMissionOnBackend() {
     if (!apiBaseUrl) {
@@ -1303,6 +1345,8 @@ export default function App() {
           setRtkPassword={setRtkPassword}
           rtkConnecting={rtkConnecting}
           connectRtkCaster={connectRtkCaster}
+          rtkRunning={rtkRunning}
+          rtkHealthy={rtkHealthy}
         />
         ) : (
           <SectionScreen
@@ -1517,6 +1561,8 @@ function HomeView({
   setRtkPassword,
   rtkConnecting,
   connectRtkCaster,
+  rtkRunning,
+  rtkHealthy,
 }: {
   importedPlan: ImportedPlan | null;
   lines: PlanLine[];
@@ -1561,6 +1607,8 @@ function HomeView({
   setRtkPassword: React.Dispatch<React.SetStateAction<string>>;
   rtkConnecting: boolean;
   connectRtkCaster: () => Promise<void>;
+  rtkRunning: boolean;
+  rtkHealthy: boolean;
 }) {
   const selectedLine = lines.find((line) => line.id === selectedLineId) ?? null;
   const hasPlan = lines.length > 0;
@@ -2628,6 +2676,7 @@ function HomeView({
                 <TextInput
                   value={rtkCaster}
                   onChangeText={setRtkCaster}
+                  editable={!rtkRunning}
                   autoCapitalize="none"
                   autoCorrect={false}
                   placeholder="caster.emlid.com"
@@ -2637,8 +2686,8 @@ function HomeView({
                     borderColor: "#cbd5e1",
                     borderRadius: 8,
                     paddingHorizontal: 10,
-                    backgroundColor: "#f8fafc",
-                    color: "#0f172a",
+                    backgroundColor: rtkRunning ? "#e2e8f0" : "#f8fafc",
+                    color: rtkRunning ? "#64748b" : "#0f172a",
                     fontSize: 13,
                   }}
                 />
@@ -2650,6 +2699,7 @@ function HomeView({
                   <TextInput
                     value={rtkPort}
                     onChangeText={setRtkPort}
+                    editable={!rtkRunning}
                     keyboardType="numeric"
                     autoCapitalize="none"
                     autoCorrect={false}
@@ -2660,8 +2710,8 @@ function HomeView({
                       borderColor: "#cbd5e1",
                       borderRadius: 8,
                       paddingHorizontal: 10,
-                      backgroundColor: "#f8fafc",
-                      color: "#0f172a",
+                      backgroundColor: rtkRunning ? "#e2e8f0" : "#f8fafc",
+                      color: rtkRunning ? "#64748b" : "#0f172a",
                       fontSize: 13,
                     }}
                   />
@@ -2671,6 +2721,7 @@ function HomeView({
                   <TextInput
                     value={rtkMountPoint}
                     onChangeText={setRtkMountPoint}
+                    editable={!rtkRunning}
                     autoCapitalize="none"
                     autoCorrect={false}
                     placeholder="e.g. MP23960a"
@@ -2680,8 +2731,8 @@ function HomeView({
                       borderColor: "#cbd5e1",
                       borderRadius: 8,
                       paddingHorizontal: 10,
-                      backgroundColor: "#f8fafc",
-                      color: "#0f172a",
+                      backgroundColor: rtkRunning ? "#e2e8f0" : "#f8fafc",
+                      color: rtkRunning ? "#64748b" : "#0f172a",
                       fontSize: 13,
                     }}
                   />
@@ -2693,6 +2744,7 @@ function HomeView({
                 <TextInput
                   value={rtkUsername}
                   onChangeText={setRtkUsername}
+                  editable={!rtkRunning}
                   autoCapitalize="none"
                   autoCorrect={false}
                   placeholder="NTRIP Username"
@@ -2702,8 +2754,8 @@ function HomeView({
                     borderColor: "#cbd5e1",
                     borderRadius: 8,
                     paddingHorizontal: 10,
-                    backgroundColor: "#f8fafc",
-                    color: "#0f172a",
+                    backgroundColor: rtkRunning ? "#e2e8f0" : "#f8fafc",
+                    color: rtkRunning ? "#64748b" : "#0f172a",
                     fontSize: 13,
                   }}
                 />
@@ -2714,6 +2766,7 @@ function HomeView({
                 <TextInput
                   value={rtkPassword}
                   onChangeText={setRtkPassword}
+                  editable={!rtkRunning}
                   secureTextEntry
                   autoCapitalize="none"
                   autoCorrect={false}
@@ -2724,8 +2777,8 @@ function HomeView({
                     borderColor: "#cbd5e1",
                     borderRadius: 8,
                     paddingHorizontal: 10,
-                    backgroundColor: "#f8fafc",
-                    color: "#0f172a",
+                    backgroundColor: rtkRunning ? "#e2e8f0" : "#f8fafc",
+                    color: rtkRunning ? "#64748b" : "#0f172a",
                     fontSize: 13,
                   }}
                 />
@@ -2756,11 +2809,11 @@ function HomeView({
                   borderRadius: 10,
                   alignItems: "center",
                   justifyContent: "center",
-                  backgroundColor: rtkConnecting ? "#93c5fd" : "#0ea5e9",
+                  backgroundColor: rtkConnecting ? "#93c5fd" : (rtkRunning ? "#dc2626" : "#0ea5e9"),
                 }}
               >
                 <Text style={{ color: "#ffffff", fontWeight: "800", fontSize: 13 }}>
-                  {rtkConnecting ? "Connecting..." : "Connect"}
+                  {rtkConnecting ? "Processing..." : (rtkRunning ? "Stop" : "Ntrip Start")}
                 </Text>
               </Pressable>
             </View>
