@@ -1596,7 +1596,15 @@ function HomeView({
           <View style={{ width: "58%", backgroundColor: "#ffffff" }}>
             <View style={{ flex: 1, margin: 14, marginTop: 72, borderRadius: 20, overflow: "hidden", backgroundColor: "#ffffff", borderWidth: 1, borderColor: "#d8e1eb" }}>
               <View style={{ flex: 1, position: "relative" }}>
-                <PlanPreview lines={lines} visibility={layerVisibility} selectedLineId={selectedLineId} onSelectLine={onSelectLine} />
+                <PlanPreview
+                  lines={lines}
+                  visibility={layerVisibility}
+                  selectedLineId={selectedLineId}
+                  onSelectLine={onSelectLine}
+                  roverPosN={telemetrySnapshot?.pos_n ?? null}
+                  roverPosE={telemetrySnapshot?.pos_e ?? null}
+                  roverHeadingDeg={telemetrySnapshot?.heading_ned_deg ?? null}
+                />
               </View>
             </View>
           </View>
@@ -1672,19 +1680,63 @@ function HomeView({
                       {telemetryError ? <Text style={[drawerStyles.error, { color: "#b91c1c" }]}>{telemetryError}</Text> : null}
                       {telemetryLoading ? <Text style={[drawerStyles.loading, { color: "#2563eb" }]}>Refreshing live data...</Text> : null}
 
+                      {/* ── Priority section: GPS, Armed, Mode ── */}
+                      <View style={{ borderRadius: 14, backgroundColor: "#f8faff", borderWidth: 1, borderColor: "#e2e8f0", padding: 12, marginBottom: 12, gap: 8 }}>
+                        <Text style={{ color: "#64748b", fontSize: 9, fontWeight: "800", letterSpacing: 1.2, textTransform: "uppercase", marginBottom: 2 }}>GPS & Vehicle Status</Text>
+                        <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+                          <View style={{ flex: 1, minWidth: 80, backgroundColor: "#ffffff", borderRadius: 10, borderWidth: 1, borderColor: "#e2e8f0", padding: 8 }}>
+                            <Text style={{ color: "#94a3b8", fontSize: 9, fontWeight: "700", textTransform: "uppercase" }}>GPS Fix</Text>
+                            <Text style={{ color: telemetrySnapshot?.gps_fix == null ? "#94a3b8" : telemetrySnapshot.gps_fix >= 5 ? "#16a34a" : telemetrySnapshot.gps_fix >= 3 ? "#d97706" : "#dc2626", fontSize: 13, fontWeight: "900", marginTop: 3 }}>
+                              {telemetrySnapshot?.gps_fix == null ? "n/a" : telemetrySnapshot.gps_fix === 0 ? "No Fix" : telemetrySnapshot.gps_fix === 4 ? "DGPS" : telemetrySnapshot.gps_fix === 5 ? "RTK Float" : telemetrySnapshot.gps_fix === 6 ? "RTK Fixed" : `Fix (${telemetrySnapshot.gps_fix})`}
+                            </Text>
+                          </View>
+                          <View style={{ flex: 1, minWidth: 80, backgroundColor: "#ffffff", borderRadius: 10, borderWidth: 1, borderColor: "#e2e8f0", padding: 8 }}>
+                            <Text style={{ color: "#94a3b8", fontSize: 9, fontWeight: "700", textTransform: "uppercase" }}>Satellites</Text>
+                            <Text style={{ color: telemetrySnapshot?.gps_sat == null ? "#94a3b8" : telemetrySnapshot.gps_sat >= 10 ? "#16a34a" : telemetrySnapshot.gps_sat >= 6 ? "#d97706" : "#dc2626", fontSize: 13, fontWeight: "900", marginTop: 3 }}>
+                              {telemetrySnapshot?.gps_sat == null ? "n/a" : `${telemetrySnapshot.gps_sat} sats`}
+                            </Text>
+                          </View>
+                        </View>
+                        <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+                          <View style={{ flex: 1, minWidth: 80, backgroundColor: "#ffffff", borderRadius: 10, borderWidth: 1, borderColor: "#e2e8f0", padding: 8 }}>
+                            <Text style={{ color: "#94a3b8", fontSize: 9, fontWeight: "700", textTransform: "uppercase" }}>Latitude</Text>
+                            <Text style={{ color: "#0f172a", fontSize: 12, fontWeight: "800", marginTop: 3 }} numberOfLines={1}>
+                              {telemetrySnapshot?.lat == null ? "n/a" : telemetrySnapshot.lat.toFixed(6)}
+                            </Text>
+                          </View>
+                          <View style={{ flex: 1, minWidth: 80, backgroundColor: "#ffffff", borderRadius: 10, borderWidth: 1, borderColor: "#e2e8f0", padding: 8 }}>
+                            <Text style={{ color: "#94a3b8", fontSize: 9, fontWeight: "700", textTransform: "uppercase" }}>Longitude</Text>
+                            <Text style={{ color: "#0f172a", fontSize: 12, fontWeight: "800", marginTop: 3 }} numberOfLines={1}>
+                              {telemetrySnapshot?.lon == null ? "n/a" : telemetrySnapshot.lon.toFixed(6)}
+                            </Text>
+                          </View>
+                        </View>
+                        <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+                          <View style={{ flex: 1, minWidth: 80, backgroundColor: "#ffffff", borderRadius: 10, borderWidth: 1, borderColor: "#e2e8f0", padding: 8 }}>
+                            <Text style={{ color: "#94a3b8", fontSize: 9, fontWeight: "700", textTransform: "uppercase" }}>Altitude</Text>
+                            <Text style={{ color: "#0f172a", fontSize: 13, fontWeight: "900", marginTop: 3 }}>
+                              {telemetrySnapshot?.alt == null ? "n/a" : `${telemetrySnapshot.alt.toFixed(1)} m`}
+                            </Text>
+                          </View>
+                          <View style={{ flex: 1, minWidth: 80, backgroundColor: (telemetrySnapshot?.armed ?? systemHealth?.armed) ? "#fef2f2" : "#f0fdf4", borderRadius: 10, borderWidth: 1, borderColor: (telemetrySnapshot?.armed ?? systemHealth?.armed) ? "#fca5a5" : "#86efac", padding: 8 }}>
+                            <Text style={{ color: "#94a3b8", fontSize: 9, fontWeight: "700", textTransform: "uppercase" }}>Armed</Text>
+                            <Text style={{ color: (telemetrySnapshot?.armed ?? systemHealth?.armed) ? "#dc2626" : "#16a34a", fontSize: 13, fontWeight: "900", marginTop: 3 }}>
+                              {(telemetrySnapshot?.armed ?? systemHealth?.armed) ? "ARMED" : "DISARMED"}
+                            </Text>
+                          </View>
+                          <View style={{ flex: 1, minWidth: 80, backgroundColor: "#ffffff", borderRadius: 10, borderWidth: 1, borderColor: "#e2e8f0", padding: 8 }}>
+                            <Text style={{ color: "#94a3b8", fontSize: 9, fontWeight: "700", textTransform: "uppercase" }}>Mode</Text>
+                            <Text style={{ color: "#0f172a", fontSize: 13, fontWeight: "900", marginTop: 3 }}>
+                              {telemetrySnapshot?.mode ?? systemHealth?.mode ?? "n/a"}
+                            </Text>
+                          </View>
+                        </View>
+                      </View>
+
+                      {/* ── Rest of diagnostics ── */}
                       <View style={drawerStyles.grid}>
                         <StatCard label="ROS node" value={pulse("ROS node", systemHealth?.ros_node)} light />
                         <StatCard label="FCU link" value={pulse("FCU link", systemHealth?.fcu_connected)} light />
-                        <StatCard label="Armed" value={pulse("Armed", telemetrySnapshot?.armed ?? systemHealth?.armed)} light />
-                        <StatCard
-                          label="Mode"
-                          value={{
-                            label: "Control mode",
-                            value: telemetrySnapshot?.mode ?? systemHealth?.mode ?? "UNKNOWN",
-                            tone: "#0f172a",
-                          }}
-                          light
-                        />
                         <StatCard
                           label="State"
                           value={{
@@ -1735,22 +1787,8 @@ function HomeView({
                             ["Cross-track", telemetrySnapshot?.xtrack_m == null ? "n/a" : `${telemetrySnapshot.xtrack_m.toFixed(2)} m`],
                             ["Goal dist", telemetrySnapshot?.dist_to_goal_m == null ? "n/a" : `${telemetrySnapshot.dist_to_goal_m.toFixed(2)} m`],
                             ["Lookahead", telemetrySnapshot?.lookahead_m == null ? "n/a" : `${telemetrySnapshot.lookahead_m.toFixed(2)} m`],
-                            ["Satellites", telemetrySnapshot?.gps_sat == null ? "n/a" : `${telemetrySnapshot.gps_sat}`],
-                          ]}
-                          light
-                        />
-                      </View>
-
-                      <View style={drawerStyles.section}>
-                        <SectionTitle title="Position & Coordinates" light />
-                        <MiniGrid
-                          items={[
                             ["North (N)", telemetrySnapshot?.pos_n == null ? "n/a" : `${telemetrySnapshot.pos_n.toFixed(2)} m`],
                             ["East (E)", telemetrySnapshot?.pos_e == null ? "n/a" : `${telemetrySnapshot.pos_e.toFixed(2)} m`],
-                            ["Latitude", telemetrySnapshot?.lat == null ? "n/a" : telemetrySnapshot.lat.toFixed(6)],
-                            ["Longitude", telemetrySnapshot?.lon == null ? "n/a" : telemetrySnapshot.lon.toFixed(6)],
-                            ["Altitude", telemetrySnapshot?.alt == null ? "n/a" : `${telemetrySnapshot.alt.toFixed(2)} m`],
-                            ["GPS Fix Type", telemetrySnapshot?.gps_fix == null ? "n/a" : telemetrySnapshot.gps_fix === 0 ? "No Fix (0)" : telemetrySnapshot.gps_fix === 4 ? "DGPS (4)" : telemetrySnapshot.gps_fix === 5 ? "RTK Float (5)" : telemetrySnapshot.gps_fix === 6 ? "RTK Fixed (6)" : `Fix (${telemetrySnapshot.gps_fix})`],
                           ]}
                           light
                         />
@@ -4012,11 +4050,17 @@ function PlanPreview({
   visibility,
   selectedLineId,
   onSelectLine,
+  roverPosN,
+  roverPosE,
+  roverHeadingDeg,
 }: {
   lines: PlanLine[];
   visibility: LayerVisibility;
   selectedLineId: string | null;
   onSelectLine?: (id: string | null) => void;
+  roverPosN?: number | null;
+  roverPosE?: number | null;
+  roverHeadingDeg?: number | null;
 }) {
   const filtered = useMemo(
     () =>
@@ -4029,12 +4073,20 @@ function PlanPreview({
     [lines, visibility]
   );
 
+  // Rover world-space position: pos_e = X axis, pos_n = Y axis (NED: East = right, North = up)
+  const hasRover = roverPosN != null && roverPosE != null;
+  const roverX = roverPosE ?? 0;   // East → SVG X
+  const roverY = roverPosN ?? 0;   // North → SVG Y (will be negated in transform)
+  const roverDeg = roverHeadingDeg ?? 0;
+
   const viewportRef = React.useRef<PreviewViewport>({ panX: 0, panY: 0, zoom: 1 });
   const linesRef = React.useRef(filtered);
   const onSelectLineRef = React.useRef(onSelectLine);
   const [layoutSize, setLayoutSize] = useState({ width: 0, height: 0 });
   const [viewport, setViewport] = useState<PreviewViewport>({ panX: 0, panY: 0, zoom: 1 });
   const [rotation, setRotation] = useState(0);
+  // Track whether user has manually panned so auto-pan doesn't fight them
+  const userPannedRef = React.useRef(false);
 
   const rotationRef = React.useRef(rotation);
   useEffect(() => {
@@ -4071,15 +4123,56 @@ function PlanPreview({
     viewportRef.current = viewport;
   }, [viewport]);
 
+  // Auto-fit when plan lines change
   useEffect(() => {
-    if (layoutSize.width <= 0 || layoutSize.height <= 0 || filtered.length === 0) {
+    if (layoutSize.width <= 0 || layoutSize.height <= 0) return;
+    if (filtered.length === 0) {
+      // No plan: centre on rover if available, else use origin
+      userPannedRef.current = false;
+      const cx = roverX;
+      const cy = -roverY; // NED North is up, so invert Y
+      const defaultZoom = 40; // 40 px per metre looks reasonable at ~1m scale
+      const fitted: PreviewViewport = {
+        panX: layoutSize.width / 2 - cx * defaultZoom,
+        panY: layoutSize.height / 2 - cy * defaultZoom,
+        zoom: defaultZoom,
+      };
+      viewportRef.current = fitted;
+      setViewport(fitted);
+      setRotation(0);
       return;
     }
+    userPannedRef.current = false;
     const fitted = computeAutoFitViewport(filtered, layoutSize.width, layoutSize.height);
     viewportRef.current = fitted;
     setViewport(fitted);
     setRotation(0);
   }, [filtered, layoutSize.width, layoutSize.height]);
+
+  // Auto-pan to keep rover in view (only when not manually panned by user)
+  useEffect(() => {
+    if (!hasRover || layoutSize.width <= 0 || layoutSize.height <= 0) return;
+    if (userPannedRef.current) return;
+    const vp = viewportRef.current;
+    // Rover screen position (NED: East=X, North=up so Y is inverted)
+    const screenX = roverX * vp.zoom + vp.panX;
+    const screenY = -roverY * vp.zoom + vp.panY;
+    const margin = 60;
+    const needsPan =
+      screenX < margin ||
+      screenX > layoutSize.width - margin ||
+      screenY < margin ||
+      screenY > layoutSize.height - margin;
+    if (needsPan) {
+      const next: PreviewViewport = {
+        ...vp,
+        panX: layoutSize.width / 2 - roverX * vp.zoom,
+        panY: layoutSize.height / 2 - (-roverY) * vp.zoom,
+      };
+      viewportRef.current = next;
+      setViewport(next);
+    }
+  }, [roverX, roverY, hasRover, layoutSize]);
 
   const handleLayout = useCallback((event: any) => {
     const { width, height } = event.nativeEvent.layout ?? {};
@@ -4121,6 +4214,7 @@ function PlanPreview({
             const dy = current.y - gestureRef.current.lastTouch.y;
             if (Math.hypot(current.x - gestureRef.current.startTouch!.x, current.y - gestureRef.current.startTouch!.y) > 4) {
               gestureRef.current.isTap = false;
+              userPannedRef.current = true;
             }
             gestureRef.current.lastTouch = current;
             const next = {
@@ -4143,6 +4237,7 @@ function PlanPreview({
             };
 
             gestureRef.current.isTap = false;
+            userPannedRef.current = true;
             if (
               !gestureRef.current.pinchDistance ||
               gestureRef.current.pinchDistance <= 0 ||
@@ -4210,13 +4305,21 @@ function PlanPreview({
     return "#475569";
   };
 
+  // Compute rover screen coordinates for icon rendering
+  const roverScreenX = roverX * viewport.zoom + viewport.panX;
+  const roverScreenY = -roverY * viewport.zoom + viewport.panY; // NED North=up so invert Y
+
+  // Grid spacing in world units for the no-plan grid
+  const GRID_WORLD_SPACING = 1; // 1 metre squares
+
   return (
     <View
       onLayout={handleLayout}
-      style={{ flex: 1, backgroundColor: "#f5f7fb" }}
+      style={{ flex: 1, backgroundColor: "#f0f4f8" }}
       {...panResponder.panHandlers}
     >
-      {filtered.length === 0 ? (
+      {filtered.length === 0 && !hasRover ? (
+        // No plan, no rover: show placeholder
         <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 18 }}>
           <Text style={{ color: "#475569", fontSize: 15, textAlign: "center", lineHeight: 22 }}>
             No plan lines to display yet.
@@ -4227,6 +4330,50 @@ function PlanPreview({
         </View>
       ) : (
         <Svg width="100%" height="100%">
+          {/* ── Background grid (always visible) ── */}
+          {layoutSize.width > 0 && layoutSize.height > 0 && (() => {
+            const gridLines: React.ReactElement[] = [];
+            const spacing = GRID_WORLD_SPACING * viewport.zoom;
+            if (spacing < 8) return null; // too dense to draw
+            // Find grid origin in screen space (world 0,0)
+            const originX = viewport.panX;
+            const originY = viewport.panY;
+            // Vertical lines (constant X in world space)
+            const startCol = Math.floor(-originX / spacing) - 1;
+            const endCol = Math.ceil((layoutSize.width - originX) / spacing) + 1;
+            for (let c = startCol; c <= endCol; c++) {
+              const sx = originX + c * spacing;
+              const isOrigin = c === 0;
+              gridLines.push(
+                <Line
+                  key={`gv${c}`}
+                  x1={sx} y1={0} x2={sx} y2={layoutSize.height}
+                  stroke={isOrigin ? "#94a3b8" : "#d8e4f0"}
+                  strokeWidth={isOrigin ? 1.2 : 0.6}
+                  opacity={isOrigin ? 0.9 : 0.6}
+                />
+              );
+            }
+            // Horizontal lines (constant Y in world space, NED North=up so invert)
+            const startRow = Math.floor(-originY / spacing) - 1;
+            const endRow = Math.ceil((layoutSize.height - originY) / spacing) + 1;
+            for (let r = startRow; r <= endRow; r++) {
+              const sy = originY + r * spacing;
+              const isOrigin = r === 0;
+              gridLines.push(
+                <Line
+                  key={`gh${r}`}
+                  x1={0} y1={sy} x2={layoutSize.width} y2={sy}
+                  stroke={isOrigin ? "#94a3b8" : "#d8e4f0"}
+                  strokeWidth={isOrigin ? 1.2 : 0.6}
+                  opacity={isOrigin ? 0.9 : 0.6}
+                />
+              );
+            }
+            return gridLines;
+          })()}
+
+          {/* ── Plan lines ── */}
           <G transform={`translate(${layoutSize.width / 2}, ${layoutSize.height / 2}) rotate(${rotation}) translate(${-layoutSize.width / 2}, ${-layoutSize.height / 2}) translate(${viewport.panX}, ${viewport.panY}) scale(${viewport.zoom})`}>
             {filtered.map((line) => (
               <Line
@@ -4243,11 +4390,118 @@ function PlanPreview({
               />
             ))}
           </G>
+
+          {/* ── Rover icon (top-down car shape) ── */}
+          {hasRover && layoutSize.width > 0 && (() => {
+            const cx = roverScreenX;
+            const cy = roverScreenY;
+            // Car dimensions in screen pixels
+            const carLength = 22;
+            const carWidth = 13;
+            const noseLength = 7;
+            // heading_ned_deg: 0=North(up), 90=East(right), clockwise
+            // SVG rotation: 0=up, positive=clockwise, matches NED heading directly
+            const headingRot = roverDeg;
+            return (
+              <G transform={`translate(${cx}, ${cy}) rotate(${headingRot})`}>
+                {/* Glow shadow */}
+                <Circle cx={0} cy={0} r={carLength * 0.85} fill="rgba(14,165,233,0.12)" />
+                {/* Car body */}
+                <Polygon
+                  points={`${-carWidth / 2},${carLength / 2} ${carWidth / 2},${carLength / 2} ${carWidth / 2},${-carLength / 2 + noseLength} ${0},${-carLength / 2 - noseLength / 2} ${-carWidth / 2},${-carLength / 2 + noseLength}`}
+                  fill="#0ea5e9"
+                  stroke="#ffffff"
+                  strokeWidth={1.8}
+                  strokeLinejoin="round"
+                />
+                {/* Rear wheels */}
+                <Polygon
+                  points={`${-carWidth / 2 - 3},${carLength / 2 - 6} ${-carWidth / 2},${carLength / 2 - 6} ${-carWidth / 2},${carLength / 2} ${-carWidth / 2 - 3},${carLength / 2}`}
+                  fill="#0f172a"
+                />
+                <Polygon
+                  points={`${carWidth / 2 + 3},${carLength / 2 - 6} ${carWidth / 2},${carLength / 2 - 6} ${carWidth / 2},${carLength / 2} ${carWidth / 2 + 3},${carLength / 2}`}
+                  fill="#0f172a"
+                />
+                {/* Front wheel (single, centred — 3-wheel rover) */}
+                <Polygon
+                  points={`${-2.5},${-carLength / 2 + noseLength} ${2.5},${-carLength / 2 + noseLength} ${2.5},${-carLength / 2 + noseLength - 6} ${-2.5},${-carLength / 2 + noseLength - 6}`}
+                  fill="#0f172a"
+                />
+                {/* Windshield */}
+                <Polygon
+                  points={`${-carWidth / 2 + 2},${-carLength / 2 + noseLength + 2} ${carWidth / 2 - 2},${-carLength / 2 + noseLength + 2} ${carWidth / 2 - 3},${-carLength / 2 + noseLength + 6} ${-carWidth / 2 + 3},${-carLength / 2 + noseLength + 6}`}
+                  fill="rgba(186,230,253,0.85)"
+                />
+                {/* Heading dot (nose tip) */}
+                <Circle cx={0} cy={-carLength / 2 - noseLength / 2} r={2.5} fill="#fbbf24" stroke="#fff" strokeWidth={1} />
+              </G>
+            );
+          })()}
         </Svg>
       )}
 
-      {filtered.length > 0 && (
-        /* Floating Compass Overlay */
+      {/* ── Live heading compass (always shown when rover data available) ── */}
+      {hasRover && (
+        <View
+          style={{
+            position: "absolute",
+            top: 14,
+            right: 14,
+            width: 62,
+            height: 62,
+            zIndex: 40,
+            elevation: 40,
+            backgroundColor: "transparent",
+          }}
+        >
+          <Svg width={62} height={62} viewBox="0 0 62 62">
+            {/* Outer ring */}
+            <Circle cx={31} cy={31} r={28} fill="rgba(15,23,42,0.88)" stroke="#38bdf8" strokeWidth={1.5} />
+            {/* Cardinal labels — fixed */}
+            <SvgText x={31} y={13} fontSize={8} fill="#ef4444" fontWeight="900" textAnchor="middle">N</SvgText>
+            <SvgText x={31} y={55} fontSize={7} fill="#94a3b8" fontWeight="700" textAnchor="middle">S</SvgText>
+            <SvgText x={54} y={34} fontSize={7} fill="#94a3b8" fontWeight="700" textAnchor="middle">E</SvgText>
+            <SvgText x={8} y={34} fontSize={7} fill="#94a3b8" fontWeight="700" textAnchor="middle">W</SvgText>
+            {/* Tick marks */}
+            {[0, 45, 90, 135, 180, 225, 270, 315].map((deg) => {
+              const r = (deg % 90 === 0) ? 3.5 : 2;
+              const rad = (deg * Math.PI) / 180;
+              const inner = 22;
+              const outer = inner + r;
+              return (
+                <Line
+                  key={deg}
+                  x1={31 + inner * Math.sin(rad)}
+                  y1={31 - inner * Math.cos(rad)}
+                  x2={31 + outer * Math.sin(rad)}
+                  y2={31 - outer * Math.cos(rad)}
+                  stroke="#475569"
+                  strokeWidth={deg % 90 === 0 ? 1.5 : 1}
+                />
+              );
+            })}
+            {/* Rotating needle — points to rover heading */}
+            <G transform={`rotate(${roverDeg} 31 31)`}>
+              {/* North pointer (direction rover nose points) */}
+              <Polygon points="31,17 34.5,31 27.5,31" fill="#38bdf8" />
+              {/* South pointer */}
+              <Polygon points="31,45 34.5,31 27.5,31" fill="#475569" />
+              {/* Center dot */}
+              <Circle cx={31} cy={31} r={3} fill="#0f172a" stroke="#fff" strokeWidth={1.2} />
+            </G>
+          </Svg>
+          {/* Heading label below compass */}
+          <View style={{ alignItems: "center", marginTop: 3 }}>
+            <Text style={{ color: "#0f172a", fontSize: 9.5, fontWeight: "800", backgroundColor: "rgba(255,255,255,0.85)", paddingHorizontal: 5, paddingVertical: 1, borderRadius: 6 }}>
+              {roverDeg.toFixed(1)}°
+            </Text>
+          </View>
+        </View>
+      )}
+
+      {/* Plan-only compass (shown when no rover data but plan exists) */}
+      {!hasRover && filtered.length > 0 && (
         <View
           style={{
             position: "absolute",
@@ -4261,28 +4515,19 @@ function PlanPreview({
           }}
         >
           <Svg width={54} height={54} viewBox="0 0 54 54">
-            {/* Outer circle */}
             <Circle cx={27} cy={27} r={24} fill="rgba(15,23,42,0.85)" stroke="#cbd5e1" strokeWidth={1.5} />
-            
-            {/* Cardinal labels */}
             <SvgText x={27} y={12} fontSize={8} fill="#ef4444" fontWeight="900" textAnchor="middle">N</SvgText>
             <SvgText x={27} y={48} fontSize={7} fill="#94a3b8" fontWeight="700" textAnchor="middle">S</SvgText>
             <SvgText x={47} y={30} fontSize={7} fill="#94a3b8" fontWeight="700" textAnchor="middle">E</SvgText>
             <SvgText x={7} y={30} fontSize={7} fill="#94a3b8" fontWeight="700" textAnchor="middle">W</SvgText>
-            
-            {/* Rotating needle */}
             <G transform={`rotate(${rotation} 27 27)`}>
-              {/* North Pointer */}
               <Polygon points="27,15 31,27 23,27" fill="#ef4444" />
-              {/* South Pointer */}
               <Polygon points="27,39 31,27 23,27" fill="#cbd5e1" />
-              {/* Center pin */}
               <Circle cx={27} cy={27} r={2.5} fill="#0f172a" stroke="#fff" strokeWidth={1} />
             </G>
           </Svg>
         </View>
       )}
-
     </View>
   );
 }
