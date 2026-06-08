@@ -2096,10 +2096,11 @@ function HomeView({
                     </Pressable>
 
                     <View style={{ flexDirection: "row", gap: 8, marginBottom: 10 }}>
+                      <View style={{ flex: 1 }} />
                       <Pressable
                         onPress={() => setRtkModalOpen(true)}
                         style={({ pressed }) => ({
-                          backgroundColor: pressed ? "#1d4ed8" : "#2563eb",
+                          backgroundColor: pressed ? "#15803d" : "#16a34a",
                           flex: 1,
                           height: 38,
                           borderRadius: 8,
@@ -2111,7 +2112,6 @@ function HomeView({
                           RTK
                         </Text>
                       </Pressable>
-                      <View style={{ flex: 1 }} />
                       <View style={{ flex: 1 }} />
                     </View>
 
