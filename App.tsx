@@ -1877,36 +1877,56 @@ function HomeView({
                             <Text style={{ color: "#64748b", fontSize: 9.5, fontWeight: "800", letterSpacing: 1.4, textTransform: "uppercase" }}>
                               Rover Ops
                             </Text>
-                            <Text style={{ color: "#0f172a", fontSize: 22, fontWeight: "900", marginTop: 2 }}>
-                              System Panel
-                            </Text>
+                            <View style={{ flexDirection: "row", alignItems: "baseline", gap: 6, marginTop: 2 }}>
+                              <Text style={{ color: "#0f172a", fontSize: 22, fontWeight: "900" }}>
+                                System Panel
+                              </Text>
+                              <Text style={{
+                                color: (!telemetryError && (systemHealth?.ros_node || systemHealth?.fcu_connected || telemetrySnapshot !== null)) ? "#16a34a" : "#dc2626",
+                                fontSize: 11,
+                                fontWeight: "800",
+                                textTransform: "uppercase",
+                                letterSpacing: 0.5
+                              }}>
+                                {(!telemetryError && (systemHealth?.ros_node || systemHealth?.fcu_connected || telemetrySnapshot !== null)) ? "Live" : "Offline"}
+                              </Text>
+                            </View>
                           </View>
-                          <View style={{
-                            flexDirection: "row",
-                            alignItems: "center",
-                            backgroundColor: (!telemetryError && (systemHealth?.ros_node || systemHealth?.fcu_connected || telemetrySnapshot !== null)) ? "rgba(22, 163, 74, 0.08)" : "rgba(220, 38, 38, 0.08)",
-                            paddingHorizontal: 8,
-                            paddingVertical: 4,
-                            borderRadius: 999,
-                            borderWidth: 1,
-                            borderColor: (!telemetryError && (systemHealth?.ros_node || systemHealth?.fcu_connected || telemetrySnapshot !== null)) ? "rgba(22, 163, 74, 0.15)" : "rgba(220, 38, 38, 0.15)",
-                            gap: 6,
-                          }}>
-                            <View style={{
-                              width: 6,
-                              height: 6,
-                              borderRadius: 3,
-                              backgroundColor: (!telemetryError && (systemHealth?.ros_node || systemHealth?.fcu_connected || telemetrySnapshot !== null)) ? "#16a34a" : "#dc2626",
-                            }} />
-                            <Text style={{
-                              color: (!telemetryError && (systemHealth?.ros_node || systemHealth?.fcu_connected || telemetrySnapshot !== null)) ? "#16a34a" : "#dc2626",
-                              fontSize: 10,
-                              fontWeight: "800",
-                              textTransform: "uppercase",
-                              letterSpacing: 0.5,
-                            }}>
-                              {(!telemetryError && (systemHealth?.ros_node || systemHealth?.fcu_connected || telemetrySnapshot !== null)) ? "Live" : "Offline"}
-                            </Text>
+                          <View style={{ flexDirection: "row", gap: 12, alignItems: "center" }}>
+                            <RadioTower
+                              size={18}
+                              color={
+                                telemetrySnapshot?.gps_fix === 6
+                                  ? "#16a34a"
+                                  : telemetrySnapshot?.gps_fix === 5
+                                  ? "#ea580c"
+                                  : "#dc2626"
+                              }
+                            />
+                            <Battery
+                              size={18}
+                              color={
+                                telemetrySnapshot?.battery_pct != null
+                                  ? telemetrySnapshot.battery_pct >= 50
+                                    ? "#16a34a"
+                                    : telemetrySnapshot.battery_pct >= 20
+                                    ? "#ea580c"
+                                    : "#dc2626"
+                                  : "#dc2626"
+                              }
+                            />
+                            <Signal
+                              size={18}
+                              color={
+                                telemetrySnapshot?.gps_sat != null
+                                  ? telemetrySnapshot.gps_sat >= 10
+                                    ? "#16a34a"
+                                    : telemetrySnapshot.gps_sat >= 6
+                                    ? "#ea580c"
+                                    : "#dc2626"
+                                  : "#dc2626"
+                              }
+                            />
                           </View>
                         </View>
                         <Text style={{ color: "#475569", fontSize: 12, lineHeight: 17, marginTop: 6 }}>
