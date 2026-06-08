@@ -141,6 +141,7 @@ const DISCOVERY_PORT = 5001;
 const SUBNET_HOST_MIN = 1;
 const SUBNET_HOST_MAX = 254;
 const SUBNET_SCAN_CONCURRENCY = 24;
+const DEFAULT_ROVER_BACKEND = "http://192.168.1.102:5001";
 
 const MENU_ITEMS: Array<{ key: Page; label: string; icon: React.ReactNode }> = [
   { key: "fields", label: "Fields", icon: <File size={22} color="#fff" /> },
@@ -158,9 +159,12 @@ export default function App() {
   const [selectedWs, setSelectedWs] = useState<string>("");
   const [manualHost, setManualHost] = useState<string>(() => {
     if (typeof window !== "undefined" && window.location && window.location.hostname) {
-      return `http://${window.location.hostname}:5001`;
+      const host = window.location.hostname;
+      if (host && host !== "localhost" && host !== "127.0.0.1") {
+        return `http://${host}:5001`;
+      }
     }
-    return "";
+    return DEFAULT_ROVER_BACKEND;
   });
   const [wsStatus, setWsStatus] = useState<"idle" | "scanning" | "ready" | "connecting" | "connected" | "error">("idle");
   const [wsError, setWsError] = useState<string>("");
@@ -311,13 +315,14 @@ export default function App() {
   };
 
   const connectSelectedWebsocket = async () => {
-    if (!selectedWs) return;
-    logAction("WS_CONNECT", { selectedWs });
+    const target = selectedWs || manualHost;
+    if (!target) return;
+    logAction("WS_CONNECT", { selectedWs: target });
     setWsStatus("connecting");
     setWsError("");
 
     try {
-      const nextSocket = io(selectedWs, {
+      const nextSocket = io(target, {
         transports: ["polling", "websocket"],
         timeout: 5000,
       });
@@ -333,11 +338,12 @@ export default function App() {
 
       setSocket(nextSocket);
       setWsStatus("connected");
-      setManualHost(selectedWs);
+      setSelectedWs(target);
+      setManualHost(target);
       setBackendPinned(true);
       setPage("home");
       setMenuOpen(true);
-      logAction("WS_CONNECTED", { apiBaseUrl: selectedWs });
+      logAction("WS_CONNECTED", { apiBaseUrl: target });
     } catch (error) {
       setWsStatus("error");
       setWsError(error instanceof Error ? error.message : "Unable to connect");
@@ -428,7 +434,7 @@ export default function App() {
     const bestHost = uniqueDiscovered[0] ? `http://${uniqueDiscovered[0].host}:${uniqueDiscovered[0].port}` : "";
     if (bestHost) {
       const currentTarget = currentSelectedWs || currentManualHost;
-      if (!isPinned || !currentTarget) {
+      if (!currentTarget) {
         setSelectedWs(bestHost);
         setManualHost(bestHost);
       }
@@ -3216,9 +3222,65 @@ function ConnectionView({
             elevation: 3,
             borderWidth: 1,
             borderColor: "#d7dee8",
-          }}
+        }}
         >
           <View style={{ flex: 1, justifyContent: "space-between", gap: 14 }}>
+            <View style={{ gap: 12 }}>
+              <View>
+                <Text style={{ color: "#0f172a", fontSize: 18, fontWeight: "800" }}>Manual backend address</Text>
+                <Text style={{ color: "#64748b", marginTop: 4, fontSize: 13, lineHeight: 18 }}>
+                  Type the rover IP if discovery does not show it.
+                </Text>
+              </View>
+
+              <TextInput
+                value={manualHost}
+                onChangeText={onManualHostChange}
+                placeholder="http://192.168.1.102:5001"
+                placeholderTextColor="#94a3b8"
+                autoCapitalize="none"
+                autoCorrect={false}
+                style={{
+                  borderWidth: 1,
+                  borderColor: "#cbd5e1",
+                  borderRadius: 16,
+                  paddingHorizontal: 14,
+                  paddingVertical: 14,
+                  color: "#0f172a",
+                  backgroundColor: "#f8fafc",
+                }}
+              />
+
+              <View style={{ flexDirection: "row", gap: 10, flexWrap: "wrap" }}>
+                <Pressable
+                  onPress={() => onSelect(manualHost)}
+                  style={{
+                    backgroundColor: "#0f172a",
+                    paddingHorizontal: 16,
+                    paddingVertical: 13,
+                    borderRadius: 16,
+                  }}
+                >
+                  <Text style={{ color: "#fff", fontWeight: "800" }}>Use manual address</Text>
+                </Pressable>
+                <Pressable
+                  onPress={onConnect}
+                  disabled={!manualHost || wsStatus === "connecting"}
+                  style={{
+                    backgroundColor: !manualHost ? "#94a3b8" : "#2563eb",
+                    paddingHorizontal: 16,
+                    paddingVertical: 13,
+                    borderRadius: 16,
+                    opacity: wsStatus === "connecting" ? 0.85 : 1,
+                  }}
+                >
+                  <Text style={{ color: "#fff", fontWeight: "800" }}>
+                    {wsStatus === "connecting" ? "Connecting..." : "Connect"}
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+
             <View style={{ flex: 1, minHeight: 0 }}>
               <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
                 <View style={{ flex: 1, minWidth: 150 }}>
@@ -3319,10 +3381,10 @@ function ConnectionView({
               <View style={{ flexDirection: "row", gap: 10 }}>
                 <Pressable
                   onPress={onConnect}
-                  disabled={!selectedWs || wsStatus === "connecting"}
+                  disabled={!selectedTarget || wsStatus === "connecting"}
                   style={{
                     flex: 1,
-                    backgroundColor: !selectedWs ? "#94a3b8" : "#2563eb",
+                    backgroundColor: !selectedTarget ? "#94a3b8" : "#2563eb",
                     paddingHorizontal: 16,
                     paddingVertical: 13,
                     borderRadius: 16,
