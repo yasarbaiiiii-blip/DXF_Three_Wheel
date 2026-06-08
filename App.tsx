@@ -2098,24 +2098,21 @@ function HomeView({
                     <View style={{ flexDirection: "row", gap: 8, marginBottom: 10 }}>
                       <View style={{ flex: 1 }} />
                       <View style={{ flex: 1 }} />
-                      <View style={{ flex: 1, flexDirection: "row" }}>
-                        <View style={{ flex: 1 }} />
-                        <Pressable
-                          onPress={() => setRtkModalOpen(true)}
-                          style={({ pressed }) => ({
-                            backgroundColor: pressed ? "#1d4ed8" : "#2563eb",
-                            flex: 1,
-                            height: 38,
-                            borderRadius: 8,
-                            alignItems: "center",
-                            justifyContent: "center",
-                          })}
-                        >
-                          <Text style={{ color: "#ffffff", fontSize: 11, fontWeight: "800", textTransform: "uppercase", textAlign: "center", width: "100%" }}>
-                            RTK
-                          </Text>
-                        </Pressable>
-                      </View>
+                      <Pressable
+                        onPress={() => setRtkModalOpen(true)}
+                        style={({ pressed }) => ({
+                          backgroundColor: pressed ? "#1d4ed8" : "#2563eb",
+                          flex: 1,
+                          height: 38,
+                          borderRadius: 8,
+                          alignItems: "center",
+                          justifyContent: "center",
+                        })}
+                      >
+                        <Text style={{ color: "#ffffff", fontSize: 12, fontWeight: "800", textTransform: "uppercase" }}>
+                          RTK
+                        </Text>
+                      </Pressable>
                     </View>
 
                     <View style={{ flexDirection: "row", gap: 8 }}>
