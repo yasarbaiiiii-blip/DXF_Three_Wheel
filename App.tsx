@@ -2095,26 +2095,6 @@ function HomeView({
                       </Text>
                     </Pressable>
 
-                    <View style={{ flexDirection: "row", gap: 8, marginBottom: 10 }}>
-                      <View style={{ flex: 1 }} />
-                      <View style={{ flex: 1 }} />
-                      <Pressable
-                        onPress={() => setRtkModalOpen(true)}
-                        style={({ pressed }) => ({
-                          backgroundColor: pressed ? "#1d4ed8" : "#2563eb",
-                          flex: 1,
-                          height: 38,
-                          borderRadius: 8,
-                          alignItems: "center",
-                          justifyContent: "center",
-                        })}
-                      >
-                        <Text style={{ color: "#ffffff", fontSize: 12, fontWeight: "800", textTransform: "uppercase" }}>
-                          RTK
-                        </Text>
-                      </Pressable>
-                    </View>
-
                     <View style={{ flexDirection: "row", gap: 8 }}>
                       <Pressable
                         onPress={() => onStartPlan(autoOrigin)}
