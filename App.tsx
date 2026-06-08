@@ -2027,77 +2027,75 @@ function HomeView({
                       </Text>
                     </View>
 
-                    <Pressable
-                      onPress={() => setSafetyControlsEnabled(!safetyControlsEnabled)}
-                      style={{
-                        flexDirection: "row",
-                        alignItems: "center",
-                        gap: 8,
-                        marginBottom: 14,
-                        paddingVertical: 4,
-                      }}
-                    >
-                      <View style={{
-                        width: 14,
-                        height: 14,
-                        borderRadius: 3,
-                        borderWidth: 1.5,
-                        borderColor: safetyControlsEnabled ? "#3b82f6" : "#475569",
-                        backgroundColor: safetyControlsEnabled ? "#3b82f6" : "transparent",
-                        alignItems: "center",
-                        justifyContent: "center",
-                      }}>
-                        {safetyControlsEnabled && (
-                          <View style={{
-                            width: 6,
-                            height: 6,
-                            borderRadius: 1,
-                            backgroundColor: "#ffffff",
-                          }} />
-                        )}
-                      </View>
-                      <Text style={{ color: "#94a3b8", fontSize: 11, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.5 }}>
-                        Show Safety Controls
-                      </Text>
-                    </Pressable>
+                    <View style={{ flexDirection: "row", gap: 8, marginBottom: 12, alignItems: "center" }}>
+                      <Pressable
+                        onPress={() => setSafetyControlsEnabled(!safetyControlsEnabled)}
+                        style={{
+                          flex: 1,
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 6,
+                          paddingVertical: 4,
+                        }}
+                      >
+                        <View style={{
+                          width: 14,
+                          height: 14,
+                          borderRadius: 3,
+                          borderWidth: 1.5,
+                          borderColor: safetyControlsEnabled ? "#3b82f6" : "#475569",
+                          backgroundColor: safetyControlsEnabled ? "#3b82f6" : "transparent",
+                          alignItems: "center",
+                          justifyContent: "center",
+                        }}>
+                          {safetyControlsEnabled && (
+                            <View style={{
+                              width: 6,
+                              height: 6,
+                              borderRadius: 1,
+                              backgroundColor: "#ffffff",
+                            }} />
+                          )}
+                        </View>
+                        <Text style={{ color: "#94a3b8", fontSize: 10, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.3 }} numberOfLines={1}>
+                          Show Safety
+                        </Text>
+                      </Pressable>
 
-                    <Pressable
-                      onPress={() => setAutoOrigin(!autoOrigin)}
-                      style={{
-                        flexDirection: "row",
-                        alignItems: "center",
-                        gap: 8,
-                        marginBottom: 18,
-                        paddingVertical: 4,
-                      }}
-                    >
-                      <View style={{
-                        width: 14,
-                        height: 14,
-                        borderRadius: 3,
-                        borderWidth: 1.5,
-                        borderColor: autoOrigin ? "#14b8a6" : "#475569",
-                        backgroundColor: autoOrigin ? "#14b8a6" : "transparent",
-                        alignItems: "center",
-                        justifyContent: "center",
-                      }}>
-                        {autoOrigin && (
-                          <View style={{
-                            width: 6,
-                            height: 6,
-                            borderRadius: 1,
-                            backgroundColor: "#ffffff",
-                          }} />
-                        )}
-                      </View>
-                      <Text style={{ color: "#94a3b8", fontSize: 11, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.5 }}>
-                        Origin Check (Auto-Origin)
-                      </Text>
-                    </Pressable>
+                      <Pressable
+                        onPress={() => setAutoOrigin(!autoOrigin)}
+                        style={{
+                          flex: 1,
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 6,
+                          paddingVertical: 4,
+                        }}
+                      >
+                        <View style={{
+                          width: 14,
+                          height: 14,
+                          borderRadius: 3,
+                          borderWidth: 1.5,
+                          borderColor: autoOrigin ? "#14b8a6" : "#475569",
+                          backgroundColor: autoOrigin ? "#14b8a6" : "transparent",
+                          alignItems: "center",
+                          justifyContent: "center",
+                        }}>
+                          {autoOrigin && (
+                            <View style={{
+                              width: 6,
+                              height: 6,
+                              borderRadius: 1,
+                              backgroundColor: "#ffffff",
+                            }} />
+                          )}
+                        </View>
+                        <Text style={{ color: "#94a3b8", fontSize: 10, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.3 }} numberOfLines={1}>
+                          Origin Check
+                        </Text>
+                      </Pressable>
 
-                    <View style={{ flexDirection: "row", gap: 8, marginBottom: 10 }}>
-                      <View style={{ flex: 1 }} />
-                      <View style={{ flex: 1 }} />
                       <Pressable
                         onPress={() => setRtkModalOpen(true)}
                         style={{
