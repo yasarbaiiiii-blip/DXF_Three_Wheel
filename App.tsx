@@ -345,7 +345,29 @@ export default function App() {
         });
       });
 
-      nextSocket.on("telemetry", (data: any) => {
+      nextSocket.on("disconnect", (reason) => {
+        console.log(`[SOCKET] Disconnected from ${target} — reason: ${reason}`);
+      });
+
+      nextSocket.on("error", (err) => {
+        console.error("[SOCKET] Error:", err);
+      });
+
+      nextSocket.on("telemetry", (rawData: any) => {
+        let data = rawData;
+        if (typeof rawData === "string") {
+          try {
+            data = JSON.parse(rawData);
+          } catch (e) {
+            console.error("[SOCKET] Failed to parse telemetry JSON:", e);
+            return;
+          }
+        }
+        if (!data || typeof data !== "object") {
+          console.warn("[SOCKET] Invalid telemetry format:", data);
+          return;
+        }
+
         setTelemetrySnapshot((prev) => {
           if (!prev) return data;
           // Optimize updates: only set state if keys have actually changed
@@ -391,7 +413,21 @@ export default function App() {
         });
       });
 
-      nextSocket.on("mission_status", (data: any) => {
+      nextSocket.on("mission_status", (rawData: any) => {
+        let data = rawData;
+        if (typeof rawData === "string") {
+          try {
+            data = JSON.parse(rawData);
+          } catch (e) {
+            console.error("[SOCKET] Failed to parse mission_status JSON:", e);
+            return;
+          }
+        }
+        if (!data || typeof data !== "object") {
+          console.warn("[SOCKET] Invalid mission_status format:", data);
+          return;
+        }
+
         if (data.state) {
           setMissionRunning(data.state === "running");
           setIsPaused(data.state === "paused");
@@ -2068,11 +2104,9 @@ function HomeView({
                         alignItems: "center",
                         justifyContent: "center",
                         marginBottom: 10,
-                        flexDirection: "row",
-                        gap: 6,
+                        width: "100%",
                       })}
                     >
-                      <RadioTower size={16} color="#ffffff" />
                       <Text style={{ color: "#ffffff", fontSize: 13, fontWeight: "800", textTransform: "uppercase", letterSpacing: 0.5 }}>
                         RTK Injection
                       </Text>
