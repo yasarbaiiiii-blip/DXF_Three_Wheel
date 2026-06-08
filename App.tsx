@@ -2099,14 +2099,14 @@ function HomeView({
                       <View style={{ flex: 1 }} />
                       <Pressable
                         onPress={() => setRtkModalOpen(true)}
-                        style={({ pressed }) => ({
-                          backgroundColor: pressed ? "#15803d" : "#16a34a",
+                        style={{
+                          backgroundColor: "#16a34a",
                           flex: 1,
                           height: 38,
                           borderRadius: 8,
                           alignItems: "center",
                           justifyContent: "center",
-                        })}
+                        }}
                       >
                         <Text style={{ color: "#ffffff", fontSize: 12, fontWeight: "800", textTransform: "uppercase" }}>
                           RTK
