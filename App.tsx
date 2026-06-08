@@ -336,6 +336,33 @@ export default function App() {
         });
       });
 
+      nextSocket.on("telemetry", (data: any) => {
+        setTelemetrySnapshot((prev) => {
+          if (!prev) return data;
+          // Optimize updates: only set state if keys have actually changed
+          if (
+            prev.pos_n === data.pos_n &&
+            prev.pos_e === data.pos_e &&
+            prev.heading_ned_deg === data.heading_ned_deg &&
+            prev.rpp_state === data.rpp_state &&
+            prev.armed === data.armed &&
+            prev.mode === data.mode &&
+            prev.battery_pct === data.battery_pct &&
+            prev.gps_fix === data.gps_fix &&
+            prev.gps_sat === data.gps_sat
+          ) {
+            return prev;
+          }
+          return { ...prev, ...data };
+        });
+      });
+
+      nextSocket.on("mission_status", (data: any) => {
+        if (data.state) {
+          setMissionRunning(data.state === "running");
+        }
+      });
+
       setSocket(nextSocket);
       setWsStatus("connected");
       setSelectedWs(target);
@@ -471,12 +498,13 @@ export default function App() {
 
   useEffect(() => {
     if (page !== "home") return;
+    if (wsStatus === "connected") return; // Skip polling when socket is active
     void refreshTelemetryPanel();
     const timer = setInterval(() => {
       void refreshTelemetryPanel();
     }, 2500);
     return () => clearInterval(timer);
-  }, [page, apiBaseUrl, selectedWs]);
+  }, [page, apiBaseUrl, selectedWs, wsStatus]);
 
   const fetchBackendPaths = async () => {
     if (!apiBaseUrl) return;
@@ -748,12 +776,12 @@ export default function App() {
     }
   }
 
-  async function startLoadedMission() {
+  async function startLoadedMission(autoOrigin: boolean = false) {
     if (!apiBaseUrl || !importedPlan || lines.length === 0) {
       return;
     }
 
-    logAction("START_REQUEST", { apiBaseUrl, fileName: importedPlan.fileName, missionRunning });
+    logAction("START_REQUEST", { apiBaseUrl, fileName: importedPlan.fileName, missionRunning, autoOrigin });
     setMissionActionBusy(true);
     try {
       showToast(missionRunning ? "Stop" : "Start", missionRunning ? "Stopping mission..." : "Starting mission...", "info");
@@ -765,6 +793,7 @@ export default function App() {
         body: JSON.stringify({
           path_name: importedPlan.fileName,
           mission_file: "",
+          auto_origin: autoOrigin,
         }),
       });
       if (!res.ok) {
@@ -773,7 +802,7 @@ export default function App() {
       }
       setMissionRunning(true);
       void refreshTelemetryPanel();
-      logAction("START_SUCCESS", { fileName: importedPlan.fileName });
+      logAction("START_SUCCESS", { fileName: importedPlan.fileName, autoOrigin });
       Alert.alert("Started", `${importedPlan.fileName} started on the rover.`);
       showToast("Mission running", `${importedPlan.fileName} is now active.`, "success");
     } catch (error) {
@@ -1357,7 +1386,7 @@ function HomeView({
   layerVisibility: LayerVisibility;
   setLayerVisibility: React.Dispatch<React.SetStateAction<LayerVisibility>>;
   onStopPlan: () => Promise<void>;
-  onStartPlan: () => Promise<void>;
+  onStartPlan: (autoOrigin: boolean) => Promise<void>;
   onPausePlan: () => Promise<void>;
   onArmVehicle: (arm: boolean) => Promise<void>;
   onEstopVehicle: () => Promise<void>;
@@ -1378,6 +1407,7 @@ function HomeView({
   const hasPlan = lines.length > 0;
   const hasSelectedLine = Boolean(selectedLine);
   const [safetyControlsEnabled, setSafetyControlsEnabled] = useState(false);
+  const [autoOrigin, setAutoOrigin] = useState(false);
   const [compassExpanded, setCompassExpanded] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteScope, setDeleteScope] = useState<"line" | "plan" | null>(null);
@@ -1861,9 +1891,43 @@ function HomeView({
                       </Text>
                     </Pressable>
 
+                    <Pressable
+                      onPress={() => setAutoOrigin(!autoOrigin)}
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 8,
+                        marginBottom: 12,
+                        paddingVertical: 4,
+                      }}
+                    >
+                      <View style={{
+                        width: 14,
+                        height: 14,
+                        borderRadius: 3,
+                        borderWidth: 1.5,
+                        borderColor: autoOrigin ? "#14b8a6" : "#475569",
+                        backgroundColor: autoOrigin ? "#14b8a6" : "transparent",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}>
+                        {autoOrigin && (
+                          <View style={{
+                            width: 6,
+                            height: 6,
+                            borderRadius: 1,
+                            backgroundColor: "#ffffff",
+                          }} />
+                        )}
+                      </View>
+                      <Text style={{ color: "#94a3b8", fontSize: 11, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                        Origin Check (Auto-Origin)
+                      </Text>
+                    </Pressable>
+
                     <View style={{ flexDirection: "row", gap: 8 }}>
                       <Pressable
-                        onPress={onStartPlan}
+                        onPress={() => onStartPlan(autoOrigin)}
                         disabled={missionActionBusy || lines.length === 0}
                         style={{
                           flex: 1,
@@ -4305,6 +4369,37 @@ function PlanPreview({
     return "#475569";
   };
 
+  const handleFocusRover = () => {
+    if (!hasRover || layoutSize.width <= 0 || layoutSize.height <= 0) return;
+    const defaultZoom = viewport.zoom > 10 ? viewport.zoom : 40;
+    const next: PreviewViewport = {
+      panX: layoutSize.width / 2 - roverX * defaultZoom,
+      panY: layoutSize.height / 2 - (-roverY) * defaultZoom,
+      zoom: defaultZoom,
+    };
+    viewportRef.current = next;
+    setViewport(next);
+    userPannedRef.current = false;
+  };
+
+  const handleFocusPlan = () => {
+    if (layoutSize.width <= 0 || layoutSize.height <= 0) return;
+    userPannedRef.current = true;
+    if (filtered.length === 0) {
+      const next: PreviewViewport = {
+        panX: layoutSize.width / 2,
+        panY: layoutSize.height / 2,
+        zoom: 40,
+      };
+      viewportRef.current = next;
+      setViewport(next);
+      return;
+    }
+    const fitted = computeAutoFitViewport(filtered, layoutSize.width, layoutSize.height);
+    viewportRef.current = fitted;
+    setViewport(fitted);
+  };
+
   // Compute rover screen coordinates for icon rendering
   const roverScreenX = roverX * viewport.zoom + viewport.panX;
   const roverScreenY = -roverY * viewport.zoom + viewport.panY; // NED North=up so invert Y
@@ -4441,93 +4536,123 @@ function PlanPreview({
         </Svg>
       )}
 
-      {/* ── Live heading compass (always shown when rover data available) ── */}
-      {hasRover && (
-        <View
-          style={{
-            position: "absolute",
-            top: 14,
-            right: 14,
-            width: 62,
-            height: 62,
-            zIndex: 40,
-            elevation: 40,
-            backgroundColor: "transparent",
-          }}
-        >
-          <Svg width={62} height={62} viewBox="0 0 62 62">
-            {/* Outer ring */}
-            <Circle cx={31} cy={31} r={28} fill="rgba(15,23,42,0.88)" stroke="#38bdf8" strokeWidth={1.5} />
-            {/* Cardinal labels — fixed */}
-            <SvgText x={31} y={13} fontSize={8} fill="#ef4444" fontWeight="900" textAnchor="middle">N</SvgText>
-            <SvgText x={31} y={55} fontSize={7} fill="#94a3b8" fontWeight="700" textAnchor="middle">S</SvgText>
-            <SvgText x={54} y={34} fontSize={7} fill="#94a3b8" fontWeight="700" textAnchor="middle">E</SvgText>
-            <SvgText x={8} y={34} fontSize={7} fill="#94a3b8" fontWeight="700" textAnchor="middle">W</SvgText>
-            {/* Tick marks */}
-            {[0, 45, 90, 135, 180, 225, 270, 315].map((deg) => {
-              const r = (deg % 90 === 0) ? 3.5 : 2;
-              const rad = (deg * Math.PI) / 180;
-              const inner = 22;
-              const outer = inner + r;
-              return (
-                <Line
-                  key={deg}
-                  x1={31 + inner * Math.sin(rad)}
-                  y1={31 - inner * Math.cos(rad)}
-                  x2={31 + outer * Math.sin(rad)}
-                  y2={31 - outer * Math.cos(rad)}
-                  stroke="#475569"
-                  strokeWidth={deg % 90 === 0 ? 1.5 : 1}
-                />
-              );
-            })}
-            {/* Rotating needle — points to rover heading */}
-            <G transform={`rotate(${roverDeg} 31 31)`}>
-              {/* North pointer (direction rover nose points) */}
-              <Polygon points="31,17 34.5,31 27.5,31" fill="#38bdf8" />
-              {/* South pointer */}
-              <Polygon points="31,45 34.5,31 27.5,31" fill="#475569" />
-              {/* Center dot */}
-              <Circle cx={31} cy={31} r={3} fill="#0f172a" stroke="#fff" strokeWidth={1.2} />
-            </G>
-          </Svg>
-          {/* Heading label below compass */}
+      {/* ── Single Heading Compass (always shown) ── */}
+      <View
+        style={{
+          position: "absolute",
+          top: 14,
+          right: 14,
+          width: 62,
+          height: 62,
+          zIndex: 40,
+          elevation: 40,
+          backgroundColor: "transparent",
+        }}
+      >
+        <Svg width={62} height={62} viewBox="0 0 62 62">
+          {/* Outer ring */}
+          <Circle cx={31} cy={31} r={28} fill="rgba(15,23,42,0.88)" stroke="#38bdf8" strokeWidth={1.5} />
+          {/* Cardinal labels — fixed */}
+          <SvgText x={31} y={13} fontSize={8} fill="#ef4444" fontWeight="900" textAnchor="middle">N</SvgText>
+          <SvgText x={31} y={55} fontSize={7} fill="#94a3b8" fontWeight="700" textAnchor="middle">S</SvgText>
+          <SvgText x={54} y={34} fontSize={7} fill="#94a3b8" fontWeight="700" textAnchor="middle">E</SvgText>
+          <SvgText x={8} y={34} fontSize={7} fill="#94a3b8" fontWeight="700" textAnchor="middle">W</SvgText>
+          {/* Tick marks */}
+          {[0, 45, 90, 135, 180, 225, 270, 315].map((deg) => {
+            const r = (deg % 90 === 0) ? 3.5 : 2;
+            const rad = (deg * Math.PI) / 180;
+            const inner = 22;
+            const outer = inner + r;
+            return (
+              <Line
+                key={deg}
+                x1={31 + inner * Math.sin(rad)}
+                y1={31 - inner * Math.cos(rad)}
+                x2={31 + outer * Math.sin(rad)}
+                y2={31 - outer * Math.cos(rad)}
+                stroke="#475569"
+                strokeWidth={deg % 90 === 0 ? 1.5 : 1}
+              />
+            );
+          })}
+          {/* Rotating needle — points to rover heading (defaults to 0 / static North if no telemetry) */}
+          <G transform={`rotate(${hasRover ? roverDeg : 0} 31 31)`}>
+            {/* North pointer (direction rover nose points) */}
+            <Polygon points="31,17 34.5,31 27.5,31" fill="#38bdf8" />
+            {/* South pointer */}
+            <Polygon points="31,45 34.5,31 27.5,31" fill="#475569" />
+            {/* Center dot */}
+            <Circle cx={31} cy={31} r={3} fill="#0f172a" stroke="#fff" strokeWidth={1.2} />
+          </G>
+        </Svg>
+        {/* Heading label below compass — only shown when telemetry is active */}
+        {hasRover && (
           <View style={{ alignItems: "center", marginTop: 3 }}>
             <Text style={{ color: "#0f172a", fontSize: 9.5, fontWeight: "800", backgroundColor: "rgba(255,255,255,0.85)", paddingHorizontal: 5, paddingVertical: 1, borderRadius: 6 }}>
               {roverDeg.toFixed(1)}°
             </Text>
           </View>
-        </View>
-      )}
+        )}
+      </View>
 
-      {/* Plan-only compass (shown when no rover data but plan exists) */}
-      {!hasRover && filtered.length > 0 && (
-        <View
-          style={{
-            position: "absolute",
-            top: 14,
-            right: 14,
-            width: 54,
-            height: 54,
-            zIndex: 40,
-            elevation: 40,
-            backgroundColor: "transparent",
-          }}
+      {/* ── Map Refocus Controls ── */}
+      <View
+        style={{
+          position: "absolute",
+          bottom: 14,
+          right: 14,
+          flexDirection: "column",
+          gap: 8,
+          zIndex: 40,
+          elevation: 40,
+        }}
+      >
+        {/* Focus Rover Button */}
+        {hasRover && (
+          <Pressable
+            onPress={handleFocusRover}
+            style={({ pressed }) => ({
+              width: 40,
+              height: 40,
+              borderRadius: 20,
+              backgroundColor: pressed ? "rgba(15,23,42,0.95)" : "rgba(15,23,42,0.85)",
+              borderWidth: 1.2,
+              borderColor: "#0ea5e9",
+              alignItems: "center",
+              justifyContent: "center",
+              shadowColor: "#000",
+              shadowOffset: { width: 0, height: 2 },
+              shadowOpacity: 0.25,
+              shadowRadius: 3.84,
+              elevation: 5,
+            })}
+          >
+            <LocateFixed size={20} color="#0ea5e9" />
+          </Pressable>
+        )}
+
+        {/* Focus Plan Button */}
+        <Pressable
+          onPress={handleFocusPlan}
+          style={({ pressed }) => ({
+            width: 40,
+            height: 40,
+            borderRadius: 20,
+            backgroundColor: pressed ? "rgba(15,23,42,0.95)" : "rgba(15,23,42,0.85)",
+            borderWidth: 1.2,
+            borderColor: "#d97706",
+            alignItems: "center",
+            justifyContent: "center",
+            shadowColor: "#000",
+            shadowOffset: { width: 0, height: 2 },
+            shadowOpacity: 0.25,
+            shadowRadius: 3.84,
+            elevation: 5,
+          })}
         >
-          <Svg width={54} height={54} viewBox="0 0 54 54">
-            <Circle cx={27} cy={27} r={24} fill="rgba(15,23,42,0.85)" stroke="#cbd5e1" strokeWidth={1.5} />
-            <SvgText x={27} y={12} fontSize={8} fill="#ef4444" fontWeight="900" textAnchor="middle">N</SvgText>
-            <SvgText x={27} y={48} fontSize={7} fill="#94a3b8" fontWeight="700" textAnchor="middle">S</SvgText>
-            <SvgText x={47} y={30} fontSize={7} fill="#94a3b8" fontWeight="700" textAnchor="middle">E</SvgText>
-            <SvgText x={7} y={30} fontSize={7} fill="#94a3b8" fontWeight="700" textAnchor="middle">W</SvgText>
-            <G transform={`rotate(${rotation} 27 27)`}>
-              <Polygon points="27,15 31,27 23,27" fill="#ef4444" />
-              <Polygon points="27,39 31,27 23,27" fill="#cbd5e1" />
-              <Circle cx={27} cy={27} r={2.5} fill="#0f172a" stroke="#fff" strokeWidth={1} />
-            </G>
-          </Svg>
-        </View>
-      )}
+          <List size={20} color="#d97706" />
+        </Pressable>
+      </View>
     </View>
   );
 }
