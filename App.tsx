@@ -110,6 +110,8 @@ type TelemetrySnapshot = {
   lon?: number | null;
   alt?: number | null;
   mission_state?: string | null;
+  hrms?: number | null;
+  vrms?: number | null;
 };
 
 type ActivityEntry = {
@@ -191,6 +193,13 @@ export default function App() {
   const [missionLoaded, setMissionLoaded] = useState(false);
   const [missionRunning, setMissionRunning] = useState(false);
   const [toast, setToast] = useState<AppToast | null>(null);
+  const [rtkModalOpen, setRtkModalOpen] = useState(false);
+  const [rtkCaster, setRtkCaster] = useState("");
+  const [rtkPort, setRtkPort] = useState("2101");
+  const [rtkMountPoint, setRtkMountPoint] = useState("");
+  const [rtkUsername, setRtkUsername] = useState("");
+  const [rtkPassword, setRtkPassword] = useState("");
+  const [rtkConnecting, setRtkConnecting] = useState(false);
   const [toggleA, setToggleA] = useState(false);
   const [toggleB, setToggleB] = useState(false);
   const [toggleC, setToggleC] = useState(true);
@@ -349,17 +358,59 @@ export default function App() {
             prev.mode === data.mode &&
             prev.battery_pct === data.battery_pct &&
             prev.gps_fix === data.gps_fix &&
-            prev.gps_sat === data.gps_sat
+            prev.gps_sat === data.gps_sat &&
+            prev.hrms === data.hrms &&
+            prev.vrms === data.vrms
           ) {
             return prev;
           }
           return { ...prev, ...data };
+        });
+
+        setSystemHealth((prev) => {
+          const next = {
+            ros_node: true, // We are receiving socket packets, so ROS is running
+            fcu_connected: data.connected ?? false,
+            armed: data.armed ?? false,
+            mode: data.mode ?? "UNKNOWN",
+            rpp_state: data.rpp_state,
+            mission_state: prev?.mission_state || "UNKNOWN",
+          };
+          if (
+            prev &&
+            prev.ros_node === next.ros_node &&
+            prev.fcu_connected === next.fcu_connected &&
+            prev.armed === next.armed &&
+            prev.mode === next.mode &&
+            prev.rpp_state === next.rpp_state &&
+            prev.mission_state === next.mission_state
+          ) {
+            return prev;
+          }
+          return next;
         });
       });
 
       nextSocket.on("mission_status", (data: any) => {
         if (data.state) {
           setMissionRunning(data.state === "running");
+          setIsPaused(data.state === "paused");
+          setTelemetrySnapshot((prev) => {
+            if (prev && prev.mission_state === data.state) return prev;
+            return prev ? { ...prev, mission_state: data.state } : { mission_state: data.state } as any;
+          });
+          setSystemHealth((prev) => {
+            const next = {
+              ros_node: prev?.ros_node ?? true,
+              fcu_connected: prev?.fcu_connected ?? false,
+              armed: prev?.armed ?? false,
+              mode: prev?.mode ?? "UNKNOWN",
+              rpp_state: prev?.rpp_state ?? null,
+              mission_state: data.state,
+            };
+            if (prev && prev.mission_state === next.mission_state) return prev;
+            return next;
+          });
         }
       });
 
@@ -495,16 +546,6 @@ export default function App() {
     }, DISCOVERY_REFRESH_MS);
     return () => clearInterval(timer);
   }, [page]);
-
-  useEffect(() => {
-    if (page !== "home") return;
-    if (wsStatus === "connected") return; // Skip polling when socket is active
-    void refreshTelemetryPanel();
-    const timer = setInterval(() => {
-      void refreshTelemetryPanel();
-    }, 2500);
-    return () => clearInterval(timer);
-  }, [page, apiBaseUrl, selectedWs, wsStatus]);
 
   const fetchBackendPaths = async () => {
     if (!apiBaseUrl) return;
@@ -814,6 +855,46 @@ export default function App() {
       showToast("Start failed", error instanceof Error ? error.message : "Could not start the mission.", "error");
     } finally {
       setMissionActionBusy(false);
+    }
+  }
+
+  async function connectRtkCaster() {
+    if (!apiBaseUrl) return;
+    if (!rtkCaster || !rtkPort || !rtkMountPoint || !rtkUsername || !rtkPassword) {
+      Alert.alert("Missing fields", "Please fill in all 5 RTK caster credentials.");
+      return;
+    }
+    setRtkConnecting(true);
+    logAction("RTK_CONNECT_REQUEST", { caster: rtkCaster, port: rtkPort, mountpoint: rtkMountPoint });
+    try {
+      showToast("RTK Injection", "Connecting to NTRIP caster...", "info");
+      const res = await fetch(`${apiBaseUrl}/api/ntrip/connect`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          caster: rtkCaster,
+          port: parseInt(rtkPort, 10),
+          mountpoint: rtkMountPoint,
+          username: rtkUsername,
+          password: rtkPassword,
+        }),
+      });
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(txt || "NTRIP caster connection failed.");
+      }
+      logAction("RTK_CONNECT_SUCCESS", { caster: rtkCaster });
+      Alert.alert("RTK Connected", "NTRIP RTK caster connected successfully.");
+      showToast("RTK Connected", "NTRIP RTK stream active.", "success");
+      setRtkModalOpen(false);
+    } catch (error) {
+      logAction("RTK_CONNECT_FAILED", { error: error instanceof Error ? error.message : String(error) });
+      Alert.alert("Connection failed", error instanceof Error ? error.message : "Failed to connect to NTRIP caster.");
+      showToast("RTK Failed", error instanceof Error ? error.message : "Failed to connect to NTRIP caster.", "error");
+    } finally {
+      setRtkConnecting(false);
     }
   }
 
@@ -1172,6 +1253,20 @@ export default function App() {
           telemetryLoading={telemetryLoading}
           isPaused={isPaused}
           setIsPaused={setIsPaused}
+          rtkModalOpen={rtkModalOpen}
+          setRtkModalOpen={setRtkModalOpen}
+          rtkCaster={rtkCaster}
+          setRtkCaster={setRtkCaster}
+          rtkPort={rtkPort}
+          setRtkPort={setRtkPort}
+          rtkMountPoint={rtkMountPoint}
+          setRtkMountPoint={setRtkMountPoint}
+          rtkUsername={rtkUsername}
+          setRtkUsername={setRtkUsername}
+          rtkPassword={rtkPassword}
+          setRtkPassword={setRtkPassword}
+          rtkConnecting={rtkConnecting}
+          connectRtkCaster={connectRtkCaster}
         />
         ) : (
           <SectionScreen
@@ -1372,6 +1467,20 @@ function HomeView({
   telemetryLoading,
   isPaused,
   setIsPaused,
+  rtkModalOpen,
+  setRtkModalOpen,
+  rtkCaster,
+  setRtkCaster,
+  rtkPort,
+  setRtkPort,
+  rtkMountPoint,
+  setRtkMountPoint,
+  rtkUsername,
+  setRtkUsername,
+  rtkPassword,
+  setRtkPassword,
+  rtkConnecting,
+  connectRtkCaster,
 }: {
   importedPlan: ImportedPlan | null;
   lines: PlanLine[];
@@ -1402,6 +1511,20 @@ function HomeView({
   telemetryLoading: boolean;
   isPaused: boolean;
   setIsPaused: React.Dispatch<React.SetStateAction<boolean>>;
+  rtkModalOpen: boolean;
+  setRtkModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  rtkCaster: string;
+  setRtkCaster: React.Dispatch<React.SetStateAction<string>>;
+  rtkPort: string;
+  setRtkPort: React.Dispatch<React.SetStateAction<string>>;
+  rtkMountPoint: string;
+  setRtkMountPoint: React.Dispatch<React.SetStateAction<string>>;
+  rtkUsername: string;
+  setRtkUsername: React.Dispatch<React.SetStateAction<string>>;
+  rtkPassword: string;
+  setRtkPassword: React.Dispatch<React.SetStateAction<string>>;
+  rtkConnecting: boolean;
+  connectRtkCaster: () => Promise<void>;
 }) {
   const selectedLine = lines.find((line) => line.id === selectedLineId) ?? null;
   const hasPlan = lines.length > 0;
@@ -1761,23 +1884,22 @@ function HomeView({
                             </Text>
                           </View>
                         </View>
+                        <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+                          <View style={{ flex: 1, minWidth: 80, backgroundColor: "#ffffff", borderRadius: 10, borderWidth: 1, borderColor: "#e2e8f0", padding: 8 }}>
+                            <Text style={{ color: "#94a3b8", fontSize: 9, fontWeight: "700", textTransform: "uppercase" }}>HRMS</Text>
+                            <Text style={{ color: "#0f172a", fontSize: 12, fontWeight: "800", marginTop: 3 }} numberOfLines={1}>
+                              {telemetrySnapshot?.hrms == null ? "n/a" : `${telemetrySnapshot.hrms.toFixed(3)} m`}
+                            </Text>
+                          </View>
+                          <View style={{ flex: 1, minWidth: 80, backgroundColor: "#ffffff", borderRadius: 10, borderWidth: 1, borderColor: "#e2e8f0", padding: 8 }}>
+                            <Text style={{ color: "#94a3b8", fontSize: 9, fontWeight: "700", textTransform: "uppercase" }}>VRMS</Text>
+                            <Text style={{ color: "#0f172a", fontSize: 12, fontWeight: "800", marginTop: 3 }} numberOfLines={1}>
+                              {telemetrySnapshot?.vrms == null ? "n/a" : `${telemetrySnapshot.vrms.toFixed(3)} m`}
+                            </Text>
+                          </View>
+                        </View>
                       </View>
 
-                      {/* ── Rest of diagnostics ── */}
-                      <View style={drawerStyles.grid}>
-                        <StatCard label="ROS node" value={pulse("ROS node", systemHealth?.ros_node)} light />
-                        <StatCard label="FCU link" value={pulse("FCU link", systemHealth?.fcu_connected)} light />
-                        <StatCard
-                          label="State"
-                          value={{
-                            label: "Mission state",
-                            value: (telemetrySnapshot?.mission_state ?? systemHealth?.mission_state ?? "UNKNOWN").toUpperCase(),
-                            tone: (telemetrySnapshot?.mission_state ?? systemHealth?.mission_state) === "error" ? "#dc2626" : "#0f172a",
-                          }}
-                          fullWidth
-                          light
-                        />
-                      </View>
 
                       <View style={drawerStyles.stripRow}>
                         <StripMetric
@@ -1834,6 +1956,18 @@ function HomeView({
                             ["Pose Age", telemetrySnapshot?.pose_age_ms == null ? "n/a" : `${telemetrySnapshot.pose_age_ms.toFixed(0)} ms`],
                             ["RPP State", telemetrySnapshot?.rpp_state_name ?? "n/a"],
                             ["FCU Connection", systemHealth?.fcu_connected ? "Connected" : "Disconnected"],
+                          ]}
+                          light
+                        />
+                      </View>
+
+                      <View style={drawerStyles.section}>
+                        <SectionTitle title="System status" light />
+                        <MiniGrid
+                          items={[
+                            ["ROS Node", (systemHealth?.ros_node || telemetrySnapshot !== null) ? "Running" : "Offline"],
+                            ["FCU Connection", (telemetrySnapshot?.connected ?? systemHealth?.fcu_connected) ? "Connected" : "Disconnected"],
+                            ["Mission State", (telemetrySnapshot?.mission_state ?? systemHealth?.mission_state ?? "Unknown").toUpperCase()],
                           ]}
                           light
                         />
@@ -1922,6 +2056,25 @@ function HomeView({
                       </View>
                       <Text style={{ color: "#94a3b8", fontSize: 11, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.5 }}>
                         Origin Check (Auto-Origin)
+                      </Text>
+                    </Pressable>
+
+                    <Pressable
+                      onPress={() => setRtkModalOpen(true)}
+                      style={({ pressed }) => ({
+                        backgroundColor: pressed ? "#0284c7" : "#0ea5e9",
+                        height: 40,
+                        borderRadius: 8,
+                        alignItems: "center",
+                        justifyContent: "center",
+                        marginBottom: 10,
+                        flexDirection: "row",
+                        gap: 6,
+                      })}
+                    >
+                      <RadioTower size={16} color="#ffffff" />
+                      <Text style={{ color: "#ffffff", fontSize: 13, fontWeight: "800", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                        RTK Injection
                       </Text>
                     </Pressable>
 
@@ -2392,6 +2545,188 @@ function HomeView({
                 }}
               >
                 <Text style={{ color: "#fff", fontWeight: "800" }}>Save</Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal transparent visible={rtkModalOpen} animationType="fade" onRequestClose={() => setRtkModalOpen(false)}>
+        <Pressable
+          onPress={() => !rtkConnecting && setRtkModalOpen(false)}
+          style={{
+            flex: 1,
+            backgroundColor: "rgba(15,23,42,0.45)",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 24,
+          }}
+        >
+          <Pressable
+            onPress={() => {}}
+            style={{
+              width: "100%",
+              maxWidth: 380,
+              borderRadius: 16,
+              backgroundColor: "#ffffff",
+              padding: 20,
+              borderWidth: 1,
+              borderColor: "#d8e1eb",
+              shadowColor: "#000",
+              shadowOffset: { width: 0, height: 4 },
+              shadowOpacity: 0.15,
+              shadowRadius: 10,
+              elevation: 8,
+            }}
+          >
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 4 }}>
+              <RadioTower size={22} color="#0ea5e9" />
+              <Text style={{ color: "#0f172a", fontSize: 18, fontWeight: "900" }}>RTK Caster Configuration</Text>
+            </View>
+            <Text style={{ color: "#64748b", fontSize: 11.5, marginBottom: 14 }}>
+              Enter NTRIP caster credentials to inject RTK correction data into the GPS.
+            </Text>
+
+            <View style={{ gap: 10 }}>
+              <View>
+                <Text style={{ color: "#475569", fontSize: 9.5, fontWeight: "800", textTransform: "uppercase", marginBottom: 3 }}>Caster Host</Text>
+                <TextInput
+                  value={rtkCaster}
+                  onChangeText={setRtkCaster}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  placeholder="caster.emlid.com"
+                  style={{
+                    height: 38,
+                    borderWidth: 1,
+                    borderColor: "#cbd5e1",
+                    borderRadius: 8,
+                    paddingHorizontal: 10,
+                    backgroundColor: "#f8fafc",
+                    color: "#0f172a",
+                    fontSize: 13,
+                  }}
+                />
+              </View>
+
+              <View style={{ flexDirection: "row", gap: 10 }}>
+                <View style={{ flex: 1.5 }}>
+                  <Text style={{ color: "#475569", fontSize: 9.5, fontWeight: "800", textTransform: "uppercase", marginBottom: 3 }}>Port</Text>
+                  <TextInput
+                    value={rtkPort}
+                    onChangeText={setRtkPort}
+                    keyboardType="numeric"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    placeholder="2101"
+                    style={{
+                      height: 38,
+                      borderWidth: 1,
+                      borderColor: "#cbd5e1",
+                      borderRadius: 8,
+                      paddingHorizontal: 10,
+                      backgroundColor: "#f8fafc",
+                      color: "#0f172a",
+                      fontSize: 13,
+                    }}
+                  />
+                </View>
+                <View style={{ flex: 2 }}>
+                  <Text style={{ color: "#475569", fontSize: 9.5, fontWeight: "800", textTransform: "uppercase", marginBottom: 3 }}>Mount Point</Text>
+                  <TextInput
+                    value={rtkMountPoint}
+                    onChangeText={setRtkMountPoint}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    placeholder="e.g. MP23960a"
+                    style={{
+                      height: 38,
+                      borderWidth: 1,
+                      borderColor: "#cbd5e1",
+                      borderRadius: 8,
+                      paddingHorizontal: 10,
+                      backgroundColor: "#f8fafc",
+                      color: "#0f172a",
+                      fontSize: 13,
+                    }}
+                  />
+                </View>
+              </View>
+
+              <View>
+                <Text style={{ color: "#475569", fontSize: 9.5, fontWeight: "800", textTransform: "uppercase", marginBottom: 3 }}>Username</Text>
+                <TextInput
+                  value={rtkUsername}
+                  onChangeText={setRtkUsername}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  placeholder="NTRIP Username"
+                  style={{
+                    height: 38,
+                    borderWidth: 1,
+                    borderColor: "#cbd5e1",
+                    borderRadius: 8,
+                    paddingHorizontal: 10,
+                    backgroundColor: "#f8fafc",
+                    color: "#0f172a",
+                    fontSize: 13,
+                  }}
+                />
+              </View>
+
+              <View>
+                <Text style={{ color: "#475569", fontSize: 9.5, fontWeight: "800", textTransform: "uppercase", marginBottom: 3 }}>Password</Text>
+                <TextInput
+                  value={rtkPassword}
+                  onChangeText={setRtkPassword}
+                  secureTextEntry
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  placeholder="NTRIP Password"
+                  style={{
+                    height: 38,
+                    borderWidth: 1,
+                    borderColor: "#cbd5e1",
+                    borderRadius: 8,
+                    paddingHorizontal: 10,
+                    backgroundColor: "#f8fafc",
+                    color: "#0f172a",
+                    fontSize: 13,
+                  }}
+                />
+              </View>
+            </View>
+
+            <View style={{ flexDirection: "row", gap: 8, marginTop: 18 }}>
+              <Pressable
+                onPress={() => !rtkConnecting && setRtkModalOpen(false)}
+                disabled={rtkConnecting}
+                style={{
+                  flex: 1,
+                  height: 40,
+                  borderRadius: 10,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  backgroundColor: "#e2e8f0",
+                }}
+              >
+                <Text style={{ color: "#0f172a", fontWeight: "800", fontSize: 13 }}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                onPress={connectRtkCaster}
+                disabled={rtkConnecting}
+                style={{
+                  flex: 1,
+                  height: 40,
+                  borderRadius: 10,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  backgroundColor: rtkConnecting ? "#93c5fd" : "#0ea5e9",
+                }}
+              >
+                <Text style={{ color: "#ffffff", fontWeight: "800", fontSize: 13 }}>
+                  {rtkConnecting ? "Connecting..." : "Connect"}
+                </Text>
               </Pressable>
             </View>
           </Pressable>
