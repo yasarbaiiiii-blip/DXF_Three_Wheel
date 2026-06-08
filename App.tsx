@@ -2095,22 +2095,28 @@ function HomeView({
                       </Text>
                     </Pressable>
 
-                    <Pressable
-                      onPress={() => setRtkModalOpen(true)}
-                      style={({ pressed }) => ({
-                        backgroundColor: pressed ? "#0284c7" : "#0ea5e9",
-                        height: 40,
-                        borderRadius: 8,
-                        alignItems: "center",
-                        justifyContent: "center",
-                        marginBottom: 10,
-                        width: "100%",
-                      })}
-                    >
-                      <Text style={{ color: "#ffffff", fontSize: 13, fontWeight: "800", textTransform: "uppercase", letterSpacing: 0.5 }}>
-                        RTK Injection
-                      </Text>
-                    </Pressable>
+                    <View style={{ flexDirection: "row", gap: 8, marginBottom: 10 }}>
+                      <View style={{ flex: 1 }} />
+                      <View style={{ flex: 1 }} />
+                      <View style={{ flex: 1, flexDirection: "row" }}>
+                        <View style={{ flex: 1 }} />
+                        <Pressable
+                          onPress={() => setRtkModalOpen(true)}
+                          style={({ pressed }) => ({
+                            backgroundColor: pressed ? "#0284c7" : "#0ea5e9",
+                            flex: 1,
+                            height: 38,
+                            borderRadius: 8,
+                            alignItems: "center",
+                            justifyContent: "center",
+                          })}
+                        >
+                          <Text style={{ color: "#ffffff", fontSize: 11, fontWeight: "800", textTransform: "uppercase" }}>
+                            RTK
+                          </Text>
+                        </Pressable>
+                      </View>
+                    </View>
 
                     <View style={{ flexDirection: "row", gap: 8 }}>
                       <Pressable
