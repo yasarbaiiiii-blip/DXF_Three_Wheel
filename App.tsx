@@ -2020,7 +2020,7 @@ function HomeView({
                     borderColor: "rgba(255,255,255,0.08)",
                     marginTop: 10,
                   }}>
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 5, marginBottom: 10, marginTop: 2 }}>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 5, marginBottom: 16, marginTop: 12 }}>
                       <View style={{ width: 3, height: 10, backgroundColor: "#10b981", borderRadius: 1.5 }} />
                       <Text style={{ color: "#94a3b8", fontSize: 9.5, fontWeight: "800", textTransform: "uppercase", letterSpacing: 0.8 }}>
                         Mission Controls
@@ -2033,7 +2033,7 @@ function HomeView({
                         flexDirection: "row",
                         alignItems: "center",
                         gap: 8,
-                        marginBottom: 10,
+                        marginBottom: 14,
                         paddingVertical: 4,
                       }}
                     >
@@ -2067,7 +2067,7 @@ function HomeView({
                         flexDirection: "row",
                         alignItems: "center",
                         gap: 8,
-                        marginBottom: 12,
+                        marginBottom: 18,
                         paddingVertical: 4,
                       }}
                     >
