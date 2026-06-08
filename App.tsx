@@ -2097,6 +2097,7 @@ function HomeView({
 
                     <View style={{ flexDirection: "row", gap: 8, marginBottom: 10 }}>
                       <View style={{ flex: 1 }} />
+                      <View style={{ flex: 1 }} />
                       <Pressable
                         onPress={() => setRtkModalOpen(true)}
                         style={{
@@ -2108,11 +2109,10 @@ function HomeView({
                           justifyContent: "center",
                         }}
                       >
-                        <Text style={{ color: "#ffffff", fontSize: 12, fontWeight: "800", textTransform: "uppercase" }}>
-                          RTK
+                        <Text style={{ color: "#ffffff", fontSize: 10, fontWeight: "800", textTransform: "uppercase", textAlign: "center" }}>
+                          RTK Injection
                         </Text>
                       </Pressable>
-                      <View style={{ flex: 1 }} />
                     </View>
 
                     <View style={{ flexDirection: "row", gap: 8 }}>
