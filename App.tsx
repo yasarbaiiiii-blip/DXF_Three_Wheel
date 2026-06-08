@@ -49,6 +49,8 @@ import {
   X,
   RotateCcw,
   RotateCw,
+  Eye,
+  EyeOff,
 } from "lucide-react-native";
 
 import { readImportedPlanFile, normalizePlanLines } from "./src/utils/planImport";
@@ -1621,6 +1623,7 @@ function HomeView({
   const [rightPanelMode, setRightPanelMode] = useState<"system" | "details">("system");
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [exportFileName, setExportFileName] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const pulse = (label: string, ok: boolean | undefined | null) => ({
     label,
     value: ok === undefined || ok === null ? "Unknown" : ok ? "OK" : "Alert",
@@ -2783,25 +2786,49 @@ function HomeView({
 
               <View>
                 <Text style={{ color: "#475569", fontSize: 9.5, fontWeight: "800", textTransform: "uppercase", marginBottom: 3 }}>Password</Text>
-                <TextInput
-                  value={rtkPassword}
-                  onChangeText={setRtkPassword}
-                  editable={!rtkRunning}
-                  secureTextEntry
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  placeholder="NTRIP Password"
+                <View
                   style={{
+                    flexDirection: "row",
+                    alignItems: "center",
                     height: 38,
                     borderWidth: 1,
                     borderColor: "#cbd5e1",
                     borderRadius: 8,
-                    paddingHorizontal: 10,
                     backgroundColor: rtkRunning ? "#e2e8f0" : "#f8fafc",
-                    color: rtkRunning ? "#64748b" : "#0f172a",
-                    fontSize: 13,
+                    paddingRight: 10,
                   }}
-                />
+                >
+                  <TextInput
+                    value={rtkPassword}
+                    onChangeText={setRtkPassword}
+                    editable={!rtkRunning}
+                    secureTextEntry={!showPassword}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    placeholder="NTRIP Password"
+                    style={{
+                      flex: 1,
+                      height: "100%",
+                      paddingHorizontal: 10,
+                      color: rtkRunning ? "#64748b" : "#0f172a",
+                      fontSize: 13,
+                    }}
+                  />
+                  <Pressable
+                    onPress={() => setShowPassword(!showPassword)}
+                    style={{
+                      padding: 4,
+                      justifyContent: "center",
+                      alignItems: "center",
+                    }}
+                  >
+                    {showPassword ? (
+                      <EyeOff size={16} color="#64748b" />
+                    ) : (
+                      <Eye size={16} color="#64748b" />
+                    )}
+                  </Pressable>
+                </View>
               </View>
             </View>
 
