@@ -571,11 +571,72 @@ export default function App() {
     }
   };
 
-  const handleSelectPath = (pathName: string) => {
-    setSelectedPathName(pathName);
-    setMissionFileReady(true);
-    setMissionLoaded(false);
-    setMissionRunning(false);
+  const previewSelectedPath = async (pathName: string) => {
+    if (!apiBaseUrl) return;
+    setMissionActionBusy(true);
+    try {
+      console.log(`[API GET] /api/path/${pathName}/preview - Fetching detailed preview...`);
+      setSelectedPathName(pathName);
+      let generatedLines: PlanLine[] = [];
+      try {
+        const res = await fetch(`${apiBaseUrl}/api/path/${encodeURIComponent(pathName)}/preview`, {
+          method: "GET",
+          headers: {
+            Accept: "application/json",
+          },
+        });
+        if (res.ok) {
+          const body = await res.json();
+          console.log(`[API GET] /api/path/${pathName}/preview - Success, loaded ${body.num_points} points`);
+          const pts = body.waypoints;
+          for (let i = 0; i < pts.length - 1; i++) {
+            const fromPt = pts[i];
+            const toPt = pts[i + 1];
+            const sprayFlag = fromPt.spray ?? true;
+            generatedLines.push({
+              id: `rpp-line-${i}`,
+              label: `Segment ${i + 1}`,
+              layer: sprayFlag ? "marking" : "center",
+              // The backend returns {north: number, east: number}
+              // PlanLine convention is x = North, y = East
+              from: { id: i * 2 + 1, x: fromPt.north, y: fromPt.east },
+              to: { id: i * 2 + 2, x: toPt.north, y: toPt.east },
+              width: 0.1,
+            });
+          }
+        } else {
+          console.error(`[API GET] /api/path/${pathName}/preview - Failed with status ${res.status}`);
+          throw new Error("Preview not available");
+        }
+      } catch (err) {
+        console.log("[API GET] /api/path/preview - Endpoint failed/not supported, fallback to mock line:", err);
+        generatedLines = [{
+          id: "rpp-line-0",
+          label: "Segment 1 (Preview fallback)",
+          layer: "marking",
+          from: { id: 1, x: 0, y: 0 },
+          to: { id: 2, x: 0, y: 10 },
+          width: 0.1,
+        }];
+      }
+      const normalized = normalizePlanLines(generatedLines);
+      setLines(normalized);
+      setImportedPlan({
+        fileName: pathName,
+        uri: "",
+        fileType: pathName.endsWith(".csv") ? "csv" : pathName.endsWith(".waypoints") ? "waypoints" : "dxf",
+        source: "builtin"
+      });
+      setSelectedLineId(normalized[0]?.id ?? null);
+      setMissionFileReady(true);
+      setMissionLoaded(false);
+      setMissionRunning(false);
+    } catch (err) {
+      console.log("Error loading path preview:", err);
+      Alert.alert("Preview failed", err instanceof Error ? err.message : String(err));
+    } finally {
+      setMissionActionBusy(false);
+    }
   };
 
   useEffect(() => {
@@ -1269,7 +1330,7 @@ export default function App() {
             selectedLineId={selectedLineId}
             backendPaths={backendPaths}
             selectedPathName={selectedPathName}
-            onSelectPath={handleSelectPath}
+            onSelectPath={previewSelectedPath}
             onLoadSelectedPath={loadMissionOnBackend}
             missionActionBusy={missionActionBusy}
             onBack={() => setPage("home")}
@@ -4000,8 +4061,25 @@ function FieldsPage({
   missionActionBusy: boolean;
 }) {
   return (
-    <View style={{ flex: 1, padding: 16 }}>
-      <View style={{ flex: 1, gap: 12, maxWidth: 600, alignSelf: "center", width: "100%" }}>
+    <View style={{ flex: 1, flexDirection: "row", padding: 16, gap: 14 }}>
+      <View
+        style={{
+          flex: 1.1,
+          backgroundColor: "#f8fafc",
+          borderRadius: 18,
+          overflow: "hidden",
+          borderWidth: 1,
+          borderColor: "#d8e1eb",
+          shadowColor: "#0f172a",
+          shadowOpacity: 0.05,
+          shadowRadius: 16,
+          shadowOffset: { width: 0, height: 8 },
+          elevation: 2,
+        }}
+      >
+        <PlanPreview lines={lines} visibility={layerVisibility} selectedLineId={selectedLineId} />
+      </View>
+      <View style={{ flex: 1, gap: 12 }}>
         <View style={{ borderRadius: 14, padding: 14, backgroundColor: "#0f172a" }}>
           <Text style={{ color: "#94a3b8", fontSize: 11, fontWeight: "800", letterSpacing: 1.2, textTransform: "uppercase" }}>
             Field Workspace
