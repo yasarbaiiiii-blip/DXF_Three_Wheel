@@ -139,6 +139,7 @@ const GREEN_DARK = "#f8fafc";
 const TEAL = "#0f988f";
 const LOCAL_WS_CANDIDATES = [
   "http://localhost:5001",
+  "http://127.0.0.1:5001",
 ];
 const PRIORITY_BACKEND_IPS: string[] = [];
 
@@ -303,8 +304,9 @@ export default function App() {
 
     try {
       const nextSocket = io(target, {
-        transports: ["websocket", "polling"], // Prioritize websocket to bypass slow polling
+        transports: ["websocket"], // Use websocket ONLY - polling is unreliable in APK builds
         timeout: 20000, // Increase to 20 seconds
+        forceNew: true,
       });
 
       await new Promise<void>((resolve, reject) => {
@@ -465,6 +467,24 @@ export default function App() {
     logAction("DISCOVERY_SCAN_START", { manualHost: currentManualHost, selectedWs: currentSelectedWs, backendPinned: isPinned });
     setWsStatus("scanning");
     setWsError("");
+
+    // Always probe the manual host directly with a fast dedicated request
+    // This ensures the "Connect" button works even if subnet sweep is slow
+    let manualHostReachable = false;
+    if (currentManualHost) {
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 2000);
+        const pingRes = await fetch(`${currentManualHost}/api/ping`, { signal: controller.signal });
+        clearTimeout(timeout);
+        if (pingRes.ok) {
+          manualHostReachable = true;
+        }
+      } catch {
+        // manual host not reachable, fall through to subnet sweep
+      }
+    }
+
     const candidateHosts = Array.from(
       new Set([
         ...priorityScanHosts(),
@@ -487,13 +507,13 @@ export default function App() {
         const parsed = parseHost(candidate);
         return parsed
           ? [{
-              id: `${parsed.host}-${parsed.port}`,
-              name: `Rover ${parsed.host.split(".").pop() ?? parsed.host}`,
-              host: parsed.host,
-              port: parsed.port,
-              version: "1.0",
-              responseTime,
-            }]
+            id: `${parsed.host}-${parsed.port}`,
+            name: `Rover ${parsed.host.split(".").pop() ?? parsed.host}`,
+            host: parsed.host,
+            port: parsed.port,
+            version: "1.0",
+            responseTime,
+          }]
           : [];
       })
     ).flat();
@@ -519,14 +539,43 @@ export default function App() {
     const bestHost = uniqueDiscovered[0] ? `http://${uniqueDiscovered[0].host}:${uniqueDiscovered[0].port}` : "";
     if (bestHost) {
       const currentTarget = currentSelectedWs || currentManualHost;
-      if (!currentTarget) {
-        setSelectedWs(bestHost);
-        setManualHost(bestHost);
+      if (!currentTarget || manualHostReachable) {
+        // If the manual host is reachable, keep it selected
+        if (manualHostReachable && currentManualHost) {
+          setSelectedWs(currentManualHost);
+          // Auto-connect to the manual host if it was reachable
+          logAction("DISCOVERY_SCAN_MANUAL_HOST_REACHABLE", { host: currentManualHost });
+        }
+        if (!currentTarget) {
+          setSelectedWs(bestHost);
+          setManualHost(bestHost);
+        }
       }
       setWsStatus("ready");
       setWsError("");
-      logAction("DISCOVERY_SCAN_RESULT", { bestHost, currentTarget });
+      logAction("DISCOVERY_SCAN_RESULT", { bestHost, currentTarget, manualHostReachable });
       return;
+    }
+
+    // If manual host was reachable but not in discovered list, still allow it
+    if (manualHostReachable && currentManualHost) {
+      const manualEntry = parseHost(currentManualHost);
+      if (manualEntry) {
+        const fakeRover: DiscoveredRover = {
+          id: `${manualEntry.host}-${manualEntry.port}`,
+          name: `Rover ${manualEntry.host.split(".").pop() ?? manualEntry.host}`,
+          host: manualEntry.host,
+          port: manualEntry.port,
+          version: "manual",
+          responseTime: 0,
+        };
+        setDiscoveredRovers([fakeRover]);
+        setSelectedWs(currentManualHost);
+        setWsStatus("ready");
+        setWsError("");
+        logAction("DISCOVERY_SCAN_MANUAL_FALLBACK", { host: currentManualHost });
+        return;
+      }
     }
 
     setSelectedWs("");
@@ -1170,7 +1219,7 @@ export default function App() {
       }
     }
 
-    // 2. Check window.location if running in a web environment
+    // 2. Check window.location if running in a web environment (will be undefined in React Native APK)
     if (typeof window !== "undefined" && window.location && window.location.hostname) {
       const host = window.location.hostname;
       if (isPrivateLanIp(host)) {
@@ -1184,6 +1233,23 @@ export default function App() {
     // 3. Always include common private subnets
     prefixes.add("192.168.1");
     prefixes.add("192.168.0");
+    prefixes.add("192.168.2");
+    prefixes.add("10.0.0");
+    prefixes.add("172.16.0");
+
+    // 4. Extract subnet from manual host and add it as a priority scan
+    //    This helps when user enters an IP manually on a non-192.168.x network
+    try {
+      const seedParsed = parseHost(seedHost);
+      if (seedParsed && isPrivateLanIp(seedParsed.host)) {
+        const octets = seedParsed.host.split(".");
+        if (octets.length === 4) {
+          prefixes.add(octets.slice(0, 3).join("."));
+        }
+      }
+    } catch {
+      // ignore
+    }
 
     const candidates: string[] = [];
     for (const prefix of prefixes) {
@@ -1274,53 +1340,53 @@ export default function App() {
             importedPlan={importedPlan}
             lines={lines}
             selectedLineId={selectedLineId}
-          onSelectLine={setSelectedLineId}
-          onDeleteSelectedLine={deleteSelectedLine}
-          onConfirmDeletePlan={deleteEntirePlan}
-          menuOpen={menuOpen}
-          onToggleMenu={() => setMenuOpen((v) => !v)}
-          onNav={(p) => {
-            logAction("NAVIGATE", { page: p });
-            setPage(p);
-            setMenuOpen(false);
-          }}
-          onDisconnect={disconnectToConnectionScreen}
-          layerVisibility={layerVisibility}
-          setLayerVisibility={setLayerVisibility}
-          onStopPlan={stopMissionOnBackend}
-          onStartPlan={startLoadedMission}
-          onPausePlan={pauseMissionOnBackend}
-          onArmVehicle={armVehicle}
-          onEstopVehicle={estopVehicle}
-          missionActionBusy={missionActionBusy}
-          missionFileReady={missionFileReady}
-          missionLoaded={missionLoaded}
-          missionRunning={missionRunning}
-          systemHealth={systemHealth}
-          telemetrySnapshot={telemetrySnapshot}
-          activityFeed={activityFeed}
-          discoveryFeed={discoveryFeed}
-          telemetryError={telemetryError}
-          telemetryLoading={telemetryLoading}
-          isPaused={isPaused}
-          setIsPaused={setIsPaused}
-          rtkModalOpen={rtkModalOpen}
-          setRtkModalOpen={setRtkModalOpen}
-          rtkCaster={rtkCaster}
-          setRtkCaster={setRtkCaster}
-          rtkPort={rtkPort}
-          setRtkPort={setRtkPort}
-          rtkMountPoint={rtkMountPoint}
-          setRtkMountPoint={setRtkMountPoint}
-          rtkUsername={rtkUsername}
-          setRtkUsername={setRtkUsername}
-          rtkPassword={rtkPassword}
-          setRtkPassword={setRtkPassword}
-          rtkConnecting={rtkConnecting}
-          connectRtkCaster={connectRtkCaster}
-          rtkRunning={rtkRunning}
-          rtkHealthy={rtkHealthy}
-        />
+            onSelectLine={setSelectedLineId}
+            onDeleteSelectedLine={deleteSelectedLine}
+            onConfirmDeletePlan={deleteEntirePlan}
+            menuOpen={menuOpen}
+            onToggleMenu={() => setMenuOpen((v) => !v)}
+            onNav={(p) => {
+              logAction("NAVIGATE", { page: p });
+              setPage(p);
+              setMenuOpen(false);
+            }}
+            onDisconnect={disconnectToConnectionScreen}
+            layerVisibility={layerVisibility}
+            setLayerVisibility={setLayerVisibility}
+            onStopPlan={stopMissionOnBackend}
+            onStartPlan={startLoadedMission}
+            onPausePlan={pauseMissionOnBackend}
+            onArmVehicle={armVehicle}
+            onEstopVehicle={estopVehicle}
+            missionActionBusy={missionActionBusy}
+            missionFileReady={missionFileReady}
+            missionLoaded={missionLoaded}
+            missionRunning={missionRunning}
+            systemHealth={systemHealth}
+            telemetrySnapshot={telemetrySnapshot}
+            activityFeed={activityFeed}
+            discoveryFeed={discoveryFeed}
+            telemetryError={telemetryError}
+            telemetryLoading={telemetryLoading}
+            isPaused={isPaused}
+            setIsPaused={setIsPaused}
+            rtkModalOpen={rtkModalOpen}
+            setRtkModalOpen={setRtkModalOpen}
+            rtkCaster={rtkCaster}
+            setRtkCaster={setRtkCaster}
+            rtkPort={rtkPort}
+            setRtkPort={setRtkPort}
+            rtkMountPoint={rtkMountPoint}
+            setRtkMountPoint={setRtkMountPoint}
+            rtkUsername={rtkUsername}
+            setRtkUsername={setRtkUsername}
+            rtkPassword={rtkPassword}
+            setRtkPassword={setRtkPassword}
+            rtkConnecting={rtkConnecting}
+            connectRtkCaster={connectRtkCaster}
+            rtkRunning={rtkRunning}
+            rtkHealthy={rtkHealthy}
+          />
         ) : (
           <SectionScreen
             title={sectionTitle}
@@ -1363,63 +1429,63 @@ export default function App() {
             setDelayA={setDelayA}
             setDelayB={setDelayB}
           />
-      )}
+        )}
 
 
-      {toast ? (
-        <View
-          pointerEvents="none"
-          style={{
-            position: "absolute",
-            left: 16,
-            right: 16,
-            bottom: 18,
-            zIndex: 999,
-            alignItems: "center",
-          }}
-        >
+        {toast ? (
           <View
+            pointerEvents="none"
             style={{
-              maxWidth: 560,
-              width: "100%",
-              borderRadius: 16,
-              paddingHorizontal: 14,
-              paddingVertical: 12,
-              backgroundColor:
-                toast.tone === "success"
-                  ? "#0f766e"
-                  : toast.tone === "warning"
-                    ? "#b45309"
-                    : toast.tone === "error"
-                      ? "#991b1b"
-                      : "#0f172a",
-              borderWidth: 1,
-              borderColor:
-                toast.tone === "success"
-                  ? "#5eead4"
-                  : toast.tone === "warning"
-                    ? "#fdba74"
-                    : toast.tone === "error"
-                      ? "#fca5a5"
-                      : "#334155",
-              shadowColor: "#000",
-              shadowOpacity: 0.16,
-              shadowRadius: 16,
-              shadowOffset: { width: 0, height: 8 },
-              elevation: 10,
+              position: "absolute",
+              left: 16,
+              right: 16,
+              bottom: 18,
+              zIndex: 999,
+              alignItems: "center",
             }}
           >
-            <Text style={{ color: "#fff", fontSize: 12, fontWeight: "900", letterSpacing: 0.6, textTransform: "uppercase" }}>
-              {toast.title}
-            </Text>
-            <Text style={{ color: "#e2e8f0", marginTop: 4, fontSize: 13, lineHeight: 18 }}>
-              {toast.message}
-            </Text>
+            <View
+              style={{
+                maxWidth: 560,
+                width: "100%",
+                borderRadius: 16,
+                paddingHorizontal: 14,
+                paddingVertical: 12,
+                backgroundColor:
+                  toast.tone === "success"
+                    ? "#0f766e"
+                    : toast.tone === "warning"
+                      ? "#b45309"
+                      : toast.tone === "error"
+                        ? "#991b1b"
+                        : "#0f172a",
+                borderWidth: 1,
+                borderColor:
+                  toast.tone === "success"
+                    ? "#5eead4"
+                    : toast.tone === "warning"
+                      ? "#fdba74"
+                      : toast.tone === "error"
+                        ? "#fca5a5"
+                        : "#334155",
+                shadowColor: "#000",
+                shadowOpacity: 0.16,
+                shadowRadius: 16,
+                shadowOffset: { width: 0, height: 8 },
+                elevation: 10,
+              }}
+            >
+              <Text style={{ color: "#fff", fontSize: 12, fontWeight: "900", letterSpacing: 0.6, textTransform: "uppercase" }}>
+                {toast.title}
+              </Text>
+              <Text style={{ color: "#e2e8f0", marginTop: 4, fontSize: 13, lineHeight: 18 }}>
+                {toast.message}
+              </Text>
+            </View>
           </View>
-        </View>
-      ) : null}
-    </SafeAreaView>
-  </SafeAreaProvider>
+        ) : null}
+      </SafeAreaView>
+    </SafeAreaProvider>
   );
 }
 
@@ -1873,8 +1939,8 @@ function HomeView({
                                 telemetrySnapshot?.gps_fix === 6
                                   ? "#16a34a"
                                   : telemetrySnapshot?.gps_fix === 5
-                                  ? "#ea580c"
-                                  : "#dc2626"
+                                    ? "#ea580c"
+                                    : "#dc2626"
                               }
                             />
                             <Battery
@@ -1884,8 +1950,8 @@ function HomeView({
                                   ? telemetrySnapshot.battery_pct >= 50
                                     ? "#16a34a"
                                     : telemetrySnapshot.battery_pct >= 20
-                                    ? "#ea580c"
-                                    : "#dc2626"
+                                      ? "#ea580c"
+                                      : "#dc2626"
                                   : "#dc2626"
                               }
                             />
@@ -1896,8 +1962,8 @@ function HomeView({
                                   ? telemetrySnapshot.gps_sat >= 10
                                     ? "#16a34a"
                                     : telemetrySnapshot.gps_sat >= 6
-                                    ? "#ea580c"
-                                    : "#dc2626"
+                                      ? "#ea580c"
+                                      : "#dc2626"
                                   : "#dc2626"
                               }
                             />
@@ -2377,7 +2443,7 @@ function HomeView({
             }}
           >
             <Pressable
-              onPress={() => {}}
+              onPress={() => { }}
               style={{
                 backgroundColor: "#fff",
                 borderRadius: 22,
@@ -2404,36 +2470,36 @@ function HomeView({
                   Choice
                 </Text>
                 <View style={{ flexDirection: "row", gap: 10 }}>
-                <Pressable
-                  disabled={!hasSelectedLine}
-                  onPress={() => setDeleteScope("line")}
-                  style={{
-                    flex: 1,
-                    paddingVertical: 14,
-                    borderRadius: 16,
-                    borderWidth: 1,
-                    borderColor: deleteScope === "line" ? "#0f172a" : "#d7dee8",
-                    backgroundColor: deleteScope === "line" ? "#eef2ff" : "#ffffff",
-                    alignItems: "center",
-                    opacity: hasSelectedLine ? 1 : 0.45,
-                  }}
-                >
-                  <Text style={{ color: "#0f172a", fontWeight: "800" }}>Selected line</Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => setDeleteScope("plan")}
-                  style={{
-                    flex: 1,
-                    paddingVertical: 14,
-                    borderRadius: 16,
-                    borderWidth: 1,
-                    borderColor: deleteScope === "plan" ? "#0f172a" : "#d7dee8",
-                    backgroundColor: deleteScope === "plan" ? "#eef2ff" : "#ffffff",
-                    alignItems: "center",
-                  }}
-                >
-                  <Text style={{ color: "#0f172a", fontWeight: "800" }}>Full plan</Text>
-                </Pressable>
+                  <Pressable
+                    disabled={!hasSelectedLine}
+                    onPress={() => setDeleteScope("line")}
+                    style={{
+                      flex: 1,
+                      paddingVertical: 14,
+                      borderRadius: 16,
+                      borderWidth: 1,
+                      borderColor: deleteScope === "line" ? "#0f172a" : "#d7dee8",
+                      backgroundColor: deleteScope === "line" ? "#eef2ff" : "#ffffff",
+                      alignItems: "center",
+                      opacity: hasSelectedLine ? 1 : 0.45,
+                    }}
+                  >
+                    <Text style={{ color: "#0f172a", fontWeight: "800" }}>Selected line</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => setDeleteScope("plan")}
+                    style={{
+                      flex: 1,
+                      paddingVertical: 14,
+                      borderRadius: 16,
+                      borderWidth: 1,
+                      borderColor: deleteScope === "plan" ? "#0f172a" : "#d7dee8",
+                      backgroundColor: deleteScope === "plan" ? "#eef2ff" : "#ffffff",
+                      alignItems: "center",
+                    }}
+                  >
+                    <Text style={{ color: "#0f172a", fontWeight: "800" }}>Full plan</Text>
+                  </Pressable>
                 </View>
                 {!hasSelectedLine ? (
                   <Text style={{ color: "#94a3b8", fontSize: 12, marginTop: 10, lineHeight: 18 }}>
@@ -2447,44 +2513,44 @@ function HomeView({
                   Action
                 </Text>
                 <View style={{ flexDirection: "row", gap: 12 }}>
-                <Pressable
-                  onPress={() => {
-                    setDeleteDialogOpen(false);
-                    setDeleteScope(null);
-                  }}
-                  style={{
-                    flex: 1,
-                    paddingVertical: 13,
-                    borderRadius: 16,
-                    borderWidth: 1,
-                    borderColor: "#cbd5e1",
-                    backgroundColor: "#f8fafc",
-                    alignItems: "center",
-                  }}
-                >
-                  <Text style={{ color: "#0f172a", fontWeight: "800" }}>Cancel</Text>
-                </Pressable>
-                <Pressable
-                  disabled={!deleteScope || (deleteScope === "line" && !hasSelectedLine)}
-                  onPress={() => {
-                    if (deleteScope === "line") {
-                      onDeleteSelectedLine();
-                    } else if (deleteScope === "plan") {
-                      onConfirmDeletePlan();
-                    }
-                    setDeleteDialogOpen(false);
-                    setDeleteScope(null);
-                  }}
-                  style={{
-                    flex: 1,
-                    paddingVertical: 13,
-                    borderRadius: 16,
-                    backgroundColor: deleteScope && !(deleteScope === "line" && !hasSelectedLine) ? "#b91c1c" : "#94a3b8",
-                    alignItems: "center",
-                  }}
-                >
-                  <Text style={{ color: "#fff", fontWeight: "800" }}>Delete</Text>
-                </Pressable>
+                  <Pressable
+                    onPress={() => {
+                      setDeleteDialogOpen(false);
+                      setDeleteScope(null);
+                    }}
+                    style={{
+                      flex: 1,
+                      paddingVertical: 13,
+                      borderRadius: 16,
+                      borderWidth: 1,
+                      borderColor: "#cbd5e1",
+                      backgroundColor: "#f8fafc",
+                      alignItems: "center",
+                    }}
+                  >
+                    <Text style={{ color: "#0f172a", fontWeight: "800" }}>Cancel</Text>
+                  </Pressable>
+                  <Pressable
+                    disabled={!deleteScope || (deleteScope === "line" && !hasSelectedLine)}
+                    onPress={() => {
+                      if (deleteScope === "line") {
+                        onDeleteSelectedLine();
+                      } else if (deleteScope === "plan") {
+                        onConfirmDeletePlan();
+                      }
+                      setDeleteDialogOpen(false);
+                      setDeleteScope(null);
+                    }}
+                    style={{
+                      flex: 1,
+                      paddingVertical: 13,
+                      borderRadius: 16,
+                      backgroundColor: deleteScope && !(deleteScope === "line" && !hasSelectedLine) ? "#b91c1c" : "#94a3b8",
+                      alignItems: "center",
+                    }}
+                  >
+                    <Text style={{ color: "#fff", fontWeight: "800" }}>Delete</Text>
+                  </Pressable>
                 </View>
               </View>
             </Pressable>
@@ -2564,7 +2630,7 @@ function HomeView({
           }}
         >
           <Pressable
-            onPress={() => {}}
+            onPress={() => { }}
             style={{
               width: "100%",
               maxWidth: 360,
@@ -2640,7 +2706,7 @@ function HomeView({
           }}
         >
           <Pressable
-            onPress={() => {}}
+            onPress={() => { }}
             style={{
               width: "100%",
               maxWidth: 380,
@@ -3274,7 +3340,7 @@ function LineDetailsDrawer({
 
 function StatCard({ label, value, fullWidth, light }: { label: string; value: { label: string; value: string; tone: string }; fullWidth?: boolean; light?: boolean }) {
   const accentColor = (value.tone === "#ffffff" || value.tone === "#fff" || value.tone === "#0f172a") ? "#3b82f6" : value.tone || "#475569";
-  
+
   let cardBg = undefined;
   if (light) {
     if (value.tone === "#16a34a") {
@@ -3765,7 +3831,7 @@ function ConnectionView({
             elevation: 3,
             borderWidth: 1,
             borderColor: "#d7dee8",
-        }}
+          }}
         >
           <View style={{ flex: 1, justifyContent: "space-between", gap: 14 }}>
             <View style={{ gap: 12 }}>
@@ -4540,7 +4606,7 @@ function pickNearestLineId(
   tap: LocalPoint,
   radiusPx: number,
   rotation: number = 0,
-  layoutSize: { width: number; height: number} = { width: 0, height: 0 }
+  layoutSize: { width: number; height: number } = { width: 0, height: 0 }
 ) {
   let nearestId: string | null = null;
   let nearestDistance = radiusPx;
