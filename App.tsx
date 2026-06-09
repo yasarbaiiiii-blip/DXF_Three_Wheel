@@ -26,6 +26,7 @@ if (
 
 import Slider from "@react-native-community/slider";
 import * as FileSystem from "expo-file-system/legacy";
+import * as DocumentPicker from "expo-document-picker";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Circle, G, Line, Polygon, Text as SvgText } from "react-native-svg";
 import { io, Socket } from "socket.io-client";
@@ -217,6 +218,8 @@ export default function App() {
   const [selectedPathName, setSelectedPathName] = useState<string | null>(null);
   const [isPaused, setIsPaused] = useState(false);
 
+  const [prevMissionState, setPrevMissionState] = useState<string | null>(null);
+
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const selectedWsRef = useRef(selectedWs);
   const manualHostRef = useRef(manualHost);
@@ -257,6 +260,16 @@ export default function App() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (telemetrySnapshot) {
+      const currentState = telemetrySnapshot.mission_state;
+      if (prevMissionState === "running" && (currentState === "idle" || currentState === "completed")) {
+        Alert.alert("Mission Completed", "The rover has successfully finished the mission.");
+      }
+      setPrevMissionState(currentState);
+    }
+  }, [telemetrySnapshot?.mission_state, prevMissionState]);
 
   useEffect(() => {
     selectedWsRef.current = selectedWs;
@@ -834,25 +847,33 @@ export default function App() {
     return `${fallbackPrefix} (status ${res.status})`;
   }
 
-  async function loadMissionOnBackend() {
-    if (!apiBaseUrl || !importedPlan || lines.length === 0) {
+  async function loadMissionOnBackend(stagedMissionId?: string) {
+    if (!apiBaseUrl || (!importedPlan && !stagedMissionId) || lines.length === 0) {
       return;
     }
 
-    logAction("LOAD_REQUEST", { apiBaseUrl, fileName: importedPlan.fileName });
+    logAction("LOAD_REQUEST", { apiBaseUrl, stagedMissionId, fileName: importedPlan?.fileName });
     setMissionActionBusy(true);
     try {
-      showToast("Load", `Loading ${importedPlan.fileName}...`, "info");
-      const res = await fetch(`${apiBaseUrl}/api/mission/load`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          path_name: importedPlan.fileName,
-          mission_file: "",
-        }),
-      });
+      showToast("Load", `Loading path...`, "info");
+      
+      let res;
+      if (stagedMissionId) {
+        res = await fetch(`${apiBaseUrl}/api/path/load-to-controller`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mission_id: stagedMissionId }),
+        });
+      } else {
+        res = await fetch(`${apiBaseUrl}/api/mission/load`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            path_name: importedPlan!.fileName,
+            mission_file: "",
+          }),
+        });
+      }
 
       if (!res.ok) {
         const errMsg = await parseFetchError(res, "Load failed");
@@ -862,12 +883,12 @@ export default function App() {
       setMissionLoaded(true);
       setMissionRunning(false);
       void refreshTelemetryPanel();
-      logAction("LOAD_SUCCESS", { fileName: importedPlan.fileName });
+      logAction("LOAD_SUCCESS", { fileName: importedPlan?.fileName });
       setPage("home");
       showToast("File loaded", "Load succeeded. Start and Export are now available.", "success");
     } catch (error) {
       logAction("LOAD_FAILED", {
-        fileName: importedPlan.fileName,
+        fileName: importedPlan?.fileName,
         error: error instanceof Error ? error.message : String(error),
       });
       Alert.alert("Load failed", error instanceof Error ? error.message : "Could not load the mission.");
@@ -902,6 +923,17 @@ export default function App() {
         throw new Error(errMsg);
       }
       setMissionRunning(true);
+      if (autoOrigin && telemetrySnapshot?.pos_n != null && telemetrySnapshot?.pos_e != null) {
+        const offsetN = telemetrySnapshot.pos_n;
+        const offsetE = telemetrySnapshot.pos_e;
+        setLines((prevLines) =>
+          prevLines.map((l) => ({
+            ...l,
+            from: { ...l.from, x: l.from.x + offsetN, y: l.from.y + offsetE },
+            to: { ...l.to, x: l.to.x + offsetN, y: l.to.y + offsetE },
+          }))
+        );
+      }
       void refreshTelemetryPanel();
       logAction("START_SUCCESS", { fileName: importedPlan.fileName, autoOrigin });
       Alert.alert("Started", `${importedPlan.fileName} started on the rover.`);
@@ -1087,6 +1119,40 @@ export default function App() {
       });
       Alert.alert(arm ? "Arm failed" : "Disarm failed", error instanceof Error ? error.message : "Command rejected.");
       showToast(arm ? "Arm failed" : "Disarm failed", error instanceof Error ? error.message : "Command rejected.", "error");
+    } finally {
+      setMissionActionBusy(false);
+    }
+  }
+
+  async function setVehicleMode(targetMode: "MANUAL" | "OFFBOARD") {
+    if (!apiBaseUrl) {
+      Alert.alert("No backend", "Connect to a backend before sending commands.");
+      return;
+    }
+    logAction("SET_MODE_REQUEST", { apiBaseUrl, targetMode });
+    setMissionActionBusy(true);
+    try {
+      showToast("Mode", `Switching to ${targetMode}...`, "info");
+      const res = await fetch(`${apiBaseUrl}/api/set_mode`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: targetMode })
+      });
+      if (!res.ok) {
+        const errMsg = await parseFetchError(res, "Set mode failed");
+        throw new Error(errMsg);
+      }
+      void refreshTelemetryPanel();
+      logAction("SET_MODE_SUCCESS", { targetMode });
+      Alert.alert("Mode Changed", `Vehicle mode set to ${targetMode}.`);
+      showToast("Mode Changed", `Vehicle mode is now ${targetMode}.`, "success");
+    } catch (error) {
+      logAction("SET_MODE_FAILED", {
+        targetMode,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      Alert.alert("Mode Change Failed", error instanceof Error ? error.message : "Command rejected.");
+      showToast("Mode Change Failed", error instanceof Error ? error.message : "Command rejected.", "error");
     } finally {
       setMissionActionBusy(false);
     }
@@ -1357,6 +1423,7 @@ export default function App() {
             onStartPlan={startLoadedMission}
             onPausePlan={pauseMissionOnBackend}
             onArmVehicle={armVehicle}
+            onSetMode={setVehicleMode}
             onEstopVehicle={estopVehicle}
             missionActionBusy={missionActionBusy}
             missionFileReady={missionFileReady}
@@ -1389,16 +1456,20 @@ export default function App() {
           />
         ) : (
           <SectionScreen
+            telemetrySnapshot={telemetrySnapshot}
             title={sectionTitle}
             page={page}
             importedPlan={importedPlan}
             lines={lines}
+            setLines={setLines}
             selectedLineId={selectedLineId}
             backendPaths={backendPaths}
             selectedPathName={selectedPathName}
             onSelectPath={previewSelectedPath}
             onLoadSelectedPath={loadMissionOnBackend}
             missionActionBusy={missionActionBusy}
+            apiBaseUrl={apiBaseUrl}
+            onRefreshPaths={fetchBackendPaths}
             onBack={() => setPage("home")}
             onSelectLine={setSelectedLineId}
             onGenerateTemplate={(name, generatedLines) => {
@@ -1573,6 +1644,7 @@ function HomeView({
   onStartPlan,
   onPausePlan,
   onArmVehicle,
+  onSetMode,
   onEstopVehicle,
   missionActionBusy,
   missionFileReady,
@@ -1619,6 +1691,7 @@ function HomeView({
   onStartPlan: (autoOrigin: boolean) => Promise<void>;
   onPausePlan: () => Promise<void>;
   onArmVehicle: (arm: boolean) => Promise<void>;
+  onSetMode: (mode: "MANUAL" | "OFFBOARD") => Promise<void>;
   onEstopVehicle: () => Promise<void>;
   missionActionBusy: boolean;
   missionFileReady: boolean;
@@ -2297,6 +2370,26 @@ function HomeView({
                         >
                           <Text style={{ color: "#ffffff", fontSize: 12, fontWeight: "800" }}>
                             {(telemetrySnapshot?.armed ?? systemHealth?.armed) ? "Disarm" : "Arm"}
+                          </Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={() => {
+                            const currentMode = telemetrySnapshot?.mode ?? systemHealth?.mode ?? "MANUAL";
+                            const targetMode = currentMode === "OFFBOARD" ? "MANUAL" : "OFFBOARD";
+                            onSetMode?.(targetMode);
+                          }}
+                          disabled={missionActionBusy}
+                          style={{
+                            flex: 1,
+                            height: 38,
+                            borderRadius: 8,
+                            backgroundColor: (telemetrySnapshot?.mode ?? systemHealth?.mode) === "OFFBOARD" ? "#f59e0b" : "#8b5cf6",
+                            alignItems: "center",
+                            justifyContent: "center",
+                          }}
+                        >
+                          <Text style={{ color: "#ffffff", fontSize: 12, fontWeight: "800" }}>
+                            {(telemetrySnapshot?.mode ?? systemHealth?.mode) === "OFFBOARD" ? "MANUAL" : "OFFBOARD"}
                           </Text>
                         </Pressable>
                         <Pressable
@@ -3636,8 +3729,10 @@ function DetailLine({ label, value }: { label: string; value: string }) {
 function SectionScreen(props: {
   title: string;
   page: Page;
+  telemetrySnapshot: TelemetrySnapshot | null;
   importedPlan: ImportedPlan | null;
   lines: PlanLine[];
+  setLines: React.Dispatch<React.SetStateAction<PlanLine[]>>;
   selectedLineId: string | null;
   onBack: () => void;
   onSelectLine: (id: string | null) => void;
@@ -3662,8 +3757,10 @@ function SectionScreen(props: {
   backendPaths: any[];
   selectedPathName: string | null;
   onSelectPath: (name: string) => void;
-  onLoadSelectedPath: () => void;
+  onLoadSelectedPath: (missionId?: string) => void;
   missionActionBusy: boolean;
+  apiBaseUrl: string;
+  onRefreshPaths: () => void;
 }) {
   const { title, page, onBack } = props;
 
@@ -4109,6 +4206,8 @@ const connectionStyles = {
 
 function FieldsPage({
   lines,
+  setLines,
+  telemetrySnapshot,
   selectedLineId,
   layerVisibility,
   backendPaths,
@@ -4116,36 +4215,193 @@ function FieldsPage({
   onSelectPath,
   onLoadSelectedPath,
   missionActionBusy,
+  onSelectLine,
+  apiBaseUrl,
+  onRefreshPaths,
 }: {
   lines: PlanLine[];
+  setLines: React.Dispatch<React.SetStateAction<PlanLine[]>>;
+  telemetrySnapshot: TelemetrySnapshot | null;
   selectedLineId: string | null;
   layerVisibility: LayerVisibility;
   backendPaths: any[];
   selectedPathName: string | null;
   onSelectPath: (name: string) => void;
-  onLoadSelectedPath: () => void;
+  onLoadSelectedPath: (missionId?: string) => void;
   missionActionBusy: boolean;
+  onSelectLine: (id: string | null) => void;
+  apiBaseUrl: string;
+  onRefreshPaths: () => void;
 }) {
+  const [pickedFile, setPickedFile] = useState<DocumentPicker.DocumentPickerAsset | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [refPoints, setRefPoints] = useState<{ dxf_x: number; dxf_y: number; lat: string; lon: string }[]>([]);
+  const [isFixing, setIsFixing] = useState(false);
+  const [missionSummary, setMissionSummary] = useState<any | null>(null);
+
+  const handleSelectPoint = (pt: { x: number; y: number }) => {
+    setMissionSummary(null);
+    setRefPoints(prev => {
+      // Toggle if clicked near existing point
+      const existingIdx = prev.findIndex(p => Math.abs(p.dxf_y - pt.x) < 0.001 && Math.abs(p.dxf_x - pt.y) < 0.001);
+      if (existingIdx >= 0) {
+        return prev.filter((_, i) => i !== existingIdx);
+      }
+      if (prev.length >= 2) return prev; // Limit to 2 points max
+      return [...prev, { dxf_x: pt.y, dxf_y: pt.x, lat: "", lon: "" }];
+    });
+  };
+
+  const handleUpdateRefPoint = (idx: number, field: "lat" | "lon", value: string) => {
+    const next = [...refPoints];
+    next[idx] = { ...next[idx], [field]: value };
+    setRefPoints(next);
+  };
+
+  const handleFixAlignment = async () => {
+    if (!selectedPathName || !apiBaseUrl || refPoints.length === 0) return;
+    setIsFixing(true);
+    try {
+      const validPoints = refPoints
+        .filter(p => p.lat.trim() !== "" && p.lon.trim() !== "")
+        .map(p => ({
+          dxf_x: p.dxf_x,
+          dxf_y: p.dxf_y,
+          lat: parseFloat(p.lat),
+          lon: parseFloat(p.lon),
+        }));
+
+      if (validPoints.length === 0) {
+        Alert.alert("Validation", "Please enter valid Latitude and Longitude for at least one point.");
+        setIsFixing(false);
+        return;
+      }
+
+      const res = await fetch(`${apiBaseUrl}/api/path/plan`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          source: selectedPathName,
+          ref_points: validPoints,
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.mission_summary) {
+          setMissionSummary(data.mission_summary);
+
+          // Update canvas lines
+          if (data.merged_waypoints && data.spray_flags) {
+            const alignedLines: PlanLine[] = [];
+            const pts = data.merged_waypoints;
+            for (let i = 0; i < pts.length - 1; i++) {
+              const sprayFlag = data.spray_flags[i] ?? true;
+              alignedLines.push({
+                id: `aligned-line-${i}`,
+                label: `Segment ${i + 1}`,
+                layer: sprayFlag ? "marking" : "center",
+                from: { id: i * 2 + 1, x: pts[i][0], y: pts[i][1] },
+                to: { id: i * 2 + 2, x: pts[i + 1][0], y: pts[i + 1][1] },
+                width: 0.1,
+              });
+            }
+            setLines(alignedLines);
+          }
+
+          Alert.alert("Success", "Alignment applied. Mission is ready to be loaded!");
+        } else {
+          Alert.alert("Success", "Alignment applied, but no mission was staged.");
+        }
+        setRefPoints([]);
+        onRefreshPaths(); // Fetch the new aligned plan
+      } else {
+        const errText = await res.text();
+        Alert.alert("Alignment Failed", errText || "Unknown error occurred.");
+      }
+    } catch (err) {
+      console.log("Error aligning path:", err);
+      Alert.alert("Error", "Could not connect to the rover to apply alignment.");
+    } finally {
+      setIsFixing(false);
+    }
+  };
+
+  const handlePickFile = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ["*/*"],
+        copyToCacheDirectory: true,
+      });
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const asset = result.assets[0];
+        const ext = asset.name.split('.').pop()?.toLowerCase();
+        if (ext === 'dxf' || ext === 'csv' || ext === 'waypoints') {
+          setPickedFile(asset);
+        } else {
+          Alert.alert("Invalid File", "Please select a .dxf, .csv, or .waypoints file.");
+        }
+      }
+    } catch (err) {
+      console.log("Error picking file:", err);
+    }
+  };
+
+  const handleParseFile = async () => {
+    if (!pickedFile || !apiBaseUrl) return;
+    setIsUploading(true);
+    try {
+      const ext = pickedFile.name.split('.').pop()?.toLowerCase();
+      const endpoint = ext === 'dxf' ? '/api/path/parse-dxf' : '/api/path/upload';
+      
+      const formData = new FormData();
+      formData.append("file", {
+        uri: pickedFile.uri,
+        name: pickedFile.name,
+        type: pickedFile.mimeType || "application/octet-stream",
+      } as any);
+
+      const res = await fetch(`${apiBaseUrl}${endpoint}`, {
+        method: "POST",
+        body: formData,
+      });
+
+      if (res.ok) {
+        Alert.alert("Success", `${pickedFile.name} imported successfully.`);
+        setPickedFile(null);
+        onRefreshPaths();
+      } else {
+        const errorText = await res.text();
+        Alert.alert("Import Failed", errorText || "Unknown error occurred");
+      }
+    } catch (err) {
+      console.log("Error importing file:", err);
+      Alert.alert("Error", "Could not connect to the rover to import the file.");
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
   return (
-    <View style={{ flex: 1, flexDirection: "row", padding: 16, gap: 14 }}>
-      <View
-        style={{
-          flex: 1.1,
-          backgroundColor: "#f8fafc",
-          borderRadius: 18,
-          overflow: "hidden",
-          borderWidth: 1,
-          borderColor: "#d8e1eb",
-          shadowColor: "#0f172a",
-          shadowOpacity: 0.05,
-          shadowRadius: 16,
-          shadowOffset: { width: 0, height: 8 },
-          elevation: 2,
-        }}
-      >
-        <PlanPreview lines={lines} visibility={layerVisibility} selectedLineId={selectedLineId} />
+    <View style={{ flex: 1, flexDirection: "row" }}>
+      <View style={{ width: "58%", backgroundColor: "transparent", padding: 14 }}>
+        <View style={{ flex: 1, borderRadius: 20, overflow: "hidden", backgroundColor: "#ffffff", borderWidth: 1, borderColor: "#d8e1eb" }}>
+          <View style={{ flex: 1, position: "relative" }}>
+            <PlanPreview
+              lines={lines}
+              visibility={layerVisibility}
+              selectedLineId={selectedLineId}
+              onSelectLine={onSelectLine}
+              roverPosN={telemetrySnapshot?.pos_n ?? null}
+              roverPosE={telemetrySnapshot?.pos_e ?? null}
+              roverHeadingDeg={telemetrySnapshot?.heading_ned_deg ?? null}
+              selectedPoints={refPoints.map(p => ({ x: p.dxf_y, y: p.dxf_x }))}
+              onSelectPoint={handleSelectPoint}
+            />
+          </View>
+        </View>
       </View>
-      <View style={{ flex: 1, gap: 12 }}>
+      <View style={{ width: "42%", height: "100%", padding: 14, paddingLeft: 0, gap: 12 }}>
         <View style={{ borderRadius: 14, padding: 14, backgroundColor: "#0f172a" }}>
           <Text style={{ color: "#94a3b8", fontSize: 11, fontWeight: "800", letterSpacing: 1.2, textTransform: "uppercase" }}>
             Field Workspace
@@ -4157,6 +4413,160 @@ function FieldsPage({
             Select a path directly from the rover.
           </Text>
         </View>
+
+        {/* --- IMPORT SECTION --- */}
+        <View style={{ borderRadius: 14, padding: 14, backgroundColor: "#ffffff", borderWidth: 1, borderColor: "#d8e1eb" }}>
+          <Text style={{ color: "#64748b", fontSize: 11, fontWeight: "800", letterSpacing: 1, textTransform: "uppercase", marginBottom: 8 }}>
+            Import from Device
+          </Text>
+          {!pickedFile ? (
+            <Pressable
+              onPress={handlePickFile}
+              style={{
+                height: 44,
+                borderRadius: 12,
+                alignItems: "center",
+                justifyContent: "center",
+                backgroundColor: "#e2e8f0",
+                borderWidth: 1,
+                borderColor: "#cbd5e1",
+              }}
+            >
+              <Text style={{ color: "#0f172a", fontSize: 14, fontWeight: "700" }}>
+                Select .dxf, .csv, .waypoints
+              </Text>
+            </Pressable>
+          ) : (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+              <View style={{ flex: 1, backgroundColor: "#f8fafc", padding: 10, borderRadius: 8, borderWidth: 1, borderColor: "#e2e8f0" }}>
+                <Text style={{ color: "#0f172a", fontSize: 13, fontWeight: "600" }} numberOfLines={1}>
+                  {pickedFile.name}
+                </Text>
+              </View>
+              <Pressable
+                onPress={handleParseFile}
+                disabled={isUploading}
+                style={{
+                  height: 40,
+                  paddingHorizontal: 16,
+                  borderRadius: 8,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  backgroundColor: isUploading ? "#94a3b8" : "#0f988f",
+                }}
+              >
+                <Text style={{ color: "#fff", fontSize: 13, fontWeight: "800" }}>
+                  {isUploading ? "..." : "Parse"}
+                </Text>
+              </Pressable>
+              <Pressable onPress={() => setPickedFile(null)} style={{ padding: 4 }}>
+                <X size={20} color="#64748b" />
+              </Pressable>
+            </View>
+          )}
+        </View>
+        {/* --- END IMPORT SECTION --- */}
+
+        {/* --- ALIGNMENT SECTION --- */}
+        <View style={{ borderRadius: 14, padding: 14, backgroundColor: "#ffffff", borderWidth: 1, borderColor: "#d8e1eb" }}>
+          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+            <Text style={{ color: "#64748b", fontSize: 11, fontWeight: "800", letterSpacing: 1, textTransform: "uppercase" }}>
+              Align DXF
+            </Text>
+            {refPoints.length > 0 && (
+              <Pressable onPress={() => setRefPoints([])}>
+                <Text style={{ color: "#ef4444", fontSize: 11, fontWeight: "700" }}>Clear Points</Text>
+              </Pressable>
+            )}
+          </View>
+
+          {refPoints.length === 0 ? (
+            <Text style={{ color: "#94a3b8", fontSize: 12, fontStyle: "italic", textAlign: "center", marginVertical: 8 }}>
+              Tap up to 2 endpoints on the canvas to set alignment references.
+            </Text>
+          ) : (
+            <View style={{ gap: 8 }}>
+              {refPoints.map((pt, i) => (
+                <View key={i} style={{ backgroundColor: "#f8fafc", padding: 10, borderRadius: 8, borderWidth: 1, borderColor: "#e2e8f0" }}>
+                  <Text style={{ color: "#0f172a", fontSize: 12, fontWeight: "700", marginBottom: 6 }}>
+                    Point {i + 1} <Text style={{ fontWeight: "400", color: "#64748b" }}>(X: {pt.dxf_x.toFixed(2)}, Y: {pt.dxf_y.toFixed(2)})</Text>
+                  </Text>
+                  <View style={{ flexDirection: "row", gap: 8 }}>
+                    <TextInput
+                      style={{ flex: 1, height: 36, backgroundColor: "#fff", borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 6, paddingHorizontal: 10, fontSize: 13 }}
+                      placeholder="Latitude"
+                      placeholderTextColor="#94a3b8"
+                      value={pt.lat}
+                      onChangeText={(val) => handleUpdateRefPoint(i, "lat", val)}
+                      keyboardType="numeric"
+                    />
+                    <TextInput
+                      style={{ flex: 1, height: 36, backgroundColor: "#fff", borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 6, paddingHorizontal: 10, fontSize: 13 }}
+                      placeholder="Longitude"
+                      placeholderTextColor="#94a3b8"
+                      value={pt.lon}
+                      onChangeText={(val) => handleUpdateRefPoint(i, "lon", val)}
+                      keyboardType="numeric"
+                    />
+                  </View>
+                </View>
+              ))}
+
+              {refPoints.length === 2 && (
+                <View style={{ backgroundColor: "#e2e8f0", padding: 10, borderRadius: 8, alignItems: "center" }}>
+                  <Text style={{ color: "#0f172a", fontSize: 13, fontWeight: "700" }}>
+                    Distance: {Math.hypot(refPoints[1].dxf_x - refPoints[0].dxf_x, refPoints[1].dxf_y - refPoints[0].dxf_y).toFixed(2)} meters
+                  </Text>
+                </View>
+              )}
+
+              <Pressable
+                onPress={handleFixAlignment}
+                disabled={isFixing || !selectedPathName}
+                style={{
+                  height: 44,
+                  borderRadius: 10,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  backgroundColor: isFixing || !selectedPathName ? "#94a3b8" : "#f59e0b",
+                  marginTop: 4,
+                }}
+              >
+                <Text style={{ color: "#fff", fontSize: 14, fontWeight: "700" }}>
+                  {isFixing ? "Fixing..." : "Fix Alignment"}
+                </Text>
+              </Pressable>
+
+              {missionSummary && (
+                <View style={{ marginTop: 12, padding: 12, backgroundColor: "#f0fdf4", borderRadius: 8, borderWidth: 1, borderColor: "#bbf7d0" }}>
+                  <Text style={{ color: "#166534", fontWeight: "800", marginBottom: 8, fontSize: 13 }}>Mission Staged Successfully</Text>
+                  <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
+                    <Text style={{ color: "#166534", fontSize: 12, fontWeight: "600" }}>Est. Time:</Text>
+                    <Text style={{ color: "#166534", fontSize: 12 }}>{missionSummary.estimated_runtime_s}s</Text>
+                  </View>
+                  <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
+                    <Text style={{ color: "#166534", fontSize: 12, fontWeight: "600" }}>Distance:</Text>
+                    <Text style={{ color: "#166534", fontSize: 12 }}>{missionSummary.total_length_m.toFixed(2)}m</Text>
+                  </View>
+                  <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 12 }}>
+                    <Text style={{ color: "#166534", fontSize: 12, fontWeight: "600" }}>Paint:</Text>
+                    <Text style={{ color: "#166534", fontSize: 12 }}>{missionSummary.estimated_paint_l.toFixed(2)}L</Text>
+                  </View>
+                  <Pressable
+                    onPress={() => onLoadSelectedPath(missionSummary.mission_id)}
+                    disabled={missionActionBusy}
+                    style={{ height: 40, backgroundColor: missionActionBusy ? "#86efac" : "#16a34a", borderRadius: 8, alignItems: "center", justifyContent: "center" }}
+                  >
+                    <Text style={{ color: "#fff", fontWeight: "800", fontSize: 13 }}>
+                      {missionActionBusy ? "Loading..." : "Load Staged Mission to Rover"}
+                    </Text>
+                  </Pressable>
+                </View>
+              )}
+            </View>
+          )}
+        </View>
+        {/* --- END ALIGNMENT SECTION --- */}
 
         <View style={{ flex: 1, borderRadius: 14, padding: 14, backgroundColor: "#ffffff", borderWidth: 1, borderColor: "#d8e1eb", minHeight: 180 }}>
           <Text style={{ color: "#64748b", fontSize: 11, fontWeight: "800", letterSpacing: 1, textTransform: "uppercase", marginBottom: 8 }}>
@@ -4173,7 +4583,10 @@ function FieldsPage({
                 return (
                   <Pressable
                     key={path.name}
-                    onPress={() => onSelectPath(path.name)}
+                    onPress={() => {
+                      setMissionSummary(null);
+                      onSelectPath(path.name);
+                    }}
                     style={{
                       borderRadius: 10,
                       padding: 10,
@@ -4193,9 +4606,9 @@ function FieldsPage({
               })
             )}
           </ScrollView>
-          {selectedPathName ? (
+          {selectedPathName && !missionSummary ? (
             <Pressable
-              onPress={onLoadSelectedPath}
+              onPress={() => onLoadSelectedPath()}
               disabled={missionActionBusy}
               style={{
                 marginTop: 10,
@@ -4545,10 +4958,10 @@ function computeAutoFitViewport(lines: PlanLine[], width: number, height: number
     };
   }
 
-  const paddingFactor = 0.82;
+  const paddingFactor = 0.70;
   const scaleX = bboxW > 0 ? (width * paddingFactor) / bboxW : 1;
   const scaleY = bboxH > 0 ? (height * paddingFactor) / bboxH : 1;
-  const zoom = clamp(Math.min(scaleX, scaleY), 0.08, 24);
+  const zoom = clamp(Math.min(scaleX, scaleY), 0.08, 800);
   const centerE = (minE + maxE) / 2;
   const centerN = (minN + maxN) / 2;
 
@@ -4634,6 +5047,78 @@ function pickNearestLineId(
   return nearestId;
 }
 
+function getCornerPoints(lines: PlanLine[]): {x: number, y: number}[] {
+  const pointMap = new Map<string, { pt: {x: number, y: number}, segments: {dx: number, dy: number}[] }>();
+
+  for (const line of lines) {
+    const k1 = `${line.from.x.toFixed(3)},${line.from.y.toFixed(3)}`;
+    const k2 = `${line.to.x.toFixed(3)},${line.to.y.toFixed(3)}`;
+    
+    const len1 = Math.hypot(line.to.x - line.from.x, line.to.y - line.from.y);
+    const dx1 = len1 > 0 ? (line.to.x - line.from.x) / len1 : 0;
+    const dy1 = len1 > 0 ? (line.to.y - line.from.y) / len1 : 0;
+
+    if (!pointMap.has(k1)) pointMap.set(k1, { pt: line.from, segments: [] });
+    pointMap.get(k1)!.segments.push({ dx: dx1, dy: dy1 });
+
+    const len2 = Math.hypot(line.from.x - line.to.x, line.from.y - line.to.y);
+    const dx2 = len2 > 0 ? (line.from.x - line.to.x) / len2 : 0;
+    const dy2 = len2 > 0 ? (line.from.y - line.to.y) / len2 : 0;
+
+    if (!pointMap.has(k2)) pointMap.set(k2, { pt: line.to, segments: [] });
+    pointMap.get(k2)!.segments.push({ dx: dx2, dy: dy2 });
+  }
+
+  const corners: {x: number, y: number}[] = [];
+
+  for (const { pt, segments } of pointMap.values()) {
+    if (segments.length === 1 || segments.length > 2) {
+      corners.push(pt); 
+    } else if (segments.length === 2) {
+      const dotProduct = segments[0].dx * segments[1].dx + segments[0].dy * segments[1].dy;
+      if (dotProduct > -0.99) {
+        corners.push(pt);
+      }
+    }
+  }
+
+  return corners;
+}
+
+function pickNearestPoint(
+  lines: PlanLine[],
+  viewport: PreviewViewport,
+  tap: LocalPoint,
+  radiusPx: number,
+  rotation: number = 0,
+  layoutSize: { width: number; height: number } = { width: 0, height: 0 }
+) {
+  let nearestPoint: { x: number; y: number } | null = null;
+  let nearestDistance = radiusPx;
+
+  const cx = layoutSize.width / 2;
+  const cy = layoutSize.height / 2;
+
+  const corners = getCornerPoints(lines);
+
+  for (const pt of corners) {
+    let screenPt = toScreenPoint(pt, viewport);
+
+    if (rotation !== 0 && layoutSize.width > 0 && layoutSize.height > 0) {
+      screenPt = rotatePoint(screenPt.x, screenPt.y, cx, cy, rotation);
+    }
+
+    const dist = Math.hypot(tap.x - screenPt.x, tap.y - screenPt.y);
+
+    if (dist < nearestDistance) {
+      nearestDistance = dist;
+      nearestPoint = pt;
+    }
+  }
+
+  return nearestPoint;
+}
+
 function PlanPreview({
   lines,
   visibility,
@@ -4642,6 +5127,8 @@ function PlanPreview({
   roverPosN,
   roverPosE,
   roverHeadingDeg,
+  selectedPoints,
+  onSelectPoint,
 }: {
   lines: PlanLine[];
   visibility: LayerVisibility;
@@ -4650,6 +5137,8 @@ function PlanPreview({
   roverPosN?: number | null;
   roverPosE?: number | null;
   roverHeadingDeg?: number | null;
+  selectedPoints?: { x: number; y: number }[];
+  onSelectPoint?: (pt: { x: number; y: number }) => void;
 }) {
   const filtered = useMemo(
     () =>
@@ -4662,6 +5151,8 @@ function PlanPreview({
     [lines, visibility]
   );
 
+  const cornerPoints = useMemo(() => getCornerPoints(filtered), [filtered]);
+
   // Rover world-space position: pos_e = East, pos_n = North
   const hasRover = roverPosN != null && roverPosE != null;
   const roverN = roverPosN ?? 0;   // North → SVG Y (inverted)
@@ -4671,6 +5162,7 @@ function PlanPreview({
   const viewportRef = React.useRef<PreviewViewport>({ panX: 0, panY: 0, zoom: 1 });
   const linesRef = React.useRef(filtered);
   const onSelectLineRef = React.useRef(onSelectLine);
+  const onSelectPointRef = React.useRef(onSelectPoint);
   const [layoutSize, setLayoutSize] = useState({ width: 0, height: 0 });
   const [viewport, setViewport] = useState<PreviewViewport>({ panX: 0, panY: 0, zoom: 1 });
   const [rotation, setRotation] = useState(0);
@@ -4687,7 +5179,7 @@ function PlanPreview({
     startTouch: LocalPoint | null;
     pinchDistance: number | null;
     pinchAngle: number | null;
-    pinchViewport: PreviewViewport;
+    pinchViewport: PreviewViewport | null;
     pinchRotation: number;
     isTap: boolean;
   }>({
@@ -4695,7 +5187,7 @@ function PlanPreview({
     startTouch: null,
     pinchDistance: null,
     pinchAngle: null,
-    pinchViewport: { panX: 0, panY: 0, zoom: 1 },
+    pinchViewport: null,
     pinchRotation: 0,
     isTap: false,
   });
@@ -4707,6 +5199,10 @@ function PlanPreview({
   useEffect(() => {
     onSelectLineRef.current = onSelectLine;
   }, [onSelectLine]);
+
+  useEffect(() => {
+    onSelectPointRef.current = onSelectPoint;
+  }, [onSelectPoint]);
 
   useEffect(() => {
     viewportRef.current = viewport;
@@ -4740,27 +5236,7 @@ function PlanPreview({
 
   // Auto-pan to keep rover in view (only when not manually panned by user)
   useEffect(() => {
-    if (!hasRover || layoutSize.width <= 0 || layoutSize.height <= 0) return;
-    if (userPannedRef.current) return;
-    const vp = viewportRef.current;
-    // Rover screen position (NED: East=X, North=up so Y is inverted)
-    const screenX = roverE * vp.zoom + vp.panX;
-    const screenY = -roverN * vp.zoom + vp.panY;
-    const margin = 60;
-    const needsPan =
-      screenX < margin ||
-      screenX > layoutSize.width - margin ||
-      screenY < margin ||
-      screenY > layoutSize.height - margin;
-    if (needsPan) {
-      const next: PreviewViewport = {
-        ...vp,
-        panX: layoutSize.width / 2 - roverE * vp.zoom,
-        panY: layoutSize.height / 2 - (-roverN) * vp.zoom,
-      };
-      viewportRef.current = next;
-      setViewport(next);
-    }
+    // Disabled to keep view static and fitted to plan
   }, [roverN, roverE, hasRover, layoutSize]);
 
   const handleLayout = useCallback((event: any) => {
@@ -4799,69 +5275,33 @@ function PlanPreview({
 
           if (touches.length === 1 && gestureRef.current.lastTouch) {
             const current = { x: touches[0].locationX, y: touches[0].locationY };
-            const dx = current.x - gestureRef.current.lastTouch.x;
-            const dy = current.y - gestureRef.current.lastTouch.y;
             if (Math.hypot(current.x - gestureRef.current.startTouch!.x, current.y - gestureRef.current.startTouch!.y) > 4) {
               gestureRef.current.isTap = false;
-              userPannedRef.current = true;
             }
             gestureRef.current.lastTouch = current;
-            const next = {
-              ...viewportRef.current,
-              panX: viewportRef.current.panX + dx,
-              panY: viewportRef.current.panY + dy,
-            };
-            viewportRef.current = next;
-            setViewport(next);
             return;
           }
 
           if (touches.length >= 2) {
-            const first = { x: touches[0].locationX, y: touches[0].locationY };
-            const second = { x: touches[1].locationX, y: touches[1].locationY };
-            const distance = Math.hypot(first.x - second.x, first.y - second.y);
-            const midpoint = {
-              x: (first.x + second.x) / 2,
-              y: (first.y + second.y) / 2,
-            };
-
             gestureRef.current.isTap = false;
-            userPannedRef.current = true;
-            if (
-              !gestureRef.current.pinchDistance ||
-              gestureRef.current.pinchDistance <= 0 ||
-              gestureRef.current.pinchAngle === null
-            ) {
-              gestureRef.current.pinchDistance = distance;
-              gestureRef.current.pinchAngle = touchAngle(touches[0], touches[1]);
-              gestureRef.current.pinchRotation = rotationRef.current;
-              gestureRef.current.pinchViewport = viewportRef.current;
-              return;
-            }
-
-            const scale = distance / gestureRef.current.pinchDistance;
-            const base = gestureRef.current.pinchViewport;
-            const nextZoom = clamp(base.zoom * scale, 0.08, 24);
-            const zoomRatio = nextZoom / base.zoom;
-            const next = {
-              zoom: nextZoom,
-              panX: midpoint.x - (midpoint.x - base.panX) * zoomRatio,
-              panY: midpoint.y - (midpoint.y - base.panY) * zoomRatio,
-            };
-            viewportRef.current = next;
-            setViewport(next);
-
-            const currentAngle = touchAngle(touches[0], touches[1]);
-            const angleDiffRad = currentAngle - gestureRef.current.pinchAngle;
-            const angleDiffDeg = (angleDiffRad * 180) / Math.PI;
-            const nextRotation = ((gestureRef.current.pinchRotation + angleDiffDeg) % 360 + 360) % 360;
-            setRotation(nextRotation);
           }
         },
 
         onPanResponderRelease: (evt) => {
           if (gestureRef.current.isTap && gestureRef.current.startTouch) {
             const tap = { x: evt.nativeEvent.locationX, y: evt.nativeEvent.locationY };
+            
+            if (onSelectPointRef.current) {
+              const ptHit = pickNearestPoint(linesRef.current, viewportRef.current, tap, 24, rotation, layoutSize);
+              if (ptHit) {
+                onSelectPointRef.current(ptHit);
+                gestureRef.current.lastTouch = null;
+                gestureRef.current.startTouch = null;
+                gestureRef.current.isTap = false;
+                return;
+              }
+            }
+
             const hit = pickNearestLineId(linesRef.current, viewportRef.current, tap, 24, rotation, layoutSize);
             if (hit) {
               onSelectLineRef.current?.(hit);
@@ -5013,10 +5453,26 @@ function PlanPreview({
                 x2={line.to.y}   // East (World Y)
                 y2={line.to.x}   // North (World X)
                 stroke={line.id === selectedLineId ? "#ef4444" : strokeForLayer(line.layer)}
-                strokeWidth={0.5}
+                strokeWidth={0.02}
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 opacity={line.id === selectedLineId ? 1 : 0.96}
+              />
+            ))}
+            {/* ── Endpoints / Corners ── */}
+            {cornerPoints.map((pt, i) => (
+              <Circle key={`ep-${i}`} cx={pt.y} cy={pt.x} r={2.5 / viewport.zoom} fill="#3b82f6" opacity={0.8} />
+            ))}
+            {/* ── Selected Points ── */}
+            {selectedPoints?.map((pt, i) => (
+              <Circle
+                key={`sp-${i}`}
+                cx={pt.y}
+                cy={pt.x}
+                r={6 / viewport.zoom}
+                fill="#f97316"
+                stroke="#ffffff"
+                strokeWidth={1.5 / viewport.zoom}
               />
             ))}
           </G>
