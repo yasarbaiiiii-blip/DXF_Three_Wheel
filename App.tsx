@@ -220,6 +220,29 @@ export default function App() {
 
   const [prevMissionState, setPrevMissionState] = useState<string | null>(null);
 
+  const [autoOrigin, setAutoOrigin] = useState(false);
+  const [originShift, setOriginShift] = useState<{ offsetN: number; offsetE: number } | null>(null);
+  const [frozenRoverPos, setFrozenRoverPos] = useState<{ n: number; e: number } | null>(null);
+
+  useEffect(() => {
+    if (autoOrigin && telemetrySnapshot?.pos_n != null && telemetrySnapshot?.pos_e != null) {
+      setOriginShift({ offsetN: telemetrySnapshot.pos_n, offsetE: telemetrySnapshot.pos_e });
+    } else {
+      setOriginShift(null);
+    }
+  }, [autoOrigin]);
+
+  const displayedLines = useMemo(() => {
+    if (originShift) {
+      return lines.map((l) => ({
+        ...l,
+        from: { ...l.from, x: l.from.x + originShift.offsetN, y: l.from.y + originShift.offsetE },
+        to: { ...l.to, x: l.to.x + originShift.offsetN, y: l.to.y + originShift.offsetE },
+      }));
+    }
+    return lines;
+  }, [lines, originShift]);
+
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const selectedWsRef = useRef(selectedWs);
   const manualHostRef = useRef(manualHost);
@@ -265,11 +288,15 @@ export default function App() {
     if (telemetrySnapshot) {
       const currentState = telemetrySnapshot.mission_state;
       if (prevMissionState === "running" && (currentState === "idle" || currentState === "completed")) {
+        const lastLine = displayedLines[displayedLines.length - 1];
+        if (lastLine) {
+          setFrozenRoverPos({ n: lastLine.to.x, e: lastLine.to.y });
+        }
         Alert.alert("Mission Completed", "The rover has successfully finished the mission.");
       }
-      setPrevMissionState(currentState);
+      setPrevMissionState(currentState ?? null);
     }
-  }, [telemetrySnapshot?.mission_state, prevMissionState]);
+  }, [telemetrySnapshot?.mission_state, prevMissionState, displayedLines]);
 
   useEffect(() => {
     selectedWsRef.current = selectedWs;
@@ -898,11 +925,12 @@ export default function App() {
     }
   }
 
-  async function startLoadedMission(autoOrigin: boolean = false) {
+  async function startLoadedMission() {
     if (!apiBaseUrl || !importedPlan || lines.length === 0) {
       return;
     }
 
+    setFrozenRoverPos(null);
     logAction("START_REQUEST", { apiBaseUrl, fileName: importedPlan.fileName, missionRunning, autoOrigin });
     setMissionActionBusy(true);
     try {
@@ -924,15 +952,7 @@ export default function App() {
       }
       setMissionRunning(true);
       if (autoOrigin && telemetrySnapshot?.pos_n != null && telemetrySnapshot?.pos_e != null) {
-        const offsetN = telemetrySnapshot.pos_n;
-        const offsetE = telemetrySnapshot.pos_e;
-        setLines((prevLines) =>
-          prevLines.map((l) => ({
-            ...l,
-            from: { ...l.from, x: l.from.x + offsetN, y: l.from.y + offsetE },
-            to: { ...l.to, x: l.to.x + offsetN, y: l.to.y + offsetE },
-          }))
-        );
+        setOriginShift({ offsetN: telemetrySnapshot.pos_n, offsetE: telemetrySnapshot.pos_e });
       }
       void refreshTelemetryPanel();
       logAction("START_SUCCESS", { fileName: importedPlan.fileName, autoOrigin });
@@ -1093,6 +1113,7 @@ export default function App() {
       Alert.alert("No backend", "Connect to a backend before sending commands.");
       return;
     }
+    setFrozenRoverPos(null);
     logAction("ARM_REQUEST", { apiBaseUrl, arm });
     setMissionActionBusy(true);
     try {
@@ -1129,6 +1150,7 @@ export default function App() {
       Alert.alert("No backend", "Connect to a backend before sending commands.");
       return;
     }
+    setFrozenRoverPos(null);
     logAction("SET_MODE_REQUEST", { apiBaseUrl, targetMode });
     setMissionActionBusy(true);
     try {
@@ -1163,6 +1185,7 @@ export default function App() {
       Alert.alert("No backend", "Connect to a backend before sending commands.");
       return;
     }
+    setFrozenRoverPos(null);
     logAction("ESTOP_REQUEST", { apiBaseUrl });
     setMissionActionBusy(true);
     try {
@@ -1403,8 +1426,11 @@ export default function App() {
           />
         ) : page === "home" ? (
           <HomeView
+            autoOrigin={autoOrigin}
+            setAutoOrigin={setAutoOrigin}
+            frozenRoverPos={frozenRoverPos}
             importedPlan={importedPlan}
-            lines={lines}
+            lines={displayedLines}
             selectedLineId={selectedLineId}
             onSelectLine={setSelectedLineId}
             onDeleteSelectedLine={deleteSelectedLine}
@@ -1457,10 +1483,11 @@ export default function App() {
         ) : (
           <SectionScreen
             telemetrySnapshot={telemetrySnapshot}
+            frozenRoverPos={frozenRoverPos}
             title={sectionTitle}
             page={page}
             importedPlan={importedPlan}
-            lines={lines}
+            lines={displayedLines}
             setLines={setLines}
             selectedLineId={selectedLineId}
             backendPaths={backendPaths}
@@ -1628,6 +1655,9 @@ function TopBar({
 }
 
 function HomeView({
+  autoOrigin,
+  setAutoOrigin,
+  frozenRoverPos,
   importedPlan,
   lines,
   selectedLineId,
@@ -1675,6 +1705,9 @@ function HomeView({
   rtkRunning,
   rtkHealthy,
 }: {
+  autoOrigin: boolean;
+  setAutoOrigin: React.Dispatch<React.SetStateAction<boolean>>;
+  frozenRoverPos: { n: number; e: number } | null;
   importedPlan: ImportedPlan | null;
   lines: PlanLine[];
   selectedLineId: string | null;
@@ -1688,7 +1721,7 @@ function HomeView({
   layerVisibility: LayerVisibility;
   setLayerVisibility: React.Dispatch<React.SetStateAction<LayerVisibility>>;
   onStopPlan: () => Promise<void>;
-  onStartPlan: (autoOrigin: boolean) => Promise<void>;
+  onStartPlan: () => Promise<void>;
   onPausePlan: () => Promise<void>;
   onArmVehicle: (arm: boolean) => Promise<void>;
   onSetMode: (mode: "MANUAL" | "OFFBOARD") => Promise<void>;
@@ -1726,7 +1759,6 @@ function HomeView({
   const hasPlan = lines.length > 0;
   const hasSelectedLine = Boolean(selectedLine);
   const [safetyControlsEnabled, setSafetyControlsEnabled] = useState(false);
-  const [autoOrigin, setAutoOrigin] = useState(false);
   const [compassExpanded, setCompassExpanded] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteScope, setDeleteScope] = useState<"line" | "plan" | null>(null);
@@ -1951,8 +1983,8 @@ function HomeView({
                   visibility={layerVisibility}
                   selectedLineId={selectedLineId}
                   onSelectLine={onSelectLine}
-                  roverPosN={telemetrySnapshot?.pos_n ?? null}
-                  roverPosE={telemetrySnapshot?.pos_e ?? null}
+                  roverPosN={frozenRoverPos ? frozenRoverPos.n : (telemetrySnapshot?.pos_n ?? null)}
+                  roverPosE={frozenRoverPos ? frozenRoverPos.e : (telemetrySnapshot?.pos_e ?? null)}
                   roverHeadingDeg={telemetrySnapshot?.heading_ned_deg ?? null}
                 />
               </View>
@@ -2296,7 +2328,7 @@ function HomeView({
 
                     <View style={{ flexDirection: "row", gap: 8 }}>
                       <Pressable
-                        onPress={() => onStartPlan(autoOrigin)}
+                        onPress={() => onStartPlan()}
                         disabled={missionActionBusy || lines.length === 0}
                         style={{
                           flex: 1,
@@ -3730,6 +3762,7 @@ function SectionScreen(props: {
   title: string;
   page: Page;
   telemetrySnapshot: TelemetrySnapshot | null;
+  frozenRoverPos: { n: number; e: number } | null;
   importedPlan: ImportedPlan | null;
   lines: PlanLine[];
   setLines: React.Dispatch<React.SetStateAction<PlanLine[]>>;
@@ -4205,9 +4238,11 @@ const connectionStyles = {
 };
 
 function FieldsPage({
+  importedPlan,
   lines,
   setLines,
   telemetrySnapshot,
+  frozenRoverPos,
   selectedLineId,
   layerVisibility,
   backendPaths,
@@ -4219,9 +4254,11 @@ function FieldsPage({
   apiBaseUrl,
   onRefreshPaths,
 }: {
+  importedPlan: ImportedPlan | null;
   lines: PlanLine[];
   setLines: React.Dispatch<React.SetStateAction<PlanLine[]>>;
   telemetrySnapshot: TelemetrySnapshot | null;
+  frozenRoverPos: { n: number; e: number } | null;
   selectedLineId: string | null;
   layerVisibility: LayerVisibility;
   backendPaths: any[];
@@ -4392,8 +4429,8 @@ function FieldsPage({
               visibility={layerVisibility}
               selectedLineId={selectedLineId}
               onSelectLine={onSelectLine}
-              roverPosN={telemetrySnapshot?.pos_n ?? null}
-              roverPosE={telemetrySnapshot?.pos_e ?? null}
+              roverPosN={frozenRoverPos ? frozenRoverPos.n : (telemetrySnapshot?.pos_n ?? null)}
+              roverPosE={frozenRoverPos ? frozenRoverPos.e : (telemetrySnapshot?.pos_e ?? null)}
               roverHeadingDeg={telemetrySnapshot?.heading_ned_deg ?? null}
               selectedPoints={refPoints.map(p => ({ x: p.dxf_y, y: p.dxf_x }))}
               onSelectPoint={handleSelectPoint}
