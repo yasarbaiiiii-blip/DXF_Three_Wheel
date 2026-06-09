@@ -1125,8 +1125,11 @@ export default function App() {
         },
         body: JSON.stringify({ arm }),
       });
-      if (!res.ok) {
-        const errMsg = await parseFetchError(res, arm ? "Arm failed" : "Disarm failed");
+      let data;
+      try { data = await res.clone().json(); } catch (e) {}
+
+      if (!res.ok || (data && data.success === false)) {
+        const errMsg = data?.message || (await parseFetchError(res, arm ? "Arm failed" : "Disarm failed"));
         throw new Error(errMsg);
       }
       void refreshTelemetryPanel();
