@@ -226,21 +226,21 @@ export default function App() {
 
   useEffect(() => {
     if (autoOrigin) {
-      if (telemetrySnapshot?.mission_state === "running" || frozenRoverPos !== null) {
+      if (telemetrySnapshot?.mission_state !== "running") {
+        if (telemetrySnapshot?.pos_n != null && telemetrySnapshot?.pos_e != null) {
+          setOriginShift({ offsetN: telemetrySnapshot.pos_n, offsetE: telemetrySnapshot.pos_e });
+        }
+      } else {
         if (telemetrySnapshot?.pos_n != null && telemetrySnapshot?.pos_e != null) {
           setOriginShift((prev) =>
             prev === null ? { offsetN: telemetrySnapshot.pos_n, offsetE: telemetrySnapshot.pos_e } : prev
           );
         }
-      } else {
-        if (telemetrySnapshot?.pos_n != null && telemetrySnapshot?.pos_e != null) {
-          setOriginShift({ offsetN: telemetrySnapshot.pos_n, offsetE: telemetrySnapshot.pos_e });
-        }
       }
     } else {
       setOriginShift(null);
     }
-  }, [autoOrigin, telemetrySnapshot?.pos_n, telemetrySnapshot?.pos_e, telemetrySnapshot?.mission_state, frozenRoverPos]);
+  }, [autoOrigin, telemetrySnapshot?.pos_n, telemetrySnapshot?.pos_e, telemetrySnapshot?.mission_state]);
 
   const displayedLines = useMemo(() => {
     if (originShift) {
@@ -303,12 +303,12 @@ export default function App() {
           setFrozenRoverPos({ n: lastLine.to.x, e: lastLine.to.y });
         }
         setTimeout(() => {
-          showToast("Success", "Mission completed successfully.", "success");
+          Alert.alert("Mission Completed", "The rover has successfully finished the mission.");
         }, 500);
       }
       setPrevMissionState(currentState ?? null);
     }
-  }, [telemetrySnapshot?.mission_state, prevMissionState, displayedLines, showToast]);
+  }, [telemetrySnapshot?.mission_state, prevMissionState, displayedLines]);
 
   useEffect(() => {
     selectedWsRef.current = selectedWs;
