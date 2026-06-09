@@ -25,7 +25,6 @@ if (
 }
 
 import Slider from "@react-native-community/slider";
-import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Circle, G, Line, Polygon, Text as SvgText } from "react-native-svg";
@@ -33,8 +32,11 @@ import { io, Socket } from "socket.io-client";
 import {
   Battery,
   CircleHelp,
+  ListChecks,
   File,
   FilePenLine,
+  FileUp,
+  FileText,
   Info,
   LocateFixed,
   LogOut,
@@ -213,6 +215,7 @@ export default function App() {
   const [backendPaths, setBackendPaths] = useState<any[]>([]);
   const [selectedPathName, setSelectedPathName] = useState<string | null>(null);
   const [isPaused, setIsPaused] = useState(false);
+
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const selectedWsRef = useRef(selectedWs);
   const manualHostRef = useRef(manualHost);
@@ -266,43 +269,7 @@ export default function App() {
     backendPinnedRef.current = backendPinned;
   }, [backendPinned]);
 
-  const handleImport = async () => {
-    try {
-      logAction("IMPORT_OPENED", { mode: "generic" });
-      const result = await DocumentPicker.getDocumentAsync({
-        multiple: false,
-        copyToCacheDirectory: true,
-      });
-      if (result.canceled || result.assets.length === 0) return;
-      const asset = result.assets[0];
-      const fileName = asset.name ?? "imported-plan.dxf";
-      const extension = fileName.split(".").pop()?.toLowerCase();
-      if (extension !== "csv" && extension !== "dxf") {
-        Alert.alert("Unsupported", "Only CSV and DXF are supported.");
-        return;
-      }
-      logAction("IMPORT_SELECTED", { fileName, fileType: extension, uri: asset.uri });
-      const plan: ImportedPlan = {
-        fileName,
-        uri: asset.uri,
-        fileType: extension as "csv" | "dxf",
-        source: "imported",
-      };
-      const parsed = await readImportedPlanFile(plan);
-      setImportedPlan(plan);
-      setLines(parsed);
-      setSelectedLineId(parsed[0]?.id ?? null);
-      setMissionFileReady(false);
-      setMissionLoaded(false);
-      setMissionRunning(false);
-      setLayerVisibility({ boundary: true, marking: true, center: true });
-      setPage("fields");
-      setMenuOpen(true);
-      showToast("File imported", `${fileName} is ready for upload.`, "success");
-    } catch {
-      Alert.alert("Import failed", "Could not import file.");
-    }
-  };
+
 
 
 
@@ -336,8 +303,8 @@ export default function App() {
 
     try {
       const nextSocket = io(target, {
-        transports: ["polling", "websocket"],
-        timeout: 5000,
+        transports: ["websocket", "polling"], // Prioritize websocket to bypass slow polling
+        timeout: 20000, // Increase to 20 seconds
       });
 
       await new Promise<void>((resolve, reject) => {
@@ -590,82 +557,25 @@ export default function App() {
   const fetchBackendPaths = async () => {
     if (!apiBaseUrl) return;
     try {
+      console.log("[API GET] /api/paths - Polling paths list...");
       const res = await fetch(`${apiBaseUrl}/api/paths`);
       if (res.ok) {
         const data = await res.json();
+        console.log(`[API GET] /api/paths - Success, found ${data.length} paths`);
         setBackendPaths(data);
+      } else {
+        console.error(`[API GET] /api/paths - Failed with status ${res.status}`);
       }
     } catch (err) {
-      console.log("Error fetching paths:", err);
+      console.log("[API GET] /api/paths - Error fetching paths:", err);
     }
   };
 
-  const previewSelectedPath = async (pathName: string) => {
-    if (!apiBaseUrl) return;
-    setMissionActionBusy(true);
-    try {
-      setSelectedPathName(pathName);
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-      };
-      let generatedLines: PlanLine[] = [];
-      try {
-        const res = await fetch(`${apiBaseUrl}/api/path/plan`, {
-          method: "POST",
-          headers,
-          body: JSON.stringify({
-            source: pathName,
-            include_waypoints: true
-          })
-        });
-        if (res.ok) {
-          const body = await res.json();
-          const pts = body.merged_waypoints;
-          for (let i = 0; i < pts.length - 1; i++) {
-            const fromPt = pts[i];
-            const toPt = pts[i + 1];
-            const sprayFlag = body.spray_flags?.[i] ?? true;
-            generatedLines.push({
-              id: `rpp-line-${i}`,
-              label: `Segment ${i + 1}`,
-              layer: sprayFlag ? "marking" : "center",
-              from: { id: i * 2 + 1, x: fromPt[1], y: fromPt[0] },
-              to: { id: i * 2 + 2, x: toPt[1], y: toPt[0] },
-              width: 0.1,
-            });
-          }
-        } else {
-          throw new Error("Preview not available");
-        }
-      } catch (err) {
-        console.log("Plan preview endpoint failed/not supported, fallback to mock line:", err);
-        generatedLines = [{
-          id: "rpp-line-0",
-          label: "Segment 1 (Preview fallback)",
-          layer: "marking",
-          from: { id: 1, x: 0, y: 0 },
-          to: { id: 2, x: 0, y: 10 },
-          width: 0.1,
-        }];
-      }
-      const normalized = normalizePlanLines(generatedLines);
-      setLines(normalized);
-      setImportedPlan({
-        fileName: pathName,
-        uri: "",
-        fileType: pathName.endsWith(".csv") ? "csv" : "dxf",
-        source: "builtin"
-      });
-      setSelectedLineId(normalized[0]?.id ?? null);
-      setMissionFileReady(true);
-      setMissionLoaded(false);
-      setMissionRunning(false);
-    } catch (err) {
-      console.log("Error loading path preview:", err);
-      Alert.alert("Preview failed", err instanceof Error ? err.message : String(err));
-    } finally {
-      setMissionActionBusy(false);
-    }
+  const handleSelectPath = (pathName: string) => {
+    setSelectedPathName(pathName);
+    setMissionFileReady(true);
+    setMissionLoaded(false);
+    setMissionRunning(false);
   };
 
   useEffect(() => {
@@ -1359,7 +1269,7 @@ export default function App() {
             selectedLineId={selectedLineId}
             backendPaths={backendPaths}
             selectedPathName={selectedPathName}
-            onSelectPath={previewSelectedPath}
+            onSelectPath={handleSelectPath}
             onLoadSelectedPath={loadMissionOnBackend}
             missionActionBusy={missionActionBusy}
             onBack={() => setPage("home")}
@@ -4090,25 +4000,8 @@ function FieldsPage({
   missionActionBusy: boolean;
 }) {
   return (
-    <View style={{ flex: 1, flexDirection: "row", padding: 16, gap: 14 }}>
-      <View
-        style={{
-          flex: 1.1,
-          backgroundColor: "#f8fafc",
-          borderRadius: 18,
-          overflow: "hidden",
-          borderWidth: 1,
-          borderColor: "#d8e1eb",
-          shadowColor: "#0f172a",
-          shadowOpacity: 0.05,
-          shadowRadius: 16,
-          shadowOffset: { width: 0, height: 8 },
-          elevation: 2,
-        }}
-      >
-        <PlanPreview lines={lines} visibility={layerVisibility} selectedLineId={selectedLineId} />
-      </View>
-      <View style={{ flex: 1, gap: 12 }}>
+    <View style={{ flex: 1, padding: 16 }}>
+      <View style={{ flex: 1, gap: 12, maxWidth: 600, alignSelf: "center", width: "100%" }}>
         <View style={{ borderRadius: 14, padding: 14, backgroundColor: "#0f172a" }}>
           <Text style={{ color: "#94a3b8", fontSize: 11, fontWeight: "800", letterSpacing: 1.2, textTransform: "uppercase" }}>
             Field Workspace
@@ -4117,7 +4010,7 @@ function FieldsPage({
             Select Rover Path
           </Text>
           <Text style={{ color: "#cbd5e1", fontSize: 12, lineHeight: 17, marginTop: 6 }}>
-            Select a path from the list below to preview it and load it on the rover.
+            Select a path directly from the rover.
           </Text>
         </View>
 
@@ -4481,14 +4374,29 @@ function computeAutoFitViewport(lines: PlanLine[], width: number, height: number
     return { panX: width / 2, panY: height / 2, zoom: 1 };
   }
 
-  const { minX, minY, maxX, maxY } = computePlanBounds(lines);
-  const bboxW = maxX - minX;
-  const bboxH = maxY - minY;
+  // Swap X/Y in bounds: World X is North (Up), World Y is East (Right)
+  // minX/maxX will now track the Easting (World Y)
+  // minY/maxY will now track the Northing (World X)
+  let minE = Number.POSITIVE_INFINITY;
+  let maxE = Number.NEGATIVE_INFINITY;
+  let minN = Number.POSITIVE_INFINITY;
+  let maxN = Number.NEGATIVE_INFINITY;
+
+  for (const line of lines) {
+    // line.x = North, line.y = East
+    minN = Math.min(minN, line.from.x, line.to.x);
+    maxN = Math.max(maxN, line.from.x, line.to.x);
+    minE = Math.min(minE, line.from.y, line.to.y);
+    maxE = Math.max(maxE, line.from.y, line.to.y);
+  }
+
+  const bboxW = maxE - minE; // Width on screen is Easting span
+  const bboxH = maxN - minN; // Height on screen is Northing span
 
   if (bboxW <= 0.0001 && bboxH <= 0.0001) {
     return {
-      panX: width / 2 - minX,
-      panY: height / 2 - minY,
+      panX: width / 2 - minE,
+      panY: height / 2 + minN,
       zoom: 1,
     };
   }
@@ -4497,20 +4405,23 @@ function computeAutoFitViewport(lines: PlanLine[], width: number, height: number
   const scaleX = bboxW > 0 ? (width * paddingFactor) / bboxW : 1;
   const scaleY = bboxH > 0 ? (height * paddingFactor) / bboxH : 1;
   const zoom = clamp(Math.min(scaleX, scaleY), 0.08, 24);
-  const centerX = (minX + maxX) / 2;
-  const centerY = (minY + maxY) / 2;
+  const centerE = (minE + maxE) / 2;
+  const centerN = (minN + maxN) / 2;
 
   return {
-    panX: width / 2 - centerX * zoom,
-    panY: height / 2 - centerY * zoom,
+    panX: width / 2 - centerE * zoom,
+    panY: height / 2 + centerN * zoom,
     zoom,
   };
 }
 
 function toScreenPoint(point: { x: number; y: number }, viewport: PreviewViewport): LocalPoint {
+  // point.x = North, point.y = East
+  // Screen X = East * zoom + panX
+  // Screen Y = -North * zoom + panY
   return {
-    x: point.x * viewport.zoom + viewport.panX,
-    y: point.y * viewport.zoom + viewport.panY,
+    x: point.y * viewport.zoom + viewport.panX,
+    y: -point.x * viewport.zoom + viewport.panY,
   };
 }
 
@@ -4607,10 +4518,10 @@ function PlanPreview({
     [lines, visibility]
   );
 
-  // Rover world-space position: pos_e = X axis, pos_n = Y axis (NED: East = right, North = up)
+  // Rover world-space position: pos_e = East, pos_n = North
   const hasRover = roverPosN != null && roverPosE != null;
-  const roverX = roverPosE ?? 0;   // East → SVG X
-  const roverY = roverPosN ?? 0;   // North → SVG Y (will be negated in transform)
+  const roverN = roverPosN ?? 0;   // North → SVG Y (inverted)
+  const roverE = roverPosE ?? 0;   // East → SVG X
   const roverDeg = roverHeadingDeg ?? 0;
 
   const viewportRef = React.useRef<PreviewViewport>({ panX: 0, panY: 0, zoom: 1 });
@@ -4663,8 +4574,8 @@ function PlanPreview({
     if (filtered.length === 0) {
       // No plan: centre on rover if available, else use origin
       userPannedRef.current = false;
-      const cx = roverX;
-      const cy = -roverY; // NED North is up, so invert Y
+      const cx = roverE;
+      const cy = -roverN; // NED North is up, so invert Y
       const defaultZoom = 40; // 40 px per metre looks reasonable at ~1m scale
       const fitted: PreviewViewport = {
         panX: layoutSize.width / 2 - cx * defaultZoom,
@@ -4689,8 +4600,8 @@ function PlanPreview({
     if (userPannedRef.current) return;
     const vp = viewportRef.current;
     // Rover screen position (NED: East=X, North=up so Y is inverted)
-    const screenX = roverX * vp.zoom + vp.panX;
-    const screenY = -roverY * vp.zoom + vp.panY;
+    const screenX = roverE * vp.zoom + vp.panX;
+    const screenY = -roverN * vp.zoom + vp.panY;
     const margin = 60;
     const needsPan =
       screenX < margin ||
@@ -4700,13 +4611,13 @@ function PlanPreview({
     if (needsPan) {
       const next: PreviewViewport = {
         ...vp,
-        panX: layoutSize.width / 2 - roverX * vp.zoom,
-        panY: layoutSize.height / 2 - (-roverY) * vp.zoom,
+        panX: layoutSize.width / 2 - roverE * vp.zoom,
+        panY: layoutSize.height / 2 - (-roverN) * vp.zoom,
       };
       viewportRef.current = next;
       setViewport(next);
     }
-  }, [roverX, roverY, hasRover, layoutSize]);
+  }, [roverN, roverE, hasRover, layoutSize]);
 
   const handleLayout = useCallback((event: any) => {
     const { width, height } = event.nativeEvent.layout ?? {};
@@ -4843,8 +4754,8 @@ function PlanPreview({
     if (!hasRover || layoutSize.width <= 0 || layoutSize.height <= 0) return;
     const defaultZoom = viewport.zoom > 10 ? viewport.zoom : 40;
     const next: PreviewViewport = {
-      panX: layoutSize.width / 2 - roverX * defaultZoom,
-      panY: layoutSize.height / 2 - (-roverY) * defaultZoom,
+      panX: layoutSize.width / 2 - roverE * defaultZoom,
+      panY: layoutSize.height / 2 - (-roverN) * defaultZoom,
       zoom: defaultZoom,
     };
     viewportRef.current = next;
@@ -4871,8 +4782,18 @@ function PlanPreview({
   };
 
   // Compute rover screen coordinates for icon rendering
-  const roverScreenX = roverX * viewport.zoom + viewport.panX;
-  const roverScreenY = -roverY * viewport.zoom + viewport.panY; // NED North=up so invert Y
+  // World North (roverPosN) maps to Screen Y (Up)
+  // World East (roverPosE) maps to Screen X (Right)
+  const rawRoverScreenX = roverE * viewport.zoom + viewport.panX;
+  const rawRoverScreenY = -roverN * viewport.zoom + viewport.panY;
+
+  let roverScreenX = rawRoverScreenX;
+  let roverScreenY = rawRoverScreenY;
+  if (rotation !== 0 && layoutSize.width > 0 && layoutSize.height > 0) {
+    const rotated = rotatePoint(rawRoverScreenX, rawRoverScreenY, layoutSize.width / 2, layoutSize.height / 2, rotation);
+    roverScreenX = rotated.x;
+    roverScreenY = rotated.y;
+  }
 
   // Grid spacing in world units for the no-plan grid
   const GRID_WORLD_SPACING = 1; // 1 metre squares
@@ -4939,14 +4860,14 @@ function PlanPreview({
           })()}
 
           {/* ── Plan lines ── */}
-          <G transform={`translate(${layoutSize.width / 2}, ${layoutSize.height / 2}) rotate(${rotation}) translate(${-layoutSize.width / 2}, ${-layoutSize.height / 2}) translate(${viewport.panX}, ${viewport.panY}) scale(${viewport.zoom})`}>
+          <G transform={`translate(${layoutSize.width / 2}, ${layoutSize.height / 2}) rotate(${rotation}) translate(${-layoutSize.width / 2}, ${-layoutSize.height / 2}) translate(${viewport.panX}, ${viewport.panY}) scale(${viewport.zoom}, ${-viewport.zoom})`}>
             {filtered.map((line) => (
               <Line
                 key={line.id}
-                x1={line.from.x}
-                y1={line.from.y}
-                x2={line.to.x}
-                y2={line.to.y}
+                x1={line.from.y} // East (World Y)
+                y1={line.from.x} // North (World X)
+                x2={line.to.y}   // East (World Y)
+                y2={line.to.x}   // North (World X)
                 stroke={line.id === selectedLineId ? "#ef4444" : strokeForLayer(line.layer)}
                 strokeWidth={0.5}
                 strokeLinecap="round"
@@ -4965,8 +4886,9 @@ function PlanPreview({
             const carWidth = 13;
             const noseLength = 7;
             // heading_ned_deg: 0=North(up), 90=East(right), clockwise
-            // SVG rotation: 0=up, positive=clockwise, matches NED heading directly
-            const headingRot = roverDeg;
+            // SVG rotation: 0=up, positive=clockwise, matches NED heading directly.
+            // We also add map rotation.
+            const headingRot = roverDeg + rotation;
             return (
               <G transform={`translate(${cx}, ${cy}) rotate(${headingRot})`}>
                 {/* Glow shadow */}

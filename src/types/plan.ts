@@ -20,7 +20,7 @@ export interface PlanLine {
 export interface ImportedPlan {
   fileName: string;
   uri: string;
-  fileType: "csv" | "dxf";
+  fileType: "csv" | "dxf" | "waypoints";
   source?: "imported" | "generated" | "builtin";
 }
 

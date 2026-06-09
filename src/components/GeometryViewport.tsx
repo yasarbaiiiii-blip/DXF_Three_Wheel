@@ -86,13 +86,52 @@ export function GeometryViewport({
   }, [offset]);
 
   useEffect(() => {
-    if (!importedPlan) {
-      setZoom(1);
-      setRotateDragMode(false);
-      setDragMode(false);
-      setOffset({ x: 0, y: 0 });
+    if (!importedPlan || surfaceSize.width <= 0 || surfaceSize.height <= 0 || lines.length === 0) {
+      if (!importedPlan) {
+        setZoom(1);
+        setRotateDragMode(false);
+        setDragMode(false);
+        setOffset({ x: 0, y: 0 });
+      }
+      return;
     }
-  }, [importedPlan]);
+
+    // Auto-fit logic for absolute metric coordinates
+    let minX = Number.POSITIVE_INFINITY;
+    let minY = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    let maxY = Number.NEGATIVE_INFINITY;
+
+    for (const line of lines) {
+      minX = Math.min(minX, line.from.x, line.to.x);
+      minY = Math.min(minY, line.from.y, line.to.y);
+      maxX = Math.max(maxX, line.from.x, line.to.x);
+      maxY = Math.max(maxY, line.from.y, line.to.y);
+    }
+
+    const bboxW = maxX - minX;
+    const bboxH = maxY - minY;
+
+    if (bboxW <= 0.0001 && bboxH <= 0.0001) {
+      setOffset({ x: surfaceSize.width / 2 - minX, y: surfaceSize.height / 2 + minY });
+      setZoom(1);
+      return;
+    }
+
+    const paddingFactor = 0.82;
+    const scaleX = (surfaceSize.width * paddingFactor) / bboxW;
+    const scaleY = (surfaceSize.height * paddingFactor) / bboxH;
+    const newZoom = Math.min(scaleX, scaleY);
+
+    const centerX = (minX + maxX) / 2;
+    const centerY = (minY + maxY) / 2;
+
+    setZoom(newZoom);
+    setOffset({
+      x: surfaceSize.width / 2 - centerX * newZoom,
+      y: surfaceSize.height / 2 + centerY * newZoom,
+    });
+  }, [importedPlan, surfaceSize, lines.length]);
 
   const selectedLine = useMemo(
     () => lines.find((line) => line.id === selectedLineId) ?? null,
@@ -101,8 +140,8 @@ export function GeometryViewport({
 
   const planTransform = useMemo(
     () =>
-      `translate(50 30) translate(${offset.x} ${offset.y}) scale(${zoom}) rotate(${rotation}) translate(-50 -30)`,
-    [offset.x, offset.y, rotation, zoom]
+      `translate(${surfaceSize.width / 2} ${surfaceSize.height / 2}) rotate(${rotation}) translate(${-surfaceSize.width / 2} ${-surfaceSize.height / 2}) translate(${offset.x} ${offset.y}) scale(${zoom} ${-zoom})`,
+    [offset.x, offset.y, rotation, zoom, surfaceSize]
   );
 
   const panResponder = useMemo(
@@ -134,8 +173,8 @@ export function GeometryViewport({
 
           if (dragMode) {
             setOffset({
-              x: dragBaseOffset.current.x + gesture.dx * 0.045,
-              y: dragBaseOffset.current.y + gesture.dy * 0.045,
+              x: dragBaseOffset.current.x + gesture.dx,
+              y: dragBaseOffset.current.y + gesture.dy,
             });
           }
         },
@@ -267,7 +306,8 @@ export function GeometryViewport({
       viewportPoint.y,
       zoom,
       rotation,
-      offset
+      offset,
+      surfaceSize
     );
     const nearest = findNearestLine(planPoint.x, planPoint.y, lines);
     const hitThreshold = Math.max(0.8, 18 / (viewportPoint.scale * zoom));
@@ -313,7 +353,6 @@ export function GeometryViewport({
                 <Svg
                   width="100%"
                   height="100%"
-                  viewBox="0 0 100 60"
                   preserveAspectRatio="xMidYMid meet"
                 >
                   <G transform={planTransform}>
@@ -330,10 +369,10 @@ export function GeometryViewport({
                       return (
                         <React.Fragment key={line.id}>
                           <Line
-                            x1={line.from.x}
-                            y1={line.from.y}
-                            x2={line.to.x}
-                            y2={line.to.y}
+                            x1={line.from.y} // East (World Y)
+                            y1={line.from.x} // North (World X)
+                            x2={line.to.y}   // East (World Y)
+                            y2={line.to.x}   // North (World X)
                             stroke={strokeColor}
                             strokeWidth={isSelected ? 0.85 : 0.45}
                             strokeDasharray={dashPattern(markingStyle)}
@@ -342,14 +381,14 @@ export function GeometryViewport({
                           {isSelected ? (
                             <>
                               <Circle
-                                cx={line.from.x}
-                                cy={line.from.y}
+                                cx={line.from.y}
+                                cy={line.from.x}
                                 r="1.2"
                                 fill={palette.emerald}
                               />
                               <Circle
-                                cx={line.to.x}
-                                cy={line.to.y}
+                                cx={line.to.y}
+                                cy={line.to.x}
                                 r="1.2"
                                 fill={palette.emerald}
                               />
@@ -1014,21 +1053,9 @@ function mapLocalPointToCanvas(
     return null;
   }
 
-  const innerWidth = Math.max(width - 40, 1);
-  const innerHeight = Math.max(height - 40, 1);
-  const scale = Math.min(innerWidth / 100, innerHeight / 60);
-  const drawnWidth = 100 * scale;
-  const drawnHeight = 60 * scale;
-  const offsetX = 20 + (innerWidth - drawnWidth) / 2;
-  const offsetY = 20 + (innerHeight - drawnHeight) / 2;
-  const x = (locationX - offsetX) / scale;
-  const y = (locationY - offsetY) / scale;
-
-  if (x < 0 || x > 100 || y < 0 || y > 60) {
-    return null;
-  }
-
-  return { x, y, scale };
+  // With no viewBox, Svg coordinates match container pixels.
+  // We account for the padding: 20 in styles.canvasGestureSurface.
+  return { x: locationX, y: locationY, scale: 1 };
 }
 
 function invertCanvasTransform(
@@ -1036,22 +1063,32 @@ function invertCanvasTransform(
   y: number,
   zoom: number,
   rotation: number,
-  offset: { x: number; y: number }
+  offset: { x: number; y: number },
+  surfaceSize: { width: number; height: number }
 ) {
-  const centerX = 50;
-  const centerY = 30;
+  const centerX = surfaceSize.width / 2;
+  const centerY = surfaceSize.height / 2;
   const radians = (-rotation * Math.PI) / 180;
-  const normalizedX = (x - centerX - offset.x) / zoom;
-  const normalizedY = (y - centerY - offset.y) / zoom;
 
-  const rotatedX =
-    normalizedX * Math.cos(radians) - normalizedY * Math.sin(radians);
-  const rotatedY =
-    normalizedX * Math.sin(radians) + normalizedY * Math.cos(radians);
+  // 1. Undo rotation around screen center
+  const dx = x - centerX;
+  const dy = y - centerY;
+  const rotatedX = dx * Math.cos(radians) - dy * Math.sin(radians);
+  const rotatedY = dx * Math.sin(radians) + dy * Math.cos(radians);
+
+  // 2. Undo translation and scaling (remembering Y is inverted)
+  // Forward: ScreenX = World_East * zoom + offset.x
+  // Forward: ScreenY = -World_North * zoom + offset.y
+  // So:
+  // World_East (Y) = (ScreenX - offset.x) / zoom
+  // World_North (X) = -(ScreenY - offset.y) / zoom
+  
+  const screenX_unrotated = rotatedX + centerX;
+  const screenY_unrotated = rotatedY + centerY;
 
   return {
-    x: centerX + rotatedX,
-    y: centerY + rotatedY,
+    x: -(screenY_unrotated - offset.y) / zoom, // World North
+    y: (screenX_unrotated - offset.x) / zoom,  // World East
   };
 }
 

@@ -15,6 +15,10 @@ export async function readImportedPlanFile(plan: ImportedPlan) {
     return parseDxf(raw);
   }
 
+  if (plan.fileType === "waypoints") {
+    return parseWaypoints(raw);
+  }
+
   return parseCsv(raw);
 }
 
@@ -26,7 +30,50 @@ export function parseImportedPlanContent(
     return parseDxf(content);
   }
 
+  if (fileType === "waypoints") {
+    return parseWaypoints(content);
+  }
+
   return parseCsv(content);
+}
+
+function parseWaypoints(content: string): PlanLine[] {
+  const lines = content.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  if (lines.length === 0) return [];
+
+  // Minimal support for MAVLink waypoints format (QGC WPL 110)
+  // We look for lines starting with an index.
+  const points: PlanPoint[] = [];
+  let idCounter = 1;
+
+  for (const line of lines) {
+    if (line.startsWith("QGC")) continue;
+    const parts = line.split(/\s+/);
+    if (parts.length < 11) continue;
+
+    // Index 4, 5, 6 are often params. 8, 9, 10 are Lat/Lon/Alt or X/Y/Z.
+    // For local NED plans, these are often meters.
+    const x = Number(parts[8]);
+    const y = Number(parts[9]);
+
+    if (Number.isFinite(x) && Number.isFinite(y)) {
+      points.push({ id: idCounter++, x, y });
+    }
+  }
+
+  const planLines: PlanLine[] = [];
+  for (let i = 0; i < points.length - 1; i++) {
+    planLines.push({
+      id: `waypoint-line-${i}`,
+      label: `Path Segment ${i + 1}`,
+      layer: "marking",
+      from: points[i],
+      to: points[i + 1],
+      width: 0.1,
+    });
+  }
+
+  return normalizePlanLines(planLines);
 }
 
 function parseDxf(content: string): PlanLine[] {
@@ -206,41 +253,9 @@ function parseCsv(content: string): PlanLine[] {
 }
 
 export function normalizePlanLines(lines: PlanLine[]) {
-  if (lines.length === 0) {
-    return lines;
-  }
-
-  let minX = Number.POSITIVE_INFINITY;
-  let maxX = Number.NEGATIVE_INFINITY;
-  let minY = Number.POSITIVE_INFINITY;
-  let maxY = Number.NEGATIVE_INFINITY;
-
-  for (const line of lines) {
-    minX = Math.min(minX, line.from.x, line.to.x);
-    maxX = Math.max(maxX, line.from.x, line.to.x);
-    minY = Math.min(minY, line.from.y, line.to.y);
-    maxY = Math.max(maxY, line.from.y, line.to.y);
-  }
-
-  const width = maxX - minX || 1;
-  const height = maxY - minY || 1;
-  const scale = Math.min(76 / width, 40 / height);
-  const offsetX = (100 - width * scale) / 2;
-  const offsetY = (60 - height * scale) / 2;
-
-  return lines.map((line) => ({
-    ...line,
-    from: {
-      ...line.from,
-      x: offsetX + (line.from.x - minX) * scale,
-      y: offsetY + (line.from.y - minY) * scale,
-    },
-    to: {
-      ...line.to,
-      x: offsetX + (line.to.x - minX) * scale,
-      y: offsetY + (line.to.y - minY) * scale,
-    },
-  }));
+  // Deprecated: No longer forcing normalization to 100x60.
+  // We return the raw lines to preserve metric scale and real-world coordinates.
+  return lines;
 }
 
 function refineLayerAssignments(lines: PlanLine[]) {
