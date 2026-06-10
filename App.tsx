@@ -56,6 +56,7 @@ import {
   Eye,
   EyeOff,
   Map as MapIcon,
+  Check as CheckIcon,
 } from "lucide-react-native";
 
 import { readImportedPlanFile, normalizePlanLines } from "./src/utils/planImport";
@@ -323,11 +324,23 @@ export default function App() {
 
   const displayedLines = useMemo(() => {
     if (originShift) {
-      return sanitizePlanLines(lines).map((l) => ({
-        ...l,
-        from: { ...l.from, x: l.from.x + originShift.offsetN, y: l.from.y + originShift.offsetE },
-        to: { ...l.to, x: l.to.x + originShift.offsetN, y: l.to.y + originShift.offsetE },
-      }));
+      return sanitizePlanLines(lines).map((l) => {
+        const shiftedEntity = l.entity ? {
+          ...l.entity,
+          preview_points: l.entity.preview_points?.map(pt => ({
+            ...pt,
+            north: pt.north + originShift.offsetN,
+            east: pt.east + originShift.offsetE,
+          }))
+        } : undefined;
+
+        return {
+          ...l,
+          from: { ...l.from, x: l.from.x + originShift.offsetN, y: l.from.y + originShift.offsetE },
+          to: { ...l.to, x: l.to.x + originShift.offsetN, y: l.to.y + originShift.offsetE },
+          ...(shiftedEntity ? { entity: shiftedEntity } : {}),
+        };
+      });
     }
     return sanitizePlanLines(lines);
   }, [lines, originShift]);
@@ -755,6 +768,21 @@ export default function App() {
     }
   };
 
+  const fetchWithRetry = async (url: string, options: RequestInit, retries = 2) => {
+    for (let i = 0; i < retries; i++) {
+      try {
+        const res = await fetch(url, options);
+        if (res.ok) return res;
+        // If not ok, it might be a 404, which shouldn't be retried if the endpoint really doesn't exist
+        if (res.status === 404) return res; 
+      } catch (err) {
+        if (i === retries - 1) throw err;
+        await new Promise(r => setTimeout(r, 1000));
+      }
+    }
+    return fetch(url, options); // fallback final attempt
+  };
+
   const previewSelectedPath = async (pathName: string) => {
     if (!apiBaseUrl) return;
     setMissionActionBusy(true);
@@ -764,7 +792,7 @@ export default function App() {
       let generatedLines: PlanLine[] = [];
       try {
         if (pathName.toLowerCase().endsWith(".dxf")) {
-          const res = await fetch(`${apiBaseUrl}/api/path/${encodeURIComponent(pathName)}/entities`, {
+          const res = await fetchWithRetry(`${apiBaseUrl}/api/path/${encodeURIComponent(pathName)}/entities`, {
             method: "GET",
             headers: { Accept: "application/json" },
           });
@@ -802,7 +830,7 @@ export default function App() {
             throw new Error(`Entities endpoint failed with status ${res.status}`);
           }
         } else {
-          const res = await fetch(`${apiBaseUrl}/api/path/${encodeURIComponent(pathName)}/preview`, {
+          const res = await fetchWithRetry(`${apiBaseUrl}/api/path/${encodeURIComponent(pathName)}/preview`, {
             method: "GET",
             headers: {
               Accept: "application/json",
@@ -1626,6 +1654,7 @@ export default function App() {
             setAutoOrigin={setAutoOrigin}
             importedPlan={importedPlan}
             lines={displayedLines}
+            setLines={setLines}
             selectedLineId={selectedLineId}
             onSelectLine={setSelectedLineId}
             onDeleteSelectedLine={deleteSelectedLine}
@@ -1901,11 +1930,13 @@ function HomeView({
   rtkRunning,
   rtkHealthy,
   onParsePlan,
+  setLines,
 }: {
   autoOrigin: boolean;
   setAutoOrigin: React.Dispatch<React.SetStateAction<boolean>>;
   importedPlan: ImportedPlan | null;
   lines: PlanLine[];
+  setLines: React.Dispatch<React.SetStateAction<PlanLine[]>>;
   selectedLineId: string | null;
   onSelectLine: (id: string | null) => void;
   onDeleteSelectedLine: () => void;
@@ -2771,6 +2802,58 @@ function HomeView({
                     ) : (
                       <View style={[drawerStyles.section, { marginTop: 18 }]}>
                         <EmptyLine text="Tap a highlighted line in the canvas to see its details here." />
+                      </View>
+                    )}
+
+                    {lines.length > 0 && (
+                      <View style={[drawerStyles.section, { marginTop: 24 }]}>
+                        <SectionTitle title="Line Viewer" />
+                        <View style={{ borderRadius: 16, overflow: "hidden", backgroundColor: "#111827", borderWidth: 1, borderColor: "rgba(148,163,184,0.16)" }}>
+                          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: 12, borderBottomWidth: 1, borderBottomColor: "rgba(148,163,184,0.16)" }}>
+                            <Text style={{ color: "#fff", fontSize: 13, fontWeight: "600" }}>Total Lines: {lines.length}</Text>
+                            <Pressable 
+                              onPress={() => {
+                                const anyUnmarked = lines.some(l => !l.is_mark);
+                                setLines(prev => prev.map(l => ({ ...l, is_mark: anyUnmarked })));
+                              }}
+                              style={{ backgroundColor: "rgba(255,255,255,0.08)", paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 }}
+                            >
+                              <Text style={{ color: "#38bdf8", fontSize: 11, fontWeight: "800", textTransform: "uppercase" }}>Toggle All</Text>
+                            </Pressable>
+                          </View>
+                          {lines.map((l, index) => (
+                            <Pressable
+                              key={l.id}
+                              onPress={() => onSelectLine(l.id)}
+                              style={{
+                                flexDirection: "row",
+                                alignItems: "center",
+                                padding: 12,
+                                borderBottomWidth: index === lines.length - 1 ? 0 : 1,
+                                borderBottomColor: "rgba(148,163,184,0.08)",
+                                backgroundColor: selectedLineId === l.id ? "rgba(56, 189, 248, 0.15)" : "transparent"
+                              }}
+                            >
+                              <View style={{ flex: 1 }}>
+                                <Text style={{ color: "#fff", fontSize: 13, fontWeight: "600" }}>Line {index + 1}</Text>
+                                <Text style={{ color: "#94a3b8", fontSize: 11, marginTop: 2, textTransform: "capitalize" }}>{l.layer} Layer</Text>
+                              </View>
+                              <Pressable
+                                onPress={() => {
+                                  setLines(prev => prev.map(pl => pl.id === l.id ? { ...pl, is_mark: !pl.is_mark } : pl));
+                                }}
+                                style={{
+                                  width: 24, height: 24, borderRadius: 6, borderWidth: 1,
+                                  borderColor: l.is_mark ? "#38bdf8" : "rgba(148,163,184,0.5)",
+                                  backgroundColor: l.is_mark ? "#38bdf8" : "transparent",
+                                  alignItems: "center", justifyContent: "center"
+                                }}
+                              >
+                                {l.is_mark && <CheckIcon size={14} color="#fff" />}
+                              </Pressable>
+                            </Pressable>
+                          ))}
+                        </View>
                       </View>
                     )}
                   </ScrollView>
@@ -5536,8 +5619,15 @@ function PlanPreview({
   }, [viewport]);
 
   // Auto-fit when plan lines change
+  const filteredLengthRef = React.useRef(-1);
   useEffect(() => {
     if (layoutSize.width <= 0 || layoutSize.height <= 0) return;
+
+    if (filteredLengthRef.current === filtered.length) {
+      return;
+    }
+    filteredLengthRef.current = filtered.length;
+
     if (filtered.length === 0) {
       // No plan: centre on rover if available, else use origin
       userPannedRef.current = false;
@@ -5806,15 +5896,13 @@ function PlanPreview({
               ))
             )}
             {selectedLine ? (
-              <Line
-                x1={selectedLine.from.y}
-                y1={selectedLine.from.x}
-                x2={selectedLine.to.y}
-                y2={selectedLine.to.x}
+              <Path
+                d={buildSvgPathChunks([selectedLine])[0] || ""}
                 stroke="#ef4444"
                 strokeWidth={3 / viewport.zoom}
                 strokeLinecap="round"
                 strokeLinejoin="round"
+                fill="none"
                 opacity={1}
               />
             ) : null}
@@ -5983,27 +6071,6 @@ function PlanPreview({
         )}
 
 
-        {/* Focus Plan Button */}
-        <Pressable
-          onPress={handleFocusPlan}
-          style={({ pressed }) => ({
-            width: 40,
-            height: 40,
-            borderRadius: 20,
-            backgroundColor: pressed ? "rgba(15,23,42,0.95)" : "rgba(15,23,42,0.85)",
-            borderWidth: 1.2,
-            borderColor: "#d97706",
-            alignItems: "center",
-            justifyContent: "center",
-            shadowColor: "#000",
-            shadowOffset: { width: 0, height: 2 },
-            shadowOpacity: 0.25,
-            shadowRadius: 3.84,
-            elevation: 5,
-          })}
-        >
-          <MapIcon size={20} color="#d97706" />
-        </Pressable>
       </View>
     </View>
   );
