@@ -805,6 +805,7 @@ export default function App() {
               const layerUpper = String(ent.layer || "").toUpperCase();
               let layerName: "boundary" | "marking" | "center" = "center";
               if (layerUpper.includes("BOUND")) layerName = "boundary";
+              else if (layerUpper.includes("CENTER")) layerName = "center";
               else if (layerUpper.includes("MARK") || ent.is_mark) layerName = "marking";
 
               // Use the first and last preview_points for 'from' and 'to'
@@ -2717,23 +2718,27 @@ function HomeView({
 
                         {/* BOTTOM SECTION: Point Data & Marking */}
                         <View style={[drawerStyles.section, { marginTop: 16 }]}>
-                          <SectionTitle title="Entity Data & Options" />
+                          <SectionTitle title="Entity Details" />
                           <View style={{ borderRadius: 16, padding: 16, backgroundColor: "#1e293b", borderWidth: 1, borderColor: "rgba(148,163,184,0.16)" }}>
                             
-                            {/* Point count and View icon */}
-                            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-                              <View>
-                                <Text style={{ color: "#94a3b8", fontSize: 10, fontWeight: "700", textTransform: "uppercase" }}>Preview Points</Text>
-                                <Text style={{ color: "#fff", fontSize: 16, fontWeight: "800", marginTop: 2 }}>
-                                  {selectedLine.entity?.preview_points?.length || 2} points
-                                </Text>
+                            {/* Points List */}
+                            <View style={{ marginBottom: 16 }}>
+                              <Text style={{ color: "#94a3b8", fontSize: 10, fontWeight: "700", textTransform: "uppercase", marginBottom: 8 }}>
+                                Available Points ({selectedLine.entity?.preview_points?.length || 2})
+                              </Text>
+                              <View style={{ maxHeight: 120, backgroundColor: "#0f172a", borderRadius: 8, padding: 8, borderWidth: 1, borderColor: "rgba(148,163,184,0.1)" }}>
+                                <ScrollView nestedScrollEnabled={true}>
+                                  {(selectedLine.entity?.preview_points || [
+                                    { north: selectedLine.from.x, east: selectedLine.from.y },
+                                    { north: selectedLine.to.x, east: selectedLine.to.y }
+                                  ]).map((pt: any, i: number, arr: any[]) => (
+                                    <View key={i} style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 6, borderBottomWidth: i === arr.length - 1 ? 0 : 1, borderBottomColor: "rgba(148,163,184,0.05)" }}>
+                                      <Text style={{ color: "#94a3b8", fontSize: 11, fontFamily: "monospace" }}>Pt {i + 1}</Text>
+                                      <Text style={{ color: "#fff", fontSize: 11, fontFamily: "monospace" }}>N: {Number(pt.north).toFixed(2)}, E: {Number(pt.east).toFixed(2)}</Text>
+                                    </View>
+                                  ))}
+                                </ScrollView>
                               </View>
-                              <Pressable
-                                onPress={() => setShowPointsModal(true)}
-                                style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: "rgba(255,255,255,0.1)", alignItems: "center", justifyContent: "center" }}
-                              >
-                                <Eye size={20} color="#fff" />
-                              </Pressable>
                             </View>
 
                             {/* Mark checkbox */}
@@ -6085,6 +6090,7 @@ function SwoziPage({
   toggleB,
   setToggleA,
   setToggleB,
+  apiBaseUrl,
 }: {
   delayA: number;
   delayB: number;
@@ -6094,7 +6100,50 @@ function SwoziPage({
   toggleB: boolean;
   setToggleA: (v: boolean) => void;
   setToggleB: (v: boolean) => void;
+  apiBaseUrl?: string;
 }) {
+  const [sprayDuration, setSprayDuration] = useState("2");
+  const [sprayStatus, setSprayStatus] = useState(false);
+  const [isTestActive, setIsTestActive] = useState(false);
+
+  useEffect(() => {
+    if (!apiBaseUrl) return;
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`${apiBaseUrl}/api/spray/status`);
+        if (res.ok) {
+          const data = await res.json();
+          setSprayStatus(data.spraying || data.manual_override || data.spray_active_desired);
+        }
+      } catch (err) {
+        // ignore network errors
+      }
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [apiBaseUrl]);
+
+  const handleSprayToggle = async () => {
+    if (!apiBaseUrl) return;
+    const isTurningOn = !isTestActive;
+    try {
+      await fetch(`${apiBaseUrl}/api/spray/test`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          on: isTurningOn,
+          duration_s: isTurningOn ? Number(sprayDuration) || 2 : 0
+        })
+      });
+      setIsTestActive(isTurningOn);
+      if (isTurningOn) {
+        // automatically reset button state after duration
+        setTimeout(() => setIsTestActive(false), (Number(sprayDuration) || 2) * 1000);
+      }
+    } catch (err) {
+      console.log("Spray test failed", err);
+    }
+  };
+
   return (
     <ScrollView style={{ flex: 1, padding: 18 }}>
       <Text style={secH}>Cart</Text>
@@ -6104,6 +6153,43 @@ function SwoziPage({
       <Text style={secH}>Pump</Text>
       <Text style={itemH}>Manual Control</Text>
       <Text style={itemT}>Disconnected</Text>
+
+      {/* Spray Test Section */}
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginVertical: 12 }}>
+        <View style={{ flex: 1, flexDirection: "row", alignItems: "center" }}>
+          <Text style={{ color: "#334155", fontSize: 16, fontWeight: "600", marginRight: 12 }}>Spray Test</Text>
+          {sprayStatus && (
+            <View style={{ backgroundColor: "#22c55e", paddingHorizontal: 8, paddingVertical: 2, borderRadius: 12 }}>
+              <Text style={{ color: "#fff", fontSize: 10, fontWeight: "bold" }}>SPRAYING</Text>
+            </View>
+          )}
+        </View>
+        <View style={{ flexDirection: "row", alignItems: "center" }}>
+          <TextInput
+            value={sprayDuration}
+            onChangeText={setSprayDuration}
+            keyboardType="numeric"
+            placeholder="sec"
+            style={{ 
+              borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, 
+              width: 60, paddingHorizontal: 10, paddingVertical: 8, 
+              marginRight: 10, color: "#334155", textAlign: "center" 
+            }}
+          />
+          <Pressable
+            onPress={handleSprayToggle}
+            style={{
+              backgroundColor: isTestActive ? "#ef4444" : "#0ea5e9",
+              paddingHorizontal: 16,
+              paddingVertical: 10,
+              borderRadius: 8
+            }}
+          >
+            <Text style={{ color: "#fff", fontWeight: "700" }}>{isTestActive ? "Stop" : "Start"}</Text>
+          </Pressable>
+        </View>
+      </View>
+
       <RowToggle label="Manual Painting with Long Press" value={toggleA} onChange={setToggleA} />
       <RowToggle label="Paint When Reversing" value={toggleB} onChange={setToggleB} />
       <RowSlider label="Pump Start Delay [s]" value={delayA} onChange={setDelayA} />
