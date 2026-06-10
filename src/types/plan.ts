@@ -15,6 +15,37 @@ export interface PlanLine {
   from: PlanPoint;
   to: PlanPoint;
   width: number;
+  is_mark?: boolean;
+  entity?: DxfEntity;
+}
+
+export interface DxfPoint {
+  north: number;
+  east: number;
+}
+
+export interface DxfEntity {
+  entity_id: string;
+  entity_type: string;
+  layer: string;
+  color: number;
+  is_mark: boolean;
+  length_m: number;
+  geometry: any;
+  preview_points: DxfPoint[];
+}
+
+export interface DxfEntitiesResponse {
+  name: string;
+  frame: string;
+  num_entities: number;
+  bounds: {
+    north_min: number;
+    north_max: number;
+    east_min: number;
+    east_max: number;
+  };
+  entities: DxfEntity[];
 }
 
 export interface ImportedPlan {

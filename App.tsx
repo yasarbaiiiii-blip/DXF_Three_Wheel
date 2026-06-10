@@ -113,7 +113,17 @@ function buildSvgPathChunks(lines: PlanLine[]) {
 
   for (const line of lines) {
     if (!isRenderableLine(line)) continue;
-    current += `M${line.from.y} ${line.from.x}L${line.to.y} ${line.to.x}`;
+    
+    if (line.entity && line.entity.preview_points && line.entity.preview_points.length > 1) {
+      const pts = line.entity.preview_points;
+      current += `M${pts[0].east} ${pts[0].north}`;
+      for (let i = 1; i < pts.length; i++) {
+        current += `L${pts[i].east} ${pts[i].north}`;
+      }
+    } else {
+      current += `M${line.from.y} ${line.from.x}L${line.to.y} ${line.to.x}`;
+    }
+    
     count += 1;
 
     if (count >= PATH_SEGMENT_CHUNK_SIZE) {
@@ -752,52 +762,90 @@ export default function App() {
       setSelectedPathName(pathName);
       let generatedLines: PlanLine[] = [];
       try {
-        const res = await fetch(`${apiBaseUrl}/api/path/${encodeURIComponent(pathName)}/preview`, {
-          method: "GET",
-          headers: {
-            Accept: "application/json",
-          },
-        });
-        if (res.ok) {
-          const body = await res.json();
-          console.log(`[API GET] /api/path/${pathName}/preview - Success, loaded ${body.num_points} points`);
-          const pts = Array.isArray(body?.waypoints) ? body.waypoints : [];
-          if (pts.length < 2) {
-            throw new Error("Preview returned fewer than two waypoints");
-          }
-          for (let i = 0; i < pts.length - 1; i++) {
-            const fromPt = pts[i];
-            const toPt = pts[i + 1];
-            const fromNorth = coerceFiniteNumber(fromPt?.north);
-            const fromEast = coerceFiniteNumber(fromPt?.east);
-            const toNorth = coerceFiniteNumber(toPt?.north);
-            const toEast = coerceFiniteNumber(toPt?.east);
+        if (pathName.toLowerCase().endsWith(".dxf")) {
+          const res = await fetch(`${apiBaseUrl}/api/path/${encodeURIComponent(pathName)}/entities`, {
+            method: "GET",
+            headers: { Accept: "application/json" },
+          });
+          if (res.ok) {
+            const body = await res.json();
+            console.log(`[API GET] /api/path/${pathName}/entities - Success, loaded ${body.num_entities} entities`);
+            const entities = body.entities || [];
+            
+            entities.forEach((ent: any, i: number) => {
+              const layerUpper = String(ent.layer || "").toUpperCase();
+              let layerName: "boundary" | "marking" | "center" = "center";
+              if (layerUpper.includes("BOUND")) layerName = "boundary";
+              else if (layerUpper.includes("MARK") || ent.is_mark) layerName = "marking";
 
-            if (fromNorth == null || fromEast == null || toNorth == null || toEast == null) {
-              continue;
-            }
+              // Use the first and last preview_points for 'from' and 'to'
+              const pts = ent.preview_points || [];
+              const fromPt = pts[0] || { north: 0, east: 0 };
+              const toPt = pts[pts.length - 1] || fromPt;
 
-            const sprayFlag = fromPt?.spray ?? true;
-            generatedLines.push({
-              id: `rpp-line-${i}`,
-              label: `Segment ${i + 1}`,
-              layer: sprayFlag ? "marking" : "center",
-              // The backend returns {north: number, east: number}
-              // PlanLine convention is x = North, y = East
-              from: { id: i * 2 + 1, x: fromNorth, y: fromEast },
-              to: { id: i * 2 + 2, x: toNorth, y: toEast },
-              width: 0.1,
+              generatedLines.push({
+                id: ent.entity_id || `dxf-ent-${i}`,
+                label: `${ent.entity_type || "Entity"} ${ent.entity_id || i}`,
+                layer: layerName,
+                from: { id: i * 2 + 1, x: fromPt.north, y: fromPt.east },
+                to: { id: i * 2 + 2, x: toPt.north, y: toPt.east },
+                width: 0.1,
+                is_mark: ent.is_mark,
+                entity: ent,
+              });
             });
-          }
-          if (generatedLines.length === 0) {
-            throw new Error("Preview waypoints did not contain valid coordinates");
+            if (generatedLines.length === 0) {
+              throw new Error("Preview entities did not contain valid geometries");
+            }
+          } else {
+            throw new Error(`Entities endpoint failed with status ${res.status}`);
           }
         } else {
-          console.error(`[API GET] /api/path/${pathName}/preview - Failed with status ${res.status}`);
-          throw new Error("Preview not available");
+          const res = await fetch(`${apiBaseUrl}/api/path/${encodeURIComponent(pathName)}/preview`, {
+            method: "GET",
+            headers: {
+              Accept: "application/json",
+            },
+          });
+          if (res.ok) {
+            const body = await res.json();
+            console.log(`[API GET] /api/path/${pathName}/preview - Success, loaded ${body.num_points} points`);
+            const pts = Array.isArray(body?.waypoints) ? body.waypoints : [];
+            if (pts.length < 2) {
+              throw new Error("Preview returned fewer than two waypoints");
+            }
+            for (let i = 0; i < pts.length - 1; i++) {
+              const fromPt = pts[i];
+              const toPt = pts[i + 1];
+              const fromNorth = coerceFiniteNumber(fromPt?.north);
+              const fromEast = coerceFiniteNumber(fromPt?.east);
+              const toNorth = coerceFiniteNumber(toPt?.north);
+              const toEast = coerceFiniteNumber(toPt?.east);
+
+              if (fromNorth == null || fromEast == null || toNorth == null || toEast == null) {
+                continue;
+              }
+
+              const sprayFlag = fromPt?.spray ?? true;
+              generatedLines.push({
+                id: `rpp-line-${i}`,
+                label: `Segment ${i + 1}`,
+                layer: sprayFlag ? "marking" : "center",
+                from: { id: i * 2 + 1, x: fromNorth, y: fromEast },
+                to: { id: i * 2 + 2, x: toNorth, y: toEast },
+                width: 0.1,
+              });
+            }
+            if (generatedLines.length === 0) {
+              throw new Error("Preview waypoints did not contain valid coordinates");
+            }
+          } else {
+            console.error(`[API GET] /api/path/${pathName}/preview - Failed with status ${res.status}`);
+            throw new Error("Preview not available");
+          }
         }
       } catch (err) {
-        console.log("[API GET] /api/path/preview - Endpoint failed/not supported, fallback to mock line:", err);
+        console.log("[API GET] /api/path/entities/preview - Endpoint failed/not supported, fallback to mock line:", err);
         generatedLines = [{
           id: "rpp-line-0",
           label: "Segment 1 (Preview fallback)",
@@ -822,6 +870,54 @@ export default function App() {
     } catch (err) {
       console.log("Error loading path preview:", err);
       Alert.alert("Preview failed", err instanceof Error ? err.message : String(err));
+    } finally {
+      setMissionActionBusy(false);
+    }
+  };
+
+  const parseDxfPlan = async () => {
+    if (!apiBaseUrl || !importedPlan) return;
+    setMissionActionBusy(true);
+    try {
+      showToast("Parse", "Sending modifications to backend...", "info");
+      
+      // The user indicated that the parse-dxf payload is still UploadFile
+      // So we will reconstruct the DXF or rely on the backend to provide a way
+      // Wait, we can't easily generate a perfect DXF on the frontend and upload it
+      // if it still expects an UploadFile. BUT the user explicitly confirmed:
+      // "it's payload is the file itself will do they didn't changed"
+      // If we must send the file itself, we will trigger the upload flow or call plan.
+      // But wait! If the user unchecks a box, we need a way to tell the backend!
+      // I will send the current entities as JSON to /api/path/plan for actual planning,
+      // or simulate it here based on what they approved.
+      // For now, I will use /api/path/parse-dxf if it accepts the file, but since the
+      // prompt says "at bottom the abutton will appear to send to post for POST /api/path/parse-dxf endpoint"
+      // I will implement a POST request.
+      
+      // Sending an empty file if the backend expects multipart/form-data for /parse-dxf
+      // But passing the modified entities in some way if possible.
+      const form = new FormData();
+      // Attempting to send a file to parse-dxf as requested
+      const content = linesToDxf(lines, importedPlan.fileName);
+      // @ts-ignore
+      form.append("file", new Blob([content], { type: "application/dxf" }), importedPlan.fileName);
+      
+      const res = await fetch(`${apiBaseUrl}/api/path/parse-dxf`, {
+        method: "POST",
+        body: form,
+      });
+      if (!res.ok) {
+        const errMsg = await parseFetchError(res, "Parse failed");
+        throw new Error(errMsg);
+      }
+      
+      // Choice A: Refresh preview immediately!
+      await previewSelectedPath(importedPlan.fileName);
+      showToast("Parsed", "Plan updated successfully.", "success");
+    } catch (error) {
+      logAction("PARSE_FAILED", { error: error instanceof Error ? error.message : String(error) });
+      Alert.alert("Parse failed", error instanceof Error ? error.message : "Could not parse.");
+      showToast("Parse failed", error instanceof Error ? error.message : "Parse failed.", "error");
     } finally {
       setMissionActionBusy(false);
     }
@@ -1624,6 +1720,7 @@ export default function App() {
             setToggleD={setToggleD}
             setDelayA={setDelayA}
             setDelayB={setDelayB}
+            onParsePlan={parseDxfPlan}
           />
         )}
 
@@ -1850,6 +1947,7 @@ function HomeView({
   connectRtkCaster: () => Promise<void>;
   rtkRunning: boolean;
   rtkHealthy: boolean;
+  onParsePlan: () => Promise<void>;
 }) {
   const selectedLine = lines.find((line) => line.id === selectedLineId) ?? null;
   const hasPlan = lines.length > 0;
@@ -1862,6 +1960,7 @@ function HomeView({
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [exportFileName, setExportFileName] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [showPointsModal, setShowPointsModal] = useState(false);
   const pulse = (label: string, ok: boolean | undefined | null) => ({
     label,
     value: ok === undefined || ok === null ? "Unknown" : ok ? "OK" : "Alert",
@@ -2569,56 +2668,59 @@ function HomeView({
 
                     {selectedLine ? (
                       <>
-                        <View style={drawerStyles.grid}>
-                          <StatCard
-                            label="Selection"
-                            value={{
-                              label: "Current line",
-                              value: selectedLine.label,
-                              tone: "#fff",
-                            }}
-                          />
-                          <StatCard
-                            label="Status"
-                            value={{
-                              label: "Drawer state",
-                              value: "Loaded",
-                              tone: "#16a34a",
-                            }}
-                          />
-                          <StatCard
-                            label="Layer"
-                            value={{
-                              label: "Visible layers",
-                              value: hasPlan ? "Available" : "No plan",
-                              tone: hasPlan ? "#fff" : "#94a3b8",
-                            }}
-                          />
-                          <StatCard
-                            label="Info"
-                            value={{
-                              label: "Line geometry",
-                              value: `${lineLength(selectedLine).toFixed(2)} m`,
-                              tone: "#fff",
-                            }}
-                          />
-                        </View>
-
-                        <View style={drawerStyles.stripRow}>
-                          <StripMetric label="Length" value={`${lineLength(selectedLine).toFixed(2)} m`} tone="#fff" />
-                          <StripMetric label="Angle" value={`${lineAngle(selectedLine).toFixed(2)}°`} tone="#fff" />
-                          <StripMetric label="Width" value={`${selectedLine.width.toFixed(2)} m`} tone="#fff" />
-                        </View>
-
+                        {/* TOP SECTION: Line Details */}
                         <View style={drawerStyles.section}>
-                          <SectionTitle title="Geometry" />
+                          <SectionTitle title="Geometry Details" />
                           <View style={{ borderRadius: 16, padding: 12, backgroundColor: "#111827", borderWidth: 1, borderColor: "rgba(148,163,184,0.16)", gap: 10 }}>
-                            <ListRow left="Line label" right={selectedLine.label} tone="#fff" />
+                            <ListRow left="Entity Type" right={selectedLine.entity?.entity_type || "Segment"} tone="#fff" />
+                            <ListRow left="Line ID" right={selectedLine.id} tone="#fff" />
                             <ListRow left="Layer" right={selectedLine.layer} tone="#fff" />
+                            <ListRow left="Length" right={`${selectedLine.entity?.length_m != null ? selectedLine.entity.length_m.toFixed(2) : lineLength(selectedLine).toFixed(2)} m`} tone="#fff" />
                             <ListRow left="From" right={`(${selectedLine.from.x.toFixed(2)}, ${selectedLine.from.y.toFixed(2)})`} tone="#fff" />
                             <ListRow left="To" right={`(${selectedLine.to.x.toFixed(2)}, ${selectedLine.to.y.toFixed(2)})`} tone="#fff" />
-                            <ListRow left="Point IDs" right={`${selectedLine.from.id} -> ${selectedLine.to.id}`} tone="#fff" />
-                            <ListRow left="Line ID" right={selectedLine.id} tone="#fff" />
+                          </View>
+                        </View>
+
+                        {/* BOTTOM SECTION: Point Data & Marking */}
+                        <View style={[drawerStyles.section, { marginTop: 16 }]}>
+                          <SectionTitle title="Entity Data & Options" />
+                          <View style={{ borderRadius: 16, padding: 16, backgroundColor: "#1e293b", borderWidth: 1, borderColor: "rgba(148,163,184,0.16)" }}>
+                            
+                            {/* Point count and View icon */}
+                            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+                              <View>
+                                <Text style={{ color: "#94a3b8", fontSize: 10, fontWeight: "700", textTransform: "uppercase" }}>Preview Points</Text>
+                                <Text style={{ color: "#fff", fontSize: 16, fontWeight: "800", marginTop: 2 }}>
+                                  {selectedLine.entity?.preview_points?.length || 2} points
+                                </Text>
+                              </View>
+                              <Pressable
+                                onPress={() => setShowPointsModal(true)}
+                                style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: "rgba(255,255,255,0.1)", alignItems: "center", justifyContent: "center" }}
+                              >
+                                <Eye size={20} color="#fff" />
+                              </Pressable>
+                            </View>
+
+                            {/* Mark checkbox */}
+                            {selectedLine.entity != null && (
+                              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.05)", paddingTop: 16 }}>
+                                <View style={{ flex: 1 }}>
+                                  <Text style={{ color: "#fff", fontSize: 14, fontWeight: "700" }}>Mark Line</Text>
+                                  <Text style={{ color: "#94a3b8", fontSize: 11, marginTop: 2 }}>Include this entity in the spray plan</Text>
+                                </View>
+                                <Switch
+                                  value={selectedLine.entity.is_mark}
+                                  onValueChange={(val) => {
+                                    selectedLine.entity!.is_mark = val;
+                                    // Trigger a re-render
+                                    setAutoOrigin((prev) => prev);
+                                  }}
+                                  trackColor={{ false: "#334155", true: "#0d9488" }}
+                                  thumbColor={"#fff"}
+                                />
+                              </View>
+                            )}
                           </View>
                         </View>
 
@@ -2642,6 +2744,26 @@ function HomeView({
                             />
                           </View>
                         </View>
+
+                        {importedPlan?.fileType === "dxf" && (
+                          <View style={{ marginTop: 24, paddingBottom: 10 }}>
+                            <Pressable
+                              onPress={onParsePlan}
+                              disabled={missionActionBusy}
+                              style={{
+                                backgroundColor: missionActionBusy ? "#334155" : "#0ea5e9",
+                                paddingVertical: 14,
+                                borderRadius: 12,
+                                alignItems: "center",
+                                justifyContent: "center"
+                              }}
+                            >
+                              <Text style={{ color: "#fff", fontSize: 15, fontWeight: "800" }}>
+                                {missionActionBusy ? "Parsing..." : "Parse/Generate Plan"}
+                              </Text>
+                            </Pressable>
+                          </View>
+                        )}
                       </>
                     ) : (
                       <View style={[drawerStyles.section, { marginTop: 18 }]}>
@@ -2776,6 +2898,34 @@ function HomeView({
               </View>
             </Pressable>
           </Pressable>
+        </Modal>
+
+        {/* Points Modal */}
+        <Modal transparent visible={showPointsModal} animationType="slide" onRequestClose={() => setShowPointsModal(false)}>
+          <View style={{ flex: 1, backgroundColor: "rgba(15,23,42,0.6)", padding: 40, justifyContent: "center", alignItems: "center" }}>
+            <View style={{ width: "100%", maxWidth: 600, backgroundColor: "#1e293b", borderRadius: 24, overflow: "hidden", maxHeight: "90%" }}>
+              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 20, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.1)" }}>
+                <Text style={{ color: "#fff", fontSize: 18, fontWeight: "800" }}>Entity Preview Points</Text>
+                <Pressable onPress={() => setShowPointsModal(false)} style={{ padding: 4 }}>
+                  <X size={24} color="#94a3b8" />
+                </Pressable>
+              </View>
+              <ScrollView style={{ flex: 1, padding: 20 }}>
+                <View style={{ flexDirection: "row", borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.1)", paddingBottom: 8, marginBottom: 8 }}>
+                  <Text style={{ flex: 1, color: "#94a3b8", fontWeight: "700" }}>#</Text>
+                  <Text style={{ flex: 2, color: "#94a3b8", fontWeight: "700" }}>North</Text>
+                  <Text style={{ flex: 2, color: "#94a3b8", fontWeight: "700" }}>East</Text>
+                </View>
+                {(selectedLine?.entity?.preview_points || []).map((pt: any, i: number) => (
+                  <View key={i} style={{ flexDirection: "row", paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.05)" }}>
+                    <Text style={{ flex: 1, color: "#cbd5e1" }}>{i + 1}</Text>
+                    <Text style={{ flex: 2, color: "#fff", fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace" }}>{pt.north.toFixed(4)}</Text>
+                    <Text style={{ flex: 2, color: "#fff", fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace" }}>{pt.east.toFixed(4)}</Text>
+                  </View>
+                ))}
+              </ScrollView>
+            </View>
+          </View>
         </Modal>
 
         {menuOpen ? (
@@ -3889,6 +4039,7 @@ function SectionScreen(props: {
   missionActionBusy: boolean;
   apiBaseUrl: string;
   onRefreshPaths: () => void;
+  onParsePlan?: () => Promise<void>;
 }) {
   const { title, page, onBack } = props;
 
@@ -4362,6 +4513,7 @@ function FieldsPage({
   onSelectLine: (id: string | null) => void;
   apiBaseUrl: string;
   onRefreshPaths: () => void;
+  onParsePlan?: () => Promise<void>;
 }) {
   const [pickedFile, setPickedFile] = useState<DocumentPicker.DocumentPickerAsset | null>(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -5430,12 +5582,31 @@ function PlanPreview({
             if (Math.hypot(current.x - gestureRef.current.startTouch!.x, current.y - gestureRef.current.startTouch!.y) > 4) {
               gestureRef.current.isTap = false;
             }
+            const dx = current.x - gestureRef.current.lastTouch.x;
+            const dy = current.y - gestureRef.current.lastTouch.y;
+            userPannedRef.current = true;
+            
+            setViewport(prev => {
+              const next = { ...prev, panX: prev.panX + dx, panY: prev.panY + dy };
+              viewportRef.current = next;
+              return next;
+            });
             gestureRef.current.lastTouch = current;
             return;
           }
 
-          if (touches.length >= 2) {
+          if (touches.length >= 2 && gestureRef.current.pinchDistance != null && gestureRef.current.pinchViewport) {
             gestureRef.current.isTap = false;
+            userPannedRef.current = true;
+
+            const dist = touchDistance(touches[0], touches[1]);
+            const scale = dist / gestureRef.current.pinchDistance;
+            
+            setViewport(prev => {
+              const next = { ...prev, zoom: Math.max(1, gestureRef.current.pinchViewport!.zoom * scale) };
+              viewportRef.current = next;
+              return next;
+            });
           }
         },
 
@@ -5787,6 +5958,36 @@ function PlanPreview({
             <LocateFixed size={20} color="#0ea5e9" />
           </Pressable>
         )}
+
+
+        <View style={{ backgroundColor: "rgba(15,23,42,0.85)", borderRadius: 20, borderWidth: 1.2, borderColor: "#64748b", overflow: "hidden", shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 3.84, elevation: 5 }}>
+          <Pressable
+            onPress={() => {
+              userPannedRef.current = true;
+              setViewport(prev => {
+                const next = { ...prev, zoom: prev.zoom * 1.5 };
+                viewportRef.current = next;
+                return next;
+              });
+            }}
+            style={({ pressed }) => ({ width: 40, height: 40, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? "rgba(255,255,255,0.1)" : "transparent", borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.1)" })}
+          >
+            <Text style={{ color: "#e2e8f0", fontSize: 24, fontWeight: "400", lineHeight: 28 }}>+</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => {
+              userPannedRef.current = true;
+              setViewport(prev => {
+                const next = { ...prev, zoom: Math.max(1, prev.zoom / 1.5) };
+                viewportRef.current = next;
+                return next;
+              });
+            }}
+            style={({ pressed }) => ({ width: 40, height: 40, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? "rgba(255,255,255,0.1)" : "transparent" })}
+          >
+            <Text style={{ color: "#e2e8f0", fontSize: 24, fontWeight: "400", lineHeight: 28 }}>-</Text>
+          </Pressable>
+        </View>
 
         {/* Focus Plan Button */}
         <Pressable
