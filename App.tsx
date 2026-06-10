@@ -28,6 +28,7 @@ import Slider from "@react-native-community/slider";
 import * as FileSystem from "expo-file-system/legacy";
 import * as DocumentPicker from "expo-document-picker";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
+
 import Svg, { Circle, G, Line, Path, Polygon, Text as SvgText } from "react-native-svg";
 import { io, Socket } from "socket.io-client";
 import {
@@ -284,21 +285,30 @@ export default function App() {
     if (autoOrigin) {
       const posN = telemetrySnapshot?.pos_n;
       const posE = telemetrySnapshot?.pos_e;
-      if (telemetrySnapshot?.mission_state !== "running") {
-        if (posN != null && posE != null) {
-          setOriginShift({ offsetN: posN, offsetE: posE });
-        }
-      } else {
+      const state = telemetrySnapshot?.mission_state;
+
+      if (state === "running") {
+        // Lock origin to the rover's starting position exactly once per mission.
+        // The `prev === null` guard ensures we don't re-lock mid-mission if telemetry updates.
         if (posN != null && posE != null) {
           setOriginShift((prev) =>
             prev === null ? { offsetN: posN, offsetE: posE } : prev
           );
         }
+      } else if (state === "idle") {
+        // Clear the shift when the rover returns to idle.
+        // This ensures the next mission can accurately lock its own fresh start position.
+        setOriginShift(null);
+      } else {
+        // "completed" or "paused" — preserve the existing origin shift.
+        // This prevents the plan from "jumping" when the mission finishes
+        // and the rover is at a different final position than its starting point.
+        setOriginShift((prev) => prev);
       }
     } else {
       setOriginShift(null);
     }
-  }, [autoOrigin, telemetrySnapshot?.pos_n, telemetrySnapshot?.pos_e, telemetrySnapshot?.mission_state]);
+  }, [autoOrigin, telemetrySnapshot?.pos_n, telemetrySnapshot?.pos_e, telemetrySnapshot?.mission_state, setOriginShift]);
 
   const displayedLines = useMemo(() => {
     if (originShift) {
