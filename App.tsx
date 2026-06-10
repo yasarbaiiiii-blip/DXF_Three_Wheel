@@ -1673,6 +1673,7 @@ export default function App() {
             connectRtkCaster={connectRtkCaster}
             rtkRunning={rtkRunning}
             rtkHealthy={rtkHealthy}
+            onParsePlan={parseDxfPlan}
           />
         ) : (
           <SectionScreen
@@ -1898,6 +1899,7 @@ function HomeView({
   connectRtkCaster,
   rtkRunning,
   rtkHealthy,
+  onParsePlan,
 }: {
   autoOrigin: boolean;
   setAutoOrigin: React.Dispatch<React.SetStateAction<boolean>>;
