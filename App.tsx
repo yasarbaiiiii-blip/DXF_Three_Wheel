@@ -55,6 +55,7 @@ import {
   RotateCw,
   Eye,
   EyeOff,
+  Map,
 } from "lucide-react-native";
 
 import { readImportedPlanFile, normalizePlanLines } from "./src/utils/planImport";
@@ -5957,7 +5958,7 @@ function PlanPreview({
               elevation: 5,
             })}
           >
-            <LocateFixed size={20} color="#0ea5e9" />
+            <Tractor size={20} color="#0ea5e9" />
           </Pressable>
         )}
 
@@ -5981,7 +5982,7 @@ function PlanPreview({
             elevation: 5,
           })}
         >
-          <List size={20} color="#d97706" />
+          <Map size={20} color="#d97706" />
         </Pressable>
       </View>
     </View>
