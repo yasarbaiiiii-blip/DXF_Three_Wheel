@@ -5776,7 +5776,7 @@ function PlanPreview({
                   key={`${layer}-${index}`}
                   d={d}
                   stroke={strokeForLayer(layer)}
-                  strokeWidth={0.02}
+                  strokeWidth={2 / viewport.zoom}
                   strokeLinecap="round"
                   strokeLinejoin="round"
                   fill="none"
@@ -5791,7 +5791,7 @@ function PlanPreview({
                 x2={selectedLine.to.y}
                 y2={selectedLine.to.x}
                 stroke="#ef4444"
-                strokeWidth={0.02}
+                strokeWidth={3 / viewport.zoom}
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 opacity={1}
