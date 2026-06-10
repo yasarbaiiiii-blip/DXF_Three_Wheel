@@ -28,7 +28,7 @@ import Slider from "@react-native-community/slider";
 import * as FileSystem from "expo-file-system/legacy";
 import * as DocumentPicker from "expo-document-picker";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
-import Svg, { Circle, G, Line, Polygon, Text as SvgText } from "react-native-svg";
+import Svg, { Circle, G, Line, Path, Polygon, Text as SvgText } from "react-native-svg";
 import { io, Socket } from "socket.io-client";
 import {
   Battery,
@@ -72,6 +72,63 @@ type Page =
   | "about";
 
 type LayerVisibility = { boundary: boolean; marking: boolean; center: boolean };
+const MAX_PREVIEW_CORNERS = 450;
+const PATH_SEGMENT_CHUNK_SIZE = 650;
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function coerceFiniteNumber(value: unknown): number | null {
+  const next = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(next) ? next : null;
+}
+
+function formatFinite(value: unknown, digits = 2, fallback = "n/a") {
+  const next = coerceFiniteNumber(value);
+  return next == null ? fallback : next.toFixed(digits);
+}
+
+function isRenderableLine(line: PlanLine | null | undefined): line is PlanLine {
+  return Boolean(
+    line &&
+      line.from &&
+      line.to &&
+      isFiniteNumber(line.from.x) &&
+      isFiniteNumber(line.from.y) &&
+      isFiniteNumber(line.to.x) &&
+      isFiniteNumber(line.to.y)
+  );
+}
+
+function sanitizePlanLines(lines: PlanLine[]) {
+  return lines.filter(isRenderableLine);
+}
+
+function buildSvgPathChunks(lines: PlanLine[]) {
+  const chunks: string[] = [];
+  let current = "";
+  let count = 0;
+
+  for (const line of lines) {
+    if (!isRenderableLine(line)) continue;
+    current += `M${line.from.y} ${line.from.x}L${line.to.y} ${line.to.x}`;
+    count += 1;
+
+    if (count >= PATH_SEGMENT_CHUNK_SIZE) {
+      chunks.push(current);
+      current = "";
+      count = 0;
+    }
+  }
+
+  if (current) {
+    chunks.push(current);
+  }
+
+  return chunks;
+}
+
 type DiscoveredRover = {
   id: string;
   name: string;
@@ -245,14 +302,22 @@ export default function App() {
 
   const displayedLines = useMemo(() => {
     if (originShift) {
-      return lines.map((l) => ({
+      return sanitizePlanLines(lines).map((l) => ({
         ...l,
         from: { ...l.from, x: l.from.x + originShift.offsetN, y: l.from.y + originShift.offsetE },
         to: { ...l.to, x: l.to.x + originShift.offsetN, y: l.to.y + originShift.offsetE },
       }));
     }
-    return lines;
+    return sanitizePlanLines(lines);
   }, [lines, originShift]);
+
+  const frozenRoverPos = useMemo(() => {
+    if (telemetrySnapshot?.pos_n == null || telemetrySnapshot?.pos_e == null) {
+      return null;
+    }
+
+    return { n: telemetrySnapshot.pos_n, e: telemetrySnapshot.pos_e };
+  }, [telemetrySnapshot?.pos_n, telemetrySnapshot?.pos_e]);
 
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const selectedWsRef = useRef(selectedWs);
@@ -686,21 +751,36 @@ export default function App() {
         if (res.ok) {
           const body = await res.json();
           console.log(`[API GET] /api/path/${pathName}/preview - Success, loaded ${body.num_points} points`);
-          const pts = body.waypoints;
+          const pts = Array.isArray(body?.waypoints) ? body.waypoints : [];
+          if (pts.length < 2) {
+            throw new Error("Preview returned fewer than two waypoints");
+          }
           for (let i = 0; i < pts.length - 1; i++) {
             const fromPt = pts[i];
             const toPt = pts[i + 1];
-            const sprayFlag = fromPt.spray ?? true;
+            const fromNorth = coerceFiniteNumber(fromPt?.north);
+            const fromEast = coerceFiniteNumber(fromPt?.east);
+            const toNorth = coerceFiniteNumber(toPt?.north);
+            const toEast = coerceFiniteNumber(toPt?.east);
+
+            if (fromNorth == null || fromEast == null || toNorth == null || toEast == null) {
+              continue;
+            }
+
+            const sprayFlag = fromPt?.spray ?? true;
             generatedLines.push({
               id: `rpp-line-${i}`,
               label: `Segment ${i + 1}`,
               layer: sprayFlag ? "marking" : "center",
               // The backend returns {north: number, east: number}
               // PlanLine convention is x = North, y = East
-              from: { id: i * 2 + 1, x: fromPt.north, y: fromPt.east },
-              to: { id: i * 2 + 2, x: toPt.north, y: toPt.east },
+              from: { id: i * 2 + 1, x: fromNorth, y: fromEast },
+              to: { id: i * 2 + 2, x: toNorth, y: toEast },
               width: 0.1,
             });
+          }
+          if (generatedLines.length === 0) {
+            throw new Error("Preview waypoints did not contain valid coordinates");
           }
         } else {
           console.error(`[API GET] /api/path/${pathName}/preview - Failed with status ${res.status}`);
@@ -717,7 +797,7 @@ export default function App() {
           width: 0.1,
         }];
       }
-      const normalized = normalizePlanLines(generatedLines);
+      const normalized = sanitizePlanLines(normalizePlanLines(generatedLines));
       setLines(normalized);
       setImportedPlan({
         fileName: pathName,
@@ -1252,8 +1332,9 @@ export default function App() {
         fileType: "dxf",
         source: "generated",
       });
-      setLines(generatedLines);
-      setSelectedLineId(generatedLines[0]?.id ?? null);
+      const safeGeneratedLines = sanitizePlanLines(generatedLines);
+      setLines(safeGeneratedLines);
+      setSelectedLineId(safeGeneratedLines[0]?.id ?? null);
       setMissionLoaded(true);
       setMissionRunning(false);
       void refreshTelemetryPanel();
@@ -1506,9 +1587,10 @@ export default function App() {
             onBack={() => setPage("home")}
             onSelectLine={setSelectedLineId}
             onGenerateTemplate={(name, generatedLines) => {
+              const safeGeneratedLines = sanitizePlanLines(generatedLines);
               setImportedPlan({ fileName: `${name}.dxf`, uri: "", fileType: "dxf", source: "generated" });
-              setLines(generatedLines);
-              setSelectedLineId(generatedLines[0]?.id ?? null);
+              setLines(safeGeneratedLines);
+              setSelectedLineId(safeGeneratedLines[0]?.id ?? null);
               setMissionFileReady(false);
               setMissionLoaded(false);
               setMissionRunning(false);
@@ -4330,21 +4412,31 @@ function FieldsPage({
           setMissionSummary(data.mission_summary);
 
           // Update canvas lines
-          if (data.merged_waypoints && data.spray_flags) {
+          if (data.merged_waypoints) {
             const alignedLines: PlanLine[] = [];
-            const pts = data.merged_waypoints;
+            const pts = Array.isArray(data.merged_waypoints) ? data.merged_waypoints : [];
+            const sprayFlags = Array.isArray(data.spray_flags) ? data.spray_flags : [];
             for (let i = 0; i < pts.length - 1; i++) {
-              const sprayFlag = data.spray_flags[i] ?? true;
+              const sprayFlag = sprayFlags[i] ?? true;
+              const fromNorth = coerceFiniteNumber(pts[i]?.[0]);
+              const fromEast = coerceFiniteNumber(pts[i]?.[1]);
+              const toNorth = coerceFiniteNumber(pts[i + 1]?.[0]);
+              const toEast = coerceFiniteNumber(pts[i + 1]?.[1]);
+
+              if (fromNorth == null || fromEast == null || toNorth == null || toEast == null) {
+                continue;
+              }
+
               alignedLines.push({
                 id: `aligned-line-${i}`,
                 label: `Segment ${i + 1}`,
                 layer: sprayFlag ? "marking" : "center",
-                from: { id: i * 2 + 1, x: pts[i][0], y: pts[i][1] },
-                to: { id: i * 2 + 2, x: pts[i + 1][0], y: pts[i + 1][1] },
+                from: { id: i * 2 + 1, x: fromNorth, y: fromEast },
+                to: { id: i * 2 + 2, x: toNorth, y: toEast },
                 width: 0.1,
               });
             }
-            setLines(alignedLines);
+            setLines(sanitizePlanLines(alignedLines));
           }
 
           Alert.alert("Success", "Alignment applied. Mission is ready to be loaded!");
@@ -4580,15 +4672,15 @@ function FieldsPage({
                   <Text style={{ color: "#166534", fontWeight: "800", marginBottom: 8, fontSize: 13 }}>Mission Staged Successfully</Text>
                   <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
                     <Text style={{ color: "#166534", fontSize: 12, fontWeight: "600" }}>Est. Time:</Text>
-                    <Text style={{ color: "#166534", fontSize: 12 }}>{missionSummary.estimated_runtime_s}s</Text>
+                    <Text style={{ color: "#166534", fontSize: 12 }}>{formatFinite(missionSummary.estimated_runtime_s, 0)}s</Text>
                   </View>
                   <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
                     <Text style={{ color: "#166534", fontSize: 12, fontWeight: "600" }}>Distance:</Text>
-                    <Text style={{ color: "#166534", fontSize: 12 }}>{missionSummary.total_length_m.toFixed(2)}m</Text>
+                    <Text style={{ color: "#166534", fontSize: 12 }}>{formatFinite(missionSummary.total_length_m)}m</Text>
                   </View>
                   <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 12 }}>
                     <Text style={{ color: "#166534", fontSize: 12, fontWeight: "600" }}>Paint:</Text>
-                    <Text style={{ color: "#166534", fontSize: 12 }}>{missionSummary.estimated_paint_l.toFixed(2)}L</Text>
+                    <Text style={{ color: "#166534", fontSize: 12 }}>{formatFinite(missionSummary.estimated_paint_l)}L</Text>
                   </View>
                   <Pressable
                     onPress={() => onLoadSelectedPath(missionSummary.mission_id)}
@@ -5180,7 +5272,7 @@ function PlanPreview({
 }) {
   const filtered = useMemo(
     () =>
-      lines.filter((line) => {
+      sanitizePlanLines(lines).filter((line) => {
         if (line.layer === "boundary") return visibility.boundary;
         if (line.layer === "marking") return visibility.marking;
         if (line.layer === "center") return visibility.center;
@@ -5189,7 +5281,19 @@ function PlanPreview({
     [lines, visibility]
   );
 
-  const cornerPoints = useMemo(() => getCornerPoints(filtered), [filtered]);
+  const cornerPoints = useMemo(() => getCornerPoints(filtered).slice(0, MAX_PREVIEW_CORNERS), [filtered]);
+  const selectedLine = useMemo(
+    () => filtered.find((line) => line.id === selectedLineId) ?? null,
+    [filtered, selectedLineId]
+  );
+  const pathChunksByLayer = useMemo(
+    () => ({
+      boundary: buildSvgPathChunks(filtered.filter((line) => line.layer === "boundary" && line.id !== selectedLineId)),
+      marking: buildSvgPathChunks(filtered.filter((line) => line.layer === "marking" && line.id !== selectedLineId)),
+      center: buildSvgPathChunks(filtered.filter((line) => line.layer === "center" && line.id !== selectedLineId)),
+    }),
+    [filtered, selectedLineId]
+  );
 
   // Rover world-space position: pos_e = East, pos_n = North
   const hasRover = roverPosN != null && roverPosE != null;
@@ -5483,20 +5587,33 @@ function PlanPreview({
 
           {/* ── Plan lines ── */}
           <G transform={`translate(${layoutSize.width / 2}, ${layoutSize.height / 2}) rotate(${rotation}) translate(${-layoutSize.width / 2}, ${-layoutSize.height / 2}) translate(${viewport.panX}, ${viewport.panY}) scale(${viewport.zoom}, ${-viewport.zoom})`}>
-            {filtered.map((line) => (
+            {(["boundary", "marking", "center"] as const).flatMap((layer) =>
+              pathChunksByLayer[layer].map((d, index) => (
+                <Path
+                  key={`${layer}-${index}`}
+                  d={d}
+                  stroke={strokeForLayer(layer)}
+                  strokeWidth={0.02}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  fill="none"
+                  opacity={0.96}
+                />
+              ))
+            )}
+            {selectedLine ? (
               <Line
-                key={line.id}
-                x1={line.from.y} // East (World Y)
-                y1={line.from.x} // North (World X)
-                x2={line.to.y}   // East (World Y)
-                y2={line.to.x}   // North (World X)
-                stroke={line.id === selectedLineId ? "#ef4444" : strokeForLayer(line.layer)}
+                x1={selectedLine.from.y}
+                y1={selectedLine.from.x}
+                x2={selectedLine.to.y}
+                y2={selectedLine.to.x}
+                stroke="#ef4444"
                 strokeWidth={0.02}
                 strokeLinecap="round"
                 strokeLinejoin="round"
-                opacity={line.id === selectedLineId ? 1 : 0.96}
+                opacity={1}
               />
-            ))}
+            ) : null}
             {/* ── Endpoints / Corners ── */}
             {cornerPoints.map((pt, i) => (
               <Circle key={`ep-${i}`} cx={pt.y} cy={pt.x} r={2.5 / viewport.zoom} fill="#3b82f6" opacity={0.8} />

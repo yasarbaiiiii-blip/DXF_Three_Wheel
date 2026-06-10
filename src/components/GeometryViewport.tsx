@@ -20,7 +20,7 @@ import {
   ZoomIn,
   ZoomOut,
 } from "lucide-react-native";
-import Svg, { Circle, G, Line, Polygon, Text as SvgText } from "react-native-svg";
+import Svg, { Circle, G, Line, Path, Polygon, Text as SvgText } from "react-native-svg";
 
 import type { Palette } from "../theme/colors";
 import type { ImportedPlan, MarkingStyle, PlanLine } from "../types/plan";
@@ -40,6 +40,44 @@ interface GeometryViewportProps {
   onRotationChange: (angle: number) => void;
   onDeleteSelectedLine: () => void;
   planNotes: string;
+}
+
+const PATH_SEGMENT_CHUNK_SIZE = 650;
+
+function isRenderableLine(line: PlanLine | null | undefined): line is PlanLine {
+  return Boolean(
+    line &&
+      line.from &&
+      line.to &&
+      Number.isFinite(line.from.x) &&
+      Number.isFinite(line.from.y) &&
+      Number.isFinite(line.to.x) &&
+      Number.isFinite(line.to.y)
+  );
+}
+
+function buildSvgPathChunks(lines: PlanLine[]) {
+  const chunks: string[] = [];
+  let current = "";
+  let count = 0;
+
+  for (const line of lines) {
+    if (!isRenderableLine(line)) continue;
+    current += `M${line.from.y} ${line.from.x}L${line.to.y} ${line.to.x}`;
+    count += 1;
+
+    if (count >= PATH_SEGMENT_CHUNK_SIZE) {
+      chunks.push(current);
+      current = "";
+      count = 0;
+    }
+  }
+
+  if (current) {
+    chunks.push(current);
+  }
+
+  return chunks;
 }
 
 export function GeometryViewport({
@@ -76,6 +114,7 @@ export function GeometryViewport({
   const pinchZoomBaseRef = useRef(1);
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
   const touchMovedRef = useRef(false);
+  const safeLines = useMemo(() => lines.filter(isRenderableLine), [lines]);
 
   useEffect(() => {
     rotationRef.current = rotation;
@@ -86,7 +125,7 @@ export function GeometryViewport({
   }, [offset]);
 
   useEffect(() => {
-    if (!importedPlan || surfaceSize.width <= 0 || surfaceSize.height <= 0 || lines.length === 0) {
+    if (!importedPlan || surfaceSize.width <= 0 || surfaceSize.height <= 0 || safeLines.length === 0) {
       if (!importedPlan) {
         setZoom(1);
         setRotateDragMode(false);
@@ -102,7 +141,7 @@ export function GeometryViewport({
     let maxX = Number.NEGATIVE_INFINITY;
     let maxY = Number.NEGATIVE_INFINITY;
 
-    for (const line of lines) {
+    for (const line of safeLines) {
       minX = Math.min(minX, line.from.x, line.to.x);
       minY = Math.min(minY, line.from.y, line.to.y);
       maxX = Math.max(maxX, line.from.x, line.to.x);
@@ -131,11 +170,20 @@ export function GeometryViewport({
       x: surfaceSize.width / 2 - centerX * newZoom,
       y: surfaceSize.height / 2 + centerY * newZoom,
     });
-  }, [importedPlan, surfaceSize, lines.length]);
+  }, [importedPlan, surfaceSize, safeLines]);
 
   const selectedLine = useMemo(
-    () => lines.find((line) => line.id === selectedLineId) ?? null,
-    [lines, selectedLineId]
+    () => safeLines.find((line) => line.id === selectedLineId) ?? null,
+    [safeLines, selectedLineId]
+  );
+
+  const pathChunksByLayer = useMemo(
+    () => ({
+      boundary: buildSvgPathChunks(safeLines.filter((line) => line.layer === "boundary" && line.id !== selectedLineId)),
+      marking: buildSvgPathChunks(safeLines.filter((line) => line.layer === "marking" && line.id !== selectedLineId)),
+      center: buildSvgPathChunks(safeLines.filter((line) => line.layer === "center" && line.id !== selectedLineId)),
+    }),
+    [safeLines, selectedLineId]
   );
 
   const planTransform = useMemo(
@@ -283,7 +331,7 @@ export function GeometryViewport({
     if (
       dragMode ||
       rotateDragMode ||
-      lines.length === 0 ||
+      safeLines.length === 0 ||
       !surfaceSize.width ||
       !surfaceSize.height
     ) {
@@ -309,7 +357,7 @@ export function GeometryViewport({
       offset,
       surfaceSize
     );
-    const nearest = findNearestLine(planPoint.x, planPoint.y, lines);
+    const nearest = findNearestLine(planPoint.x, planPoint.y, safeLines);
     const hitThreshold = Math.max(0.8, 18 / (viewportPoint.scale * zoom));
 
     if (nearest && nearest.distance <= hitThreshold) {
@@ -356,47 +404,51 @@ export function GeometryViewport({
                   preserveAspectRatio="xMidYMid meet"
                 >
                   <G transform={planTransform}>
-                    {lines.map((line) => {
-                      const isSelected = line.id === selectedLineId;
-                      const strokeColor = isSelected
-                        ? palette.emerald
-                        : line.layer === "center"
-                          ? palette.amber
-                          : line.layer === "boundary"
-                            ? palette.foreground
-                            : palette.mutedForeground;
-
-                      return (
-                        <React.Fragment key={line.id}>
-                          <Line
-                            x1={line.from.y} // East (World Y)
-                            y1={line.from.x} // North (World X)
-                            x2={line.to.y}   // East (World Y)
-                            y2={line.to.x}   // North (World X)
-                            stroke={strokeColor}
-                            strokeWidth={isSelected ? 0.85 : 0.45}
-                            strokeDasharray={dashPattern(markingStyle)}
-                            strokeLinecap="round"
-                          />
-                          {isSelected ? (
-                            <>
-                              <Circle
-                                cx={line.from.y}
-                                cy={line.from.x}
-                                r="1.2"
-                                fill={palette.emerald}
-                              />
-                              <Circle
-                                cx={line.to.y}
-                                cy={line.to.x}
-                                r="1.2"
-                                fill={palette.emerald}
-                              />
-                            </>
-                          ) : null}
-                        </React.Fragment>
-                      );
-                    })}
+                    {(["boundary", "marking", "center"] as const).flatMap((layer) =>
+                      pathChunksByLayer[layer].map((d, index) => (
+                        <Path
+                          key={`${layer}-${index}`}
+                          d={d}
+                          stroke={
+                            layer === "center"
+                              ? palette.amber
+                              : layer === "boundary"
+                                ? palette.foreground
+                                : palette.mutedForeground
+                          }
+                          strokeWidth={0.45}
+                          strokeDasharray={dashPattern(markingStyle)}
+                          strokeLinecap="round"
+                          fill="none"
+                        />
+                      ))
+                    )}
+                    {selectedLine ? (
+                      <>
+                        <Line
+                          x1={selectedLine.from.y}
+                          y1={selectedLine.from.x}
+                          x2={selectedLine.to.y}
+                          y2={selectedLine.to.x}
+                          stroke={palette.emerald}
+                          strokeWidth={0.85}
+                          strokeDasharray={dashPattern(markingStyle)}
+                          strokeLinecap="round"
+                        />
+                        <Circle
+                          cx={selectedLine.from.y}
+                          cy={selectedLine.from.x}
+                          r="1.2"
+                          fill={palette.emerald}
+                        />
+                        <Circle
+                          cx={selectedLine.to.y}
+                          cy={selectedLine.to.x}
+                          r="1.2"
+                          fill={palette.emerald}
+                        />
+                      </>
+                    ) : null}
                   </G>
                 </Svg>
               </View>
@@ -457,7 +509,7 @@ export function GeometryViewport({
                     {importedPlan.fileName}
                   </Text>
                   <Text className="mt-1 text-xs" style={{ color: palette.mutedForeground }}>
-                    {lines.length} points imported
+                    {safeLines.length} points imported
                   </Text>
                 </View>
                 <View className="items-end" style={{ gap: 10 }}>
