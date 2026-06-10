@@ -222,7 +222,6 @@ export default function App() {
 
   const [autoOrigin, setAutoOrigin] = useState(false);
   const [originShift, setOriginShift] = useState<{ offsetN: number; offsetE: number } | null>(null);
-  const [frozenRoverPos, setFrozenRoverPos] = useState<{ n: number; e: number } | null>(null);
 
   useEffect(() => {
     if (autoOrigin) {
@@ -298,17 +297,13 @@ export default function App() {
     if (telemetrySnapshot) {
       const currentState = telemetrySnapshot.mission_state;
       if (prevMissionState === "running" && (currentState === "idle" || currentState === "completed")) {
-        const lastLine = displayedLines[displayedLines.length - 1];
-        if (lastLine) {
-          setFrozenRoverPos({ n: lastLine.to.x, e: lastLine.to.y });
-        }
         setTimeout(() => {
           Alert.alert("Mission Completed", "The rover has successfully finished the mission.");
         }, 500);
       }
       setPrevMissionState(currentState ?? null);
     }
-  }, [telemetrySnapshot?.mission_state, prevMissionState, displayedLines]);
+  }, [telemetrySnapshot?.mission_state, prevMissionState]);
 
   useEffect(() => {
     selectedWsRef.current = selectedWs;
@@ -942,7 +937,6 @@ export default function App() {
       return;
     }
 
-    setFrozenRoverPos(null);
     logAction("START_REQUEST", { apiBaseUrl, fileName: importedPlan.fileName, missionRunning, autoOrigin });
     setMissionActionBusy(true);
     try {
@@ -1125,7 +1119,6 @@ export default function App() {
       Alert.alert("No backend", "Connect to a backend before sending commands.");
       return;
     }
-    setFrozenRoverPos(null);
     logAction("ARM_REQUEST", { apiBaseUrl, arm });
     setMissionActionBusy(true);
     try {
@@ -1165,7 +1158,6 @@ export default function App() {
       Alert.alert("No backend", "Connect to a backend before sending commands.");
       return;
     }
-    setFrozenRoverPos(null);
     logAction("SET_MODE_REQUEST", { apiBaseUrl, targetMode });
     setMissionActionBusy(true);
     try {
@@ -1200,7 +1192,6 @@ export default function App() {
       Alert.alert("No backend", "Connect to a backend before sending commands.");
       return;
     }
-    setFrozenRoverPos(null);
     logAction("ESTOP_REQUEST", { apiBaseUrl });
     setMissionActionBusy(true);
     try {
@@ -1443,7 +1434,6 @@ export default function App() {
           <HomeView
             autoOrigin={autoOrigin}
             setAutoOrigin={setAutoOrigin}
-            frozenRoverPos={frozenRoverPos}
             importedPlan={importedPlan}
             lines={displayedLines}
             selectedLineId={selectedLineId}
@@ -1672,7 +1662,6 @@ function TopBar({
 function HomeView({
   autoOrigin,
   setAutoOrigin,
-  frozenRoverPos,
   importedPlan,
   lines,
   selectedLineId,
@@ -1722,7 +1711,6 @@ function HomeView({
 }: {
   autoOrigin: boolean;
   setAutoOrigin: React.Dispatch<React.SetStateAction<boolean>>;
-  frozenRoverPos: { n: number; e: number } | null;
   importedPlan: ImportedPlan | null;
   lines: PlanLine[];
   selectedLineId: string | null;
@@ -1998,8 +1986,8 @@ function HomeView({
                   visibility={layerVisibility}
                   selectedLineId={selectedLineId}
                   onSelectLine={onSelectLine}
-                  roverPosN={frozenRoverPos ? frozenRoverPos.n : (telemetrySnapshot?.pos_n ?? null)}
-                  roverPosE={frozenRoverPos ? frozenRoverPos.e : (telemetrySnapshot?.pos_e ?? null)}
+                  roverPosN={telemetrySnapshot?.pos_n ?? null}
+                  roverPosE={telemetrySnapshot?.pos_e ?? null}
                   roverHeadingDeg={telemetrySnapshot?.heading_ned_deg ?? null}
                 />
               </View>
@@ -4257,7 +4245,6 @@ function FieldsPage({
   lines,
   setLines,
   telemetrySnapshot,
-  frozenRoverPos,
   selectedLineId,
   layerVisibility,
   backendPaths,
@@ -4273,7 +4260,6 @@ function FieldsPage({
   lines: PlanLine[];
   setLines: React.Dispatch<React.SetStateAction<PlanLine[]>>;
   telemetrySnapshot: TelemetrySnapshot | null;
-  frozenRoverPos: { n: number; e: number } | null;
   selectedLineId: string | null;
   layerVisibility: LayerVisibility;
   backendPaths: any[];
@@ -4444,8 +4430,8 @@ function FieldsPage({
               visibility={layerVisibility}
               selectedLineId={selectedLineId}
               onSelectLine={onSelectLine}
-              roverPosN={frozenRoverPos ? frozenRoverPos.n : (telemetrySnapshot?.pos_n ?? null)}
-              roverPosE={frozenRoverPos ? frozenRoverPos.e : (telemetrySnapshot?.pos_e ?? null)}
+              roverPosN={telemetrySnapshot?.pos_n ?? null}
+              roverPosE={telemetrySnapshot?.pos_e ?? null}
               roverHeadingDeg={telemetrySnapshot?.heading_ned_deg ?? null}
               selectedPoints={refPoints.map(p => ({ x: p.dxf_y, y: p.dxf_x }))}
               onSelectPoint={handleSelectPoint}
