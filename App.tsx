@@ -5323,19 +5323,39 @@ function pickNearestLineId(
   const cy = layoutSize.height / 2;
 
   for (const line of lines) {
-    let from = toScreenPoint(line.from, viewport);
-    let to = toScreenPoint(line.to, viewport);
+    if (line.entity && line.entity.preview_points && line.entity.preview_points.length > 1) {
+      const pts = line.entity.preview_points;
+      for (let i = 0; i < pts.length - 1; i++) {
+        let from = toScreenPoint({ x: pts[i].north, y: pts[i].east }, viewport);
+        let to = toScreenPoint({ x: pts[i + 1].north, y: pts[i + 1].east }, viewport);
 
-    if (rotation !== 0 && layoutSize.width > 0 && layoutSize.height > 0) {
-      from = rotatePoint(from.x, from.y, cx, cy, rotation);
-      to = rotatePoint(to.x, to.y, cx, cy, rotation);
-    }
+        if (rotation !== 0 && layoutSize.width > 0 && layoutSize.height > 0) {
+          from = rotatePoint(from.x, from.y, cx, cy, rotation);
+          to = rotatePoint(to.x, to.y, cx, cy, rotation);
+        }
 
-    const distance = distancePointToSegment(tap.x, tap.y, from.x, from.y, to.x, to.y);
+        const distance = distancePointToSegment(tap.x, tap.y, from.x, from.y, to.x, to.y);
 
-    if (distance < nearestDistance) {
-      nearestDistance = distance;
-      nearestId = line.id;
+        if (distance < nearestDistance) {
+          nearestDistance = distance;
+          nearestId = line.id;
+        }
+      }
+    } else {
+      let from = toScreenPoint(line.from, viewport);
+      let to = toScreenPoint(line.to, viewport);
+
+      if (rotation !== 0 && layoutSize.width > 0 && layoutSize.height > 0) {
+        from = rotatePoint(from.x, from.y, cx, cy, rotation);
+        to = rotatePoint(to.x, to.y, cx, cy, rotation);
+      }
+
+      const distance = distancePointToSegment(tap.x, tap.y, from.x, from.y, to.x, to.y);
+
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        nearestId = line.id;
+      }
     }
   }
 
