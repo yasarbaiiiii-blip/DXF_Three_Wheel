@@ -225,14 +225,16 @@ export default function App() {
 
   useEffect(() => {
     if (autoOrigin) {
+      const posN = telemetrySnapshot?.pos_n;
+      const posE = telemetrySnapshot?.pos_e;
       if (telemetrySnapshot?.mission_state !== "running") {
-        if (telemetrySnapshot?.pos_n != null && telemetrySnapshot?.pos_e != null) {
-          setOriginShift({ offsetN: telemetrySnapshot.pos_n, offsetE: telemetrySnapshot.pos_e });
+        if (posN != null && posE != null) {
+          setOriginShift({ offsetN: posN, offsetE: posE });
         }
       } else {
-        if (telemetrySnapshot?.pos_n != null && telemetrySnapshot?.pos_e != null) {
+        if (posN != null && posE != null) {
           setOriginShift((prev) =>
-            prev === null ? { offsetN: telemetrySnapshot.pos_n, offsetE: telemetrySnapshot.pos_e } : prev
+            prev === null ? { offsetN: posN, offsetE: posE } : prev
           );
         }
       }
@@ -1488,7 +1490,6 @@ export default function App() {
         ) : (
           <SectionScreen
             telemetrySnapshot={telemetrySnapshot}
-            frozenRoverPos={frozenRoverPos}
             title={sectionTitle}
             page={page}
             importedPlan={importedPlan}
@@ -3765,7 +3766,6 @@ function SectionScreen(props: {
   title: string;
   page: Page;
   telemetrySnapshot: TelemetrySnapshot | null;
-  frozenRoverPos: { n: number; e: number } | null;
   importedPlan: ImportedPlan | null;
   lines: PlanLine[];
   setLines: React.Dispatch<React.SetStateAction<PlanLine[]>>;
