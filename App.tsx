@@ -55,7 +55,7 @@ import {
   RotateCw,
   Eye,
   EyeOff,
-  Map,
+  Map as MapIcon,
 } from "lucide-react-native";
 
 import { readImportedPlanFile, normalizePlanLines } from "./src/utils/planImport";
@@ -5982,7 +5982,7 @@ function PlanPreview({
             elevation: 5,
           })}
         >
-          <Map size={20} color="#d97706" />
+          <MapIcon size={20} color="#d97706" />
         </Pressable>
       </View>
     </View>
