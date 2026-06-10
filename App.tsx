@@ -5962,35 +5962,6 @@ function PlanPreview({
         )}
 
 
-        <View style={{ backgroundColor: "rgba(15,23,42,0.85)", borderRadius: 20, borderWidth: 1.2, borderColor: "#64748b", overflow: "hidden", shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 3.84, elevation: 5 }}>
-          <Pressable
-            onPress={() => {
-              userPannedRef.current = true;
-              setViewport(prev => {
-                const next = { ...prev, zoom: prev.zoom * 1.5 };
-                viewportRef.current = next;
-                return next;
-              });
-            }}
-            style={({ pressed }) => ({ width: 40, height: 40, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? "rgba(255,255,255,0.1)" : "transparent", borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.1)" })}
-          >
-            <Text style={{ color: "#e2e8f0", fontSize: 24, fontWeight: "400", lineHeight: 28 }}>+</Text>
-          </Pressable>
-          <Pressable
-            onPress={() => {
-              userPannedRef.current = true;
-              setViewport(prev => {
-                const next = { ...prev, zoom: Math.max(1, prev.zoom / 1.5) };
-                viewportRef.current = next;
-                return next;
-              });
-            }}
-            style={({ pressed }) => ({ width: 40, height: 40, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? "rgba(255,255,255,0.1)" : "transparent" })}
-          >
-            <Text style={{ color: "#e2e8f0", fontSize: 24, fontWeight: "400", lineHeight: 28 }}>-</Text>
-          </Pressable>
-        </View>
-
         {/* Focus Plan Button */}
         <Pressable
           onPress={handleFocusPlan}
