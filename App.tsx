@@ -4767,8 +4767,9 @@ function FieldsPage({
   const [isExtSetting, setIsExtSetting] = useState(false);
 
   const [scaleModalOpen, setScaleModalOpen] = useState(false);
-  const [scaleFactorInput, setScaleFactorInput] = useState("1.5");
+  const [scaleTargetSize, setScaleTargetSize] = useState("");
   const [isScaling, setIsScaling] = useState(false);
+  const [scaleDimension, setScaleDimension] = useState<"width" | "height">("width");
 
   const targetPathForExtensions = selectedPathName || importedPlan?.fileName;
 
@@ -4830,19 +4831,61 @@ function FieldsPage({
     }
   };
 
+  // Compute current plan dimensions from entities (in meters)
+  const currentPlanDims = useMemo(() => {
+    const planLines = lines.filter(l => l.layer !== "extension");
+    if (planLines.length === 0) return { width: 0, height: 0 };
+
+    let minN = Infinity, maxN = -Infinity, minE = Infinity, maxE = -Infinity;
+    planLines.forEach(l => {
+      if (l.entity && l.entity.preview_points && l.entity.preview_points.length > 1) {
+        l.entity.preview_points.forEach(pt => {
+          minN = Math.min(minN, pt.north);
+          maxN = Math.max(maxN, pt.north);
+          minE = Math.min(minE, pt.east);
+          maxE = Math.max(maxE, pt.east);
+        });
+      } else {
+        minN = Math.min(minN, l.from.x, l.to.x);
+        maxN = Math.max(maxN, l.from.x, l.to.x);
+        minE = Math.min(minE, l.from.y, l.to.y);
+        maxE = Math.max(maxE, l.from.y, l.to.y);
+      }
+    });
+    return {
+      width: Math.abs(maxE - minE),
+      height: Math.abs(maxN - minN),
+    };
+  }, [lines]);
+
   const handleScaleDxf = async () => {
     if (!selectedPathName || lines.length === 0 || !apiBaseUrl) return;
-    const factor = parseFloat(scaleFactorInput);
-    if (isNaN(factor) || factor <= 0) {
-      Alert.alert("Invalid Scale", "Please enter a valid positive number.");
+    const targetMeters = parseFloat(scaleTargetSize);
+    if (isNaN(targetMeters) || targetMeters <= 0) {
+      Alert.alert("Invalid Size", "Please enter a valid size in meters.");
       return;
     }
+
+    const currentSize = scaleDimension === "width" ? currentPlanDims.width : currentPlanDims.height;
+    if (currentSize <= 0.001) {
+      Alert.alert("Error", "Current plan size is too small or zero to scale.");
+      return;
+    }
+
+    const factor = targetMeters / currentSize;
     setIsScaling(true);
     try {
-      // Unroll complex entities into flat line segments so we don't lose arcs/circles
+      // Collect ALL geometry from complex entities using their original DXF geometry
+      // The backend returns preview_points as {north, east}
+      // Our PlanLine stores: from.x = north, from.y = east
+      // linesToDxf writes: DXF group 10 = from.x, group 20 = from.y
+      // The backend's DXF parser reads: DXF group 10 → X, group 20 → Y
+      // and outputs preview_points as: north = Y (group 20), east = X (group 10)
+      // So we need: DXF X (group 10) = east, DXF Y (group 20) = north
+      // That means: from.x should be EAST, from.y should be NORTH
+
       const flatLines: PlanLine[] = [];
       lines.forEach(l => {
-        // Skip extension layers so we don't bake them permanently into the new DXF
         if (l.layer === "extension") return;
 
         if (l.entity && l.entity.preview_points && l.entity.preview_points.length > 1) {
@@ -4853,12 +4896,19 @@ function FieldsPage({
               label: l.label,
               layer: l.layer,
               width: l.width,
-              from: { id: 0, x: pts[i].north, y: pts[i].east },
-              to: { id: 0, x: pts[i+1].north, y: pts[i+1].east },
+              // Store as: from.x = east (→ DXF X), from.y = north (→ DXF Y)
+              from: { id: 0, x: pts[i].east, y: pts[i].north },
+              to: { id: 0, x: pts[i+1].east, y: pts[i+1].north },
             });
           }
         } else {
-          flatLines.push(l);
+          // Existing lines already have from.x = north, from.y = east
+          // Swap to: from.x = east, from.y = north for correct DXF output
+          flatLines.push({
+            ...l,
+            from: { ...l.from, x: l.from.y, y: l.from.x },
+            to: { ...l.to, x: l.to.y, y: l.to.x },
+          });
         }
       });
 
@@ -4868,6 +4918,7 @@ function FieldsPage({
         return;
       }
 
+      // Compute center in DXF coordinate space (x=east, y=north)
       let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
       flatLines.forEach(l => {
         minX = Math.min(minX, l.from.x, l.to.x);
@@ -4885,7 +4936,7 @@ function FieldsPage({
       }));
 
       const baseName = selectedPathName.replace(/\.dxf$/i, "");
-      const newName = `${baseName}_${factor}x.dxf`;
+      const newName = `${baseName}_${targetMeters}m.dxf`;
 
       const fileContent = linesToDxf(scaledLines, newName);
 
@@ -4907,7 +4958,7 @@ function FieldsPage({
       });
 
       if (res.ok) {
-        Alert.alert("Success", "Scaled plan generated and uploaded successfully.");
+        Alert.alert("Success", `Plan scaled to ${targetMeters}m and uploaded.`);
         setScaleModalOpen(false);
         onRefreshPaths();
         onSelectPath(newName);
@@ -5246,54 +5297,106 @@ function FieldsPage({
         {/* --- SCALE MODAL --- */}
         <Modal visible={scaleModalOpen} transparent={true} animationType="fade">
           <View style={{ flex: 1, backgroundColor: "rgba(15,23,42,0.6)", justifyContent: "center", alignItems: "center" }}>
-            <View style={{ width: 340, backgroundColor: "#fff", borderRadius: 16, padding: 20, elevation: 10 }}>
-              <Text style={{ color: "#0f172a", fontSize: 18, fontWeight: "900", marginBottom: 12 }}>
+            <View style={{ width: 380, backgroundColor: "#fff", borderRadius: 16, padding: 20, elevation: 10 }}>
+              <Text style={{ color: "#0f172a", fontSize: 18, fontWeight: "900", marginBottom: 16 }}>
                 Scale Plan
               </Text>
-              <View style={{ marginBottom: 12 }}>
-                <Text style={{ color: "#64748b", fontSize: 12, fontWeight: "700", marginBottom: 4 }}>File Name</Text>
-                <TextInput
-                  style={{ backgroundColor: "#f8fafc", borderWidth: 1, borderColor: "#e2e8f0", borderRadius: 8, padding: 10, color: "#64748b", fontWeight: "600" }}
-                  value={selectedPathName || ""}
-                  editable={false}
-                />
-              </View>
-              <View style={{ marginBottom: 20 }}>
-                <Text style={{ color: "#64748b", fontSize: 12, fontWeight: "700", marginBottom: 4 }}>Scale Multiplier</Text>
-                <TextInput
-                  style={{ backgroundColor: "#fff", borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, padding: 10, color: "#0f172a" }}
-                  value={scaleFactorInput}
-                  onChangeText={setScaleFactorInput}
-                  keyboardType="numeric"
-                  placeholder="e.g. 1.5 for 150%"
-                />
-                <Text style={{ color: "#94a3b8", fontSize: 11, marginTop: 4 }}>
-                  Generates a perfectly scaled DXF file and loads it immediately.
+
+              {/* Current Dimensions */}
+              <View style={{ backgroundColor: "#f0f4f8", borderRadius: 10, padding: 12, marginBottom: 16 }}>
+                <Text style={{ color: "#64748b", fontSize: 11, fontWeight: "800", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 6 }}>
+                  Current Plan Size
                 </Text>
+                <View style={{ flexDirection: "row", gap: 16 }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: "#94a3b8", fontSize: 10, fontWeight: "700" }}>Width</Text>
+                    <Text style={{ color: "#0f172a", fontSize: 16, fontWeight: "900" }}>
+                      {currentPlanDims.width.toFixed(2)} m
+                    </Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: "#94a3b8", fontSize: 10, fontWeight: "700" }}>Height</Text>
+                    <Text style={{ color: "#0f172a", fontSize: 16, fontWeight: "900" }}>
+                      {currentPlanDims.height.toFixed(2)} m
+                    </Text>
+                  </View>
+                </View>
               </View>
 
-              <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 12 }}>
+              {/* Dimension Picker */}
+              <View style={{ marginBottom: 12 }}>
+                <Text style={{ color: "#64748b", fontSize: 12, fontWeight: "700", marginBottom: 6 }}>Scale By</Text>
+                <View style={{ flexDirection: "row", gap: 8 }}>
+                  <Pressable
+                    onPress={() => setScaleDimension("width")}
+                    style={{
+                      flex: 1, height: 40, borderRadius: 8, alignItems: "center", justifyContent: "center",
+                      backgroundColor: scaleDimension === "width" ? "#0f172a" : "#f0f4f8",
+                      borderWidth: 1, borderColor: scaleDimension === "width" ? "#0f172a" : "#d8e1eb",
+                    }}
+                  >
+                    <Text style={{ color: scaleDimension === "width" ? "#fff" : "#64748b", fontSize: 13, fontWeight: "800" }}>Width</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => setScaleDimension("height")}
+                    style={{
+                      flex: 1, height: 40, borderRadius: 8, alignItems: "center", justifyContent: "center",
+                      backgroundColor: scaleDimension === "height" ? "#0f172a" : "#f0f4f8",
+                      borderWidth: 1, borderColor: scaleDimension === "height" ? "#0f172a" : "#d8e1eb",
+                    }}
+                  >
+                    <Text style={{ color: scaleDimension === "height" ? "#fff" : "#64748b", fontSize: 13, fontWeight: "800" }}>Height</Text>
+                  </Pressable>
+                </View>
+              </View>
+
+              {/* Target Size */}
+              <View style={{ marginBottom: 12 }}>
+                <Text style={{ color: "#64748b", fontSize: 12, fontWeight: "700", marginBottom: 4 }}>
+                  Target {scaleDimension === "width" ? "Width" : "Height"} (meters)
+                </Text>
+                <TextInput
+                  style={{ backgroundColor: "#fff", borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, padding: 10, color: "#0f172a", fontSize: 16, fontWeight: "700" }}
+                  value={scaleTargetSize}
+                  onChangeText={setScaleTargetSize}
+                  keyboardType="numeric"
+                  placeholder={`e.g. ${((scaleDimension === "width" ? currentPlanDims.width : currentPlanDims.height) * 2).toFixed(1)}`}
+                />
+              </View>
+
+              {/* Scale Factor Preview */}
+              {scaleTargetSize.trim() !== "" && !isNaN(parseFloat(scaleTargetSize)) && (
+                <View style={{ backgroundColor: "#f0fdf4", borderRadius: 8, padding: 10, marginBottom: 16, borderWidth: 1, borderColor: "#bbf7d0" }}>
+                  <Text style={{ color: "#166534", fontSize: 12, fontWeight: "700" }}>
+                    Scale Factor: {(parseFloat(scaleTargetSize) / (scaleDimension === "width" ? currentPlanDims.width : currentPlanDims.height)).toFixed(3)}x
+                  </Text>
+                  <Text style={{ color: "#166534", fontSize: 11, marginTop: 2 }}>
+                    Result: {parseFloat(scaleTargetSize).toFixed(2)}m × {(
+                      (scaleDimension === "width"
+                        ? currentPlanDims.height * (parseFloat(scaleTargetSize) / currentPlanDims.width)
+                        : currentPlanDims.width * (parseFloat(scaleTargetSize) / currentPlanDims.height)
+                      )
+                    ).toFixed(2)}m
+                  </Text>
+                </View>
+              )}
+
+              <View style={{ flexDirection: "row", gap: 10 }}>
                 <Pressable
                   onPress={() => setScaleModalOpen(false)}
-                  style={{ paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8 }}
+                  style={{ flex: 1, height: 44, backgroundColor: "#e2e8f0", borderRadius: 10, alignItems: "center", justifyContent: "center" }}
                 >
-                  <Text style={{ color: "#64748b", fontWeight: "700" }}>Cancel</Text>
+                  <Text style={{ color: "#475569", fontSize: 14, fontWeight: "700" }}>Cancel</Text>
                 </Pressable>
                 <Pressable
                   onPress={handleScaleDxf}
                   disabled={isScaling}
-                  style={{
-                    backgroundColor: isScaling ? "#9ca3af" : "#eab308",
-                    paddingHorizontal: 20,
-                    paddingVertical: 10,
-                    borderRadius: 8,
-                    alignItems: "center"
-                  }}
+                  style={{ flex: 1, height: 44, backgroundColor: isScaling ? "#9ca3af" : "#eab308", borderRadius: 10, alignItems: "center", justifyContent: "center" }}
                 >
                   {isScaling ? (
                     <ActivityIndicator size="small" color="#fff" />
                   ) : (
-                    <Text style={{ color: "#fff", fontWeight: "800" }}>Generate & Scale</Text>
+                    <Text style={{ color: "#fff", fontSize: 14, fontWeight: "800" }}>Scale & Generate</Text>
                   )}
                 </Pressable>
               </View>
