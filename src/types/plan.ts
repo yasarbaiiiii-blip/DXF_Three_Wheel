@@ -1,4 +1,4 @@
-export type PlanLayer = "boundary" | "marking" | "center";
+export type PlanLayer = "boundary" | "marking" | "center" | "transit" | "extension";
 export type SidebarPanel = "import" | "details" | "mission" | "view" | "positioning" | "settings";
 export type MarkingStyle = "straight" | "dotted" | "dashed";
 
@@ -33,6 +33,13 @@ export interface DxfEntity {
   length_m: number;
   geometry: any;
   preview_points: DxfPoint[];
+  extension_preview?: {
+    enabled: boolean;
+    pre_length_m: number;
+    aft_length_m: number;
+    pre_points: DxfPoint[];
+    aft_points: DxfPoint[];
+  };
 }
 
 export interface DxfEntitiesResponse {
@@ -45,6 +52,17 @@ export interface DxfEntitiesResponse {
     east_min: number;
     east_max: number;
   };
+  extension_config?: {
+    enabled: boolean;
+    pre_extension_m: number;
+    aft_extension_m: number;
+  };
+  transit_preview?: {
+    from_entity_id: string;
+    to_entity_id: string;
+    length_m: number;
+    points: DxfPoint[];
+  }[];
   entities: DxfEntity[];
 }
 
@@ -59,4 +77,6 @@ export interface LayerVisibility {
   boundary: boolean;
   marking: boolean;
   center: boolean;
+  transit: boolean;
+  extension: boolean;
 }

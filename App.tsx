@@ -34,6 +34,7 @@ import { io, Socket } from "socket.io-client";
 import {
   Battery,
   CircleHelp,
+  LayoutTemplate,
   ListChecks,
   File,
   FilePenLine,
@@ -61,6 +62,7 @@ import {
 
 import { readImportedPlanFile, normalizePlanLines } from "./src/utils/planImport";
 import type { ImportedPlan, PlanLine } from "./src/types/plan";
+import { generateTemplateLines, ShapeType } from "./src/utils/shapeTemplates";
 
 type Page =
   | "connection"
@@ -74,7 +76,7 @@ type Page =
   | "howto"
   | "about";
 
-type LayerVisibility = { boundary: boolean; marking: boolean; center: boolean };
+type LayerVisibility = { boundary: boolean; marking: boolean; center: boolean; transit: boolean; extension: boolean; };
 const MAX_PREVIEW_CORNERS = 450;
 const PATH_SEGMENT_CHUNK_SIZE = 650;
 
@@ -223,6 +225,7 @@ const DEFAULT_ROVER_BACKEND = "http://192.168.1.102:5001";
 
 const MENU_ITEMS: Array<{ key: Page; label: string; icon: React.ReactNode }> = [
   { key: "fields", label: "Fields", icon: <File size={22} color="#fff" /> },
+  { key: "templates", label: "Templates", icon: <LayoutTemplate size={22} color="#fff" /> },
   { key: "swozi", label: "Swozi", icon: <Tractor size={22} color="#fff" /> },
   { key: "status", label: "Status", icon: <Waves size={22} color="#fff" /> },
   { key: "positioning", label: "Positioning", icon: <LocateFixed size={22} color="#fff" /> },
@@ -257,6 +260,8 @@ export default function App() {
     boundary: true,
     marking: true,
     center: true,
+    transit: true,
+    extension: true,
   });
   const [systemHealth, setSystemHealth] = useState<SystemHealth | null>(null);
   const [telemetrySnapshot, setTelemetrySnapshot] = useState<TelemetrySnapshot | null>(null);
@@ -440,7 +445,7 @@ export default function App() {
     setLines([]);
     setSelectedLineId(null);
     setImportedPlan(null);
-    setLayerVisibility({ boundary: true, marking: true, center: true });
+    setLayerVisibility({ boundary: true, marking: true, center: true, transit: true, extension: true });
   };
 
   const connectSelectedWebsocket = async () => {
@@ -803,10 +808,10 @@ export default function App() {
             
             entities.forEach((ent: any, i: number) => {
               const layerUpper = String(ent.layer || "").toUpperCase();
-              let layerName: "boundary" | "marking" | "center" = "center";
+              let layerName: PlanLine["layer"] = "marking"; // default to marking
               if (layerUpper.includes("BOUND")) layerName = "boundary";
               else if (layerUpper.includes("CENTER")) layerName = "center";
-              else if (layerUpper.includes("MARK") || ent.is_mark) layerName = "marking";
+              else if (layerUpper.includes("MARK")) layerName = "marking";
 
               // Use the first and last preview_points for 'from' and 'to'
               const pts = ent.preview_points || [];
@@ -823,7 +828,52 @@ export default function App() {
                 is_mark: ent.is_mark,
                 entity: ent,
               });
+
+              // Add extensions if enabled
+              if (ent.extension_preview && ent.extension_preview.enabled) {
+                if (ent.extension_preview.pre_points && ent.extension_preview.pre_points.length >= 2) {
+                  const pre = ent.extension_preview.pre_points;
+                  generatedLines.push({
+                    id: `ext-pre-${ent.entity_id || i}`,
+                    label: `Pre-extension ${ent.entity_id || i}`,
+                    layer: "extension",
+                    from: { id: i * 100 + 1, x: pre[0].north, y: pre[0].east },
+                    to: { id: i * 100 + 2, x: pre[pre.length - 1].north, y: pre[pre.length - 1].east },
+                    width: 0.1,
+                    entity: { ...ent, preview_points: pre }
+                  });
+                }
+                if (ent.extension_preview.aft_points && ent.extension_preview.aft_points.length >= 2) {
+                  const aft = ent.extension_preview.aft_points;
+                  generatedLines.push({
+                    id: `ext-aft-${ent.entity_id || i}`,
+                    label: `Aft-extension ${ent.entity_id || i}`,
+                    layer: "extension",
+                    from: { id: i * 100 + 3, x: aft[0].north, y: aft[0].east },
+                    to: { id: i * 100 + 4, x: aft[aft.length - 1].north, y: aft[aft.length - 1].east },
+                    width: 0.1,
+                    entity: { ...ent, preview_points: aft }
+                  });
+                }
+              }
             });
+
+            // Add transits
+            if (body.transit_preview && Array.isArray(body.transit_preview)) {
+              body.transit_preview.forEach((transit: any, i: number) => {
+                const pts = transit.points || [];
+                if (pts.length < 2) return;
+                generatedLines.push({
+                  id: `transit-${i}`,
+                  label: `Transit ${transit.from_entity_id || "?"} to ${transit.to_entity_id || "?"}`,
+                  layer: "transit",
+                  from: { id: i * 1000 + 1, x: pts[0].north, y: pts[0].east },
+                  to: { id: i * 1000 + 2, x: pts[pts.length - 1].north, y: pts[pts.length - 1].east },
+                  width: 0.1,
+                  entity: { entity_id: `transit-${i}`, entity_type: "TRANSIT", layer: "TRANSIT", color: 0, is_mark: false, length_m: transit.length_m || 0, geometry: {}, preview_points: pts }
+                });
+              });
+            }
             if (generatedLines.length === 0) {
               throw new Error("Preview entities did not contain valid geometries");
             }
@@ -1705,6 +1755,12 @@ export default function App() {
             rtkRunning={rtkRunning}
             rtkHealthy={rtkHealthy}
             onParsePlan={parseDxfPlan}
+            apiBaseUrl={apiBaseUrl}
+            selectedPathName={selectedPathName}
+            onRefreshPaths={() => {
+              const target = selectedPathName || importedPlan?.fileName;
+              if (target) previewSelectedPath(target);
+            }}
           />
         ) : (
           <SectionScreen
@@ -1932,6 +1988,9 @@ function HomeView({
   rtkHealthy,
   onParsePlan,
   setLines,
+  apiBaseUrl,
+  selectedPathName,
+  onRefreshPaths,
 }: {
   autoOrigin: boolean;
   setAutoOrigin: React.Dispatch<React.SetStateAction<boolean>>;
@@ -1983,6 +2042,9 @@ function HomeView({
   rtkRunning: boolean;
   rtkHealthy: boolean;
   onParsePlan: () => Promise<void>;
+  apiBaseUrl?: string;
+  selectedPathName?: string | null;
+  onRefreshPaths?: () => void;
 }) {
   const selectedLine = lines.find((line) => line.id === selectedLineId) ?? null;
   const hasPlan = lines.length > 0;
@@ -1992,10 +2054,60 @@ function HomeView({
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteScope, setDeleteScope] = useState<"line" | "plan" | null>(null);
   const [rightPanelMode, setRightPanelMode] = useState<"system" | "details">("system");
+  const [isSprayingSet, setIsSprayingSet] = useState(false);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [exportFileName, setExportFileName] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [showPointsModal, setShowPointsModal] = useState(false);
+
+  const availableLayers = useMemo(() => {
+    return {
+      boundary: lines.some((l) => l.layer === "boundary"),
+      marking: lines.some((l) => l.layer === "marking"),
+      center: lines.some((l) => l.layer === "center"),
+      transit: lines.some((l) => l.layer === "transit"),
+      extension: lines.some((l) => l.layer === "extension"),
+    };
+  }, [lines]);
+
+  const handleSetSpray = async () => {
+    const targetPath = selectedPathName || importedPlan?.fileName;
+    if (!apiBaseUrl || !targetPath) {
+      Alert.alert("Error", "No path selected to save overrides to.");
+      return;
+    }
+    setIsSprayingSet(true);
+    try {
+      const overridesMap = new Map<string, boolean>();
+      lines
+        .filter(l => l.entity && l.entity.entity_id && l.layer !== "extension" && l.layer !== "transit")
+        .forEach(l => {
+          overridesMap.set(l.entity!.entity_id, !!l.entity!.is_mark);
+        });
+
+      const overrides = Array.from(overridesMap.entries()).map(([entity_id, is_mark]) => ({
+        entity_id,
+        is_mark
+      }));
+
+      const res = await fetch(`${apiBaseUrl}/api/path/${targetPath}/entities`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ overrides }),
+      });
+      if (res.ok) {
+        Alert.alert("Success", "Spray overrides saved.");
+      } else {
+        const errText = await res.text();
+        Alert.alert("Error", errText || "Failed to save spray overrides.");
+      }
+    } catch (err: any) {
+      Alert.alert("Error", err.message || "Network error.");
+    } finally {
+      setIsSprayingSet(false);
+    }
+  };
+
   const pulse = (label: string, ok: boolean | undefined | null) => ({
     label,
     value: ok === undefined || ok === null ? "Unknown" : ok ? "OK" : "Alert",
@@ -2701,9 +2813,21 @@ function HomeView({
                       Swipe right to inspect the selected line in a focused side panel.
                     </Text>
 
+                    <View style={drawerStyles.section}>
+                      <SectionTitle title="Visible layers" />
+                      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                        {availableLayers.boundary && <CompactLayerToggle label="Boundary" value={layerVisibility.boundary} onToggle={() => setLayerVisibility((prev) => ({ ...prev, boundary: !prev.boundary }))} />}
+                        {availableLayers.marking && <CompactLayerToggle label="Marking" value={layerVisibility.marking} onToggle={() => setLayerVisibility((prev) => ({ ...prev, marking: !prev.marking }))} />}
+                        {availableLayers.center && <CompactLayerToggle label="Center" value={layerVisibility.center} onToggle={() => setLayerVisibility((prev) => ({ ...prev, center: !prev.center }))} />}
+                        {availableLayers.transit && <CompactLayerToggle label="Transit" value={layerVisibility.transit} onToggle={() => setLayerVisibility((prev) => ({ ...prev, transit: !prev.transit }))} />}
+                        {availableLayers.extension && <CompactLayerToggle label="Extension" value={layerVisibility.extension} onToggle={() => setLayerVisibility((prev) => ({ ...prev, extension: !prev.extension }))} />}
+                      </View>
+                    </View>
+
                     {selectedLine ? (
                       <>
                         {/* TOP SECTION: Line Details */}
+                        {/* TOP SECTION: Geometry Details with Points */}
                         <View style={drawerStyles.section}>
                           <SectionTitle title="Geometry Details" />
                           <View style={{ borderRadius: 16, padding: 12, backgroundColor: "#111827", borderWidth: 1, borderColor: "rgba(148,163,184,0.16)", gap: 10 }}>
@@ -2713,20 +2837,12 @@ function HomeView({
                             <ListRow left="Length" right={`${selectedLine.entity?.length_m != null ? selectedLine.entity.length_m.toFixed(2) : lineLength(selectedLine).toFixed(2)} m`} tone="#fff" />
                             <ListRow left="From" right={`(${selectedLine.from.x.toFixed(2)}, ${selectedLine.from.y.toFixed(2)})`} tone="#fff" />
                             <ListRow left="To" right={`(${selectedLine.to.x.toFixed(2)}, ${selectedLine.to.y.toFixed(2)})`} tone="#fff" />
-                          </View>
-                        </View>
 
-                        {/* BOTTOM SECTION: Point Data & Marking */}
-                        <View style={[drawerStyles.section, { marginTop: 16 }]}>
-                          <SectionTitle title="Entity Details" />
-                          <View style={{ borderRadius: 16, padding: 16, backgroundColor: "#1e293b", borderWidth: 1, borderColor: "rgba(148,163,184,0.16)" }}>
-                            
-                            {/* Points List */}
-                            <View style={{ marginBottom: 16 }}>
+                            <View style={{ marginTop: 6, paddingTop: 10, borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.05)" }}>
                               <Text style={{ color: "#94a3b8", fontSize: 10, fontWeight: "700", textTransform: "uppercase", marginBottom: 8 }}>
                                 Available Points ({selectedLine.entity?.preview_points?.length || 2})
                               </Text>
-                              <View style={{ maxHeight: 120, backgroundColor: "#0f172a", borderRadius: 8, padding: 8, borderWidth: 1, borderColor: "rgba(148,163,184,0.1)" }}>
+                              <View style={{ maxHeight: 100, backgroundColor: "#0f172a", borderRadius: 8, padding: 8, borderWidth: 1, borderColor: "rgba(148,163,184,0.1)" }}>
                                 <ScrollView nestedScrollEnabled={true}>
                                   {(selectedLine.entity?.preview_points || [
                                     { north: selectedLine.from.x, east: selectedLine.from.y },
@@ -2740,69 +2856,8 @@ function HomeView({
                                 </ScrollView>
                               </View>
                             </View>
-
-                            {/* Mark checkbox */}
-                            {selectedLine.entity != null && (
-                              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.05)", paddingTop: 16 }}>
-                                <View style={{ flex: 1 }}>
-                                  <Text style={{ color: "#fff", fontSize: 14, fontWeight: "700" }}>Mark Line</Text>
-                                  <Text style={{ color: "#94a3b8", fontSize: 11, marginTop: 2 }}>Include this entity in the spray plan</Text>
-                                </View>
-                                <Switch
-                                  value={selectedLine.entity.is_mark}
-                                  onValueChange={(val) => {
-                                    selectedLine.entity!.is_mark = val;
-                                    // Trigger a re-render
-                                    setAutoOrigin((prev) => prev);
-                                  }}
-                                  trackColor={{ false: "#334155", true: "#0d9488" }}
-                                  thumbColor={"#fff"}
-                                />
-                              </View>
-                            )}
                           </View>
                         </View>
-
-                        <View style={drawerStyles.section}>
-                          <SectionTitle title="Visible layers" />
-                          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-                            <CompactLayerToggle
-                              label="Boundary"
-                              value={layerVisibility.boundary}
-                              onToggle={() => setLayerVisibility((prev) => ({ ...prev, boundary: !prev.boundary }))}
-                            />
-                            <CompactLayerToggle
-                              label="Marking"
-                              value={layerVisibility.marking}
-                              onToggle={() => setLayerVisibility((prev) => ({ ...prev, marking: !prev.marking }))}
-                            />
-                            <CompactLayerToggle
-                              label="Center"
-                              value={layerVisibility.center}
-                              onToggle={() => setLayerVisibility((prev) => ({ ...prev, center: !prev.center }))}
-                            />
-                          </View>
-                        </View>
-
-                        {importedPlan?.fileType === "dxf" && (
-                          <View style={{ marginTop: 24, paddingBottom: 10 }}>
-                            <Pressable
-                              onPress={onParsePlan}
-                              disabled={missionActionBusy}
-                              style={{
-                                backgroundColor: missionActionBusy ? "#334155" : "#0ea5e9",
-                                paddingVertical: 14,
-                                borderRadius: 12,
-                                alignItems: "center",
-                                justifyContent: "center"
-                              }}
-                            >
-                              <Text style={{ color: "#fff", fontSize: 15, fontWeight: "800" }}>
-                                {missionActionBusy ? "Parsing..." : "Parse/Generate Plan"}
-                              </Text>
-                            </Pressable>
-                          </View>
-                        )}
                       </>
                     ) : (
                       <View style={[drawerStyles.section, { marginTop: 18 }]}>
@@ -2810,57 +2865,80 @@ function HomeView({
                       </View>
                     )}
 
-                    {lines.length > 0 && (
-                      <View style={[drawerStyles.section, { marginTop: 24 }]}>
-                        <SectionTitle title="Line Viewer" />
-                        <View style={{ borderRadius: 16, overflow: "hidden", backgroundColor: "#111827", borderWidth: 1, borderColor: "rgba(148,163,184,0.16)" }}>
-                          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: 12, borderBottomWidth: 1, borderBottomColor: "rgba(148,163,184,0.16)" }}>
-                            <Text style={{ color: "#fff", fontSize: 13, fontWeight: "600" }}>Total Lines: {lines.length}</Text>
+                    {/* ALWAYS VISIBLE AT BOTTOM: Line Viewer & Set Spray */}
+                    {importedPlan?.fileType === "dxf" && (
+                      <View style={[drawerStyles.section, { marginTop: 24, paddingBottom: 20 }]}>
+                        <SectionTitle title="Line Viewer (Spray Overrides)" />
+                        <View style={{ borderRadius: 16, padding: 12, backgroundColor: "#1e293b", borderWidth: 1, borderColor: "rgba(148,163,184,0.16)", maxHeight: 250 }}>
+                          
+                          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.05)", marginBottom: 4 }}>
+                            <Text style={{ color: "#fff", fontSize: 12, fontWeight: "600" }}>Total: {lines.filter(l => l.entity && l.entity.entity_id && l.layer !== "extension" && l.layer !== "transit").length}</Text>
                             <Pressable 
                               onPress={() => {
-                                const anyUnmarked = lines.some(l => !l.is_mark);
-                                setLines(prev => prev.map(l => ({ ...l, is_mark: anyUnmarked })));
+                                const entityLines = lines.filter(l => l.entity && l.entity.entity_id && l.layer !== "extension" && l.layer !== "transit");
+                                const anyUnmarked = entityLines.some(l => !l.entity!.is_mark);
+                                setLines(prev => prev.map(l => {
+                                  if (l.entity && l.entity.entity_id && l.layer !== "extension" && l.layer !== "transit") {
+                                    return { ...l, entity: { ...l.entity, is_mark: anyUnmarked } };
+                                  }
+                                  return l;
+                                }));
                               }}
                               style={{ backgroundColor: "rgba(255,255,255,0.08)", paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 }}
                             >
-                              <Text style={{ color: "#38bdf8", fontSize: 11, fontWeight: "800", textTransform: "uppercase" }}>Toggle All</Text>
+                              <Text style={{ color: "#38bdf8", fontSize: 10, fontWeight: "800", textTransform: "uppercase" }}>Toggle All</Text>
                             </Pressable>
                           </View>
-                          {lines.map((l, index) => (
-                            <Pressable
-                              key={l.id}
-                              onPress={() => onSelectLine(l.id)}
-                              style={{
-                                flexDirection: "row",
-                                alignItems: "center",
-                                padding: 12,
-                                borderBottomWidth: index === lines.length - 1 ? 0 : 1,
-                                borderBottomColor: "rgba(148,163,184,0.08)",
-                                backgroundColor: selectedLineId === l.id ? "rgba(56, 189, 248, 0.15)" : "transparent"
-                              }}
-                            >
-                              <View style={{ flex: 1 }}>
-                                <Text style={{ color: "#fff", fontSize: 13, fontWeight: "600" }}>Line {index + 1}</Text>
-                                <Text style={{ color: "#94a3b8", fontSize: 11, marginTop: 2, textTransform: "capitalize" }}>{l.layer} Layer</Text>
+
+                          <ScrollView nestedScrollEnabled={true}>
+                            {lines.filter(l => l.entity && l.entity.entity_id && l.layer !== "extension" && l.layer !== "transit").map((line, idx) => (
+                              <View key={line.id} style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.05)" }}>
+                                <View style={{ flex: 1 }}>
+                                  <Text style={{ color: "#fff", fontSize: 13, fontWeight: "600" }}>{line.label}</Text>
+                                  <Text style={{ color: "#94a3b8", fontSize: 10, marginTop: 2 }}>{line.layer}</Text>
+                                </View>
+                                <Pressable
+                                  onPress={() => {
+                                    if (line.entity) {
+                                      const val = !line.entity.is_mark;
+                                      line.entity.is_mark = val;
+                                      setLines([...lines]); // trigger re-render
+                                    }
+                                  }}
+                                  style={{
+                                    width: 24, height: 24, borderRadius: 6, borderWidth: 1,
+                                    borderColor: line.entity?.is_mark ? "#0d9488" : "rgba(148,163,184,0.5)",
+                                    backgroundColor: line.entity?.is_mark ? "#0d9488" : "transparent",
+                                    alignItems: "center", justifyContent: "center"
+                                  }}
+                                >
+                                  {line.entity?.is_mark && <CheckIcon size={14} color="#fff" />}
+                                </Pressable>
                               </View>
-                              <Pressable
-                                onPress={() => {
-                                  setLines(prev => prev.map(pl => pl.id === l.id ? { ...pl, is_mark: !pl.is_mark } : pl));
-                                }}
-                                style={{
-                                  width: 24, height: 24, borderRadius: 6, borderWidth: 1,
-                                  borderColor: l.is_mark ? "#38bdf8" : "rgba(148,163,184,0.5)",
-                                  backgroundColor: l.is_mark ? "#38bdf8" : "transparent",
-                                  alignItems: "center", justifyContent: "center"
-                                }}
-                              >
-                                {l.is_mark && <CheckIcon size={14} color="#fff" />}
-                              </Pressable>
-                            </Pressable>
-                          ))}
+                            ))}
+                          </ScrollView>
                         </View>
+                        
+                        <Pressable
+                          onPress={handleSetSpray}
+                          disabled={isSprayingSet}
+                          style={{
+                            marginTop: 16,
+                            backgroundColor: isSprayingSet ? "#334155" : "#0f988f",
+                            paddingVertical: 14,
+                            borderRadius: 12,
+                            alignItems: "center",
+                            justifyContent: "center"
+                          }}
+                        >
+                          <Text style={{ color: "#fff", fontSize: 15, fontWeight: "800" }}>
+                            {isSprayingSet ? "Saving..." : "Set Spray"}
+                          </Text>
+                        </Pressable>
                       </View>
                     )}
+
+
                   </ScrollView>
                 </View>
               )}
@@ -3786,6 +3864,16 @@ function LineDetailsDrawer({
                     value={layerVisibility.center}
                     onToggle={() => setLayerVisibility((prev) => ({ ...prev, center: !prev.center }))}
                   />
+                  <CompactLayerToggle
+                    label="Transit"
+                    value={layerVisibility.transit}
+                    onToggle={() => setLayerVisibility((prev) => ({ ...prev, transit: !prev.transit }))}
+                  />
+                  <CompactLayerToggle
+                    label="Extension"
+                    value={layerVisibility.extension}
+                    onToggle={() => setLayerVisibility((prev) => ({ ...prev, extension: !prev.extension }))}
+                  />
                 </View>
               </View>
             </>
@@ -4139,7 +4227,7 @@ function SectionScreen(props: {
       <TopBar title={title} onBack={onBack} />
 
       {page === "fields" ? <FieldsPage {...props} /> : null}
-      {page === "templates" ? <TemplatesPage onGenerateTemplate={props.onGenerateTemplate} onRunTemplate={props.onRunTemplate} /> : null}
+      {page === "templates" ? <TemplatesPage {...props} /> : null}
       {page === "swozi" ? <SwoziPage {...props} /> : null}
       {page === "status" ? <StatusPage /> : null}
       {page === "positioning" ? <PositioningPage {...props} /> : null}
@@ -4612,6 +4700,44 @@ function FieldsPage({
   const [isFixing, setIsFixing] = useState(false);
   const [missionSummary, setMissionSummary] = useState<any | null>(null);
 
+  const [extModalOpen, setExtModalOpen] = useState(false);
+  const [extPre, setExtPre] = useState("0.5");
+  const [extAft, setExtAft] = useState("0.5");
+  const [isExtSetting, setIsExtSetting] = useState(false);
+
+  const targetPathForExtensions = selectedPathName || importedPlan?.fileName;
+
+  const handleSetExtension = async () => {
+    if (!targetPathForExtensions || !apiBaseUrl) {
+      Alert.alert("Error", "No path selected to save extensions to.");
+      return;
+    }
+    setIsExtSetting(true);
+    try {
+      const res = await fetch(`${apiBaseUrl}/api/path/${targetPathForExtensions}/extensions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          enabled: true,
+          pre_extension_m: parseFloat(extPre) || 0,
+          aft_extension_m: parseFloat(extAft) || 0,
+        }),
+      });
+      if (res.ok) {
+        Alert.alert("Success", "Extensions saved successfully.");
+        setExtModalOpen(false);
+        onRefreshPaths(); // re-fetch the updated path
+      } else {
+        const errText = await res.text();
+        Alert.alert("Error", errText || "Failed to set extensions");
+      }
+    } catch (err: any) {
+      Alert.alert("Error", err.message || "Failed to connect to backend");
+    } finally {
+      setIsExtSetting(false);
+    }
+  };
+
   const handleSelectPoint = (pt: { x: number; y: number }) => {
     setMissionSummary(null);
     setRefPoints(prev => {
@@ -4786,16 +4912,87 @@ function FieldsPage({
       </View>
       <View style={{ width: "42%", height: "100%", padding: 14, paddingLeft: 0, gap: 12 }}>
         <View style={{ borderRadius: 14, padding: 14, backgroundColor: "#0f172a" }}>
-          <Text style={{ color: "#94a3b8", fontSize: 11, fontWeight: "800", letterSpacing: 1.2, textTransform: "uppercase" }}>
-            Field Workspace
-          </Text>
-          <Text style={{ color: "#fff", fontSize: 18, fontWeight: "900", marginTop: 5 }}>
-            Select Rover Path
-          </Text>
-          <Text style={{ color: "#cbd5e1", fontSize: 12, lineHeight: 17, marginTop: 6 }}>
-            Select a path directly from the rover.
-          </Text>
+          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" }}>
+            <View>
+              <Text style={{ color: "#94a3b8", fontSize: 11, fontWeight: "800", letterSpacing: 1.2, textTransform: "uppercase" }}>
+                Field Workspace
+              </Text>
+              <Text style={{ color: "#fff", fontSize: 18, fontWeight: "900", marginTop: 5 }}>
+                Select Rover Path
+              </Text>
+              <Text style={{ color: "#cbd5e1", fontSize: 12, lineHeight: 17, marginTop: 6 }}>
+                Select a path directly from the rover.
+              </Text>
+            </View>
+            {selectedPathName?.toLowerCase().endsWith(".dxf") && (
+              <Pressable
+                onPress={() => setExtModalOpen(true)}
+                style={{
+                  height: 36,
+                  paddingHorizontal: 12,
+                  backgroundColor: "#8b5cf6",
+                  borderRadius: 8,
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <Text style={{ color: "#fff", fontSize: 12, fontWeight: "800" }}>Enable Extension</Text>
+              </Pressable>
+            )}
+          </View>
         </View>
+
+        {/* --- EXTENSION MODAL --- */}
+        <Modal visible={extModalOpen} transparent={true} animationType="fade">
+          <View style={{ flex: 1, backgroundColor: "rgba(15,23,42,0.6)", justifyContent: "center", alignItems: "center" }}>
+            <View style={{ width: 340, backgroundColor: "#fff", borderRadius: 16, padding: 20, elevation: 10 }}>
+              <Text style={{ color: "#0f172a", fontSize: 18, fontWeight: "900", marginBottom: 12 }}>
+                Path Extensions
+              </Text>
+              <View style={{ marginBottom: 12 }}>
+                <Text style={{ color: "#64748b", fontSize: 12, fontWeight: "700", marginBottom: 4 }}>File Name</Text>
+                <TextInput
+                  style={{ backgroundColor: "#f8fafc", borderWidth: 1, borderColor: "#e2e8f0", borderRadius: 8, padding: 10, color: "#64748b", fontWeight: "600" }}
+                  value={targetPathForExtensions || ""}
+                  editable={false}
+                />
+              </View>
+              <View style={{ marginBottom: 12 }}>
+                <Text style={{ color: "#64748b", fontSize: 12, fontWeight: "700", marginBottom: 4 }}>Pre Extension (m)</Text>
+                <TextInput
+                  style={{ backgroundColor: "#fff", borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, padding: 10, color: "#0f172a" }}
+                  value={extPre}
+                  onChangeText={setExtPre}
+                  keyboardType="numeric"
+                />
+              </View>
+              <View style={{ marginBottom: 20 }}>
+                <Text style={{ color: "#64748b", fontSize: 12, fontWeight: "700", marginBottom: 4 }}>Aft Extension (m)</Text>
+                <TextInput
+                  style={{ backgroundColor: "#fff", borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, padding: 10, color: "#0f172a" }}
+                  value={extAft}
+                  onChangeText={setExtAft}
+                  keyboardType="numeric"
+                />
+              </View>
+              <View style={{ flexDirection: "row", gap: 10 }}>
+                <Pressable
+                  onPress={() => setExtModalOpen(false)}
+                  style={{ flex: 1, height: 44, backgroundColor: "#e2e8f0", borderRadius: 10, alignItems: "center", justifyContent: "center" }}
+                >
+                  <Text style={{ color: "#475569", fontSize: 14, fontWeight: "700" }}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  onPress={handleSetExtension}
+                  disabled={isExtSetting}
+                  style={{ flex: 1, height: 44, backgroundColor: "#8b5cf6", borderRadius: 10, alignItems: "center", justifyContent: "center", opacity: isExtSetting ? 0.7 : 1 }}
+                >
+                  <Text style={{ color: "#fff", fontSize: 14, fontWeight: "800" }}>{isExtSetting ? "Setting..." : "Set Extension"}</Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        </Modal>
 
         {/* --- IMPORT SECTION --- */}
         <View style={{ borderRadius: 14, padding: 14, backgroundColor: "#ffffff", borderWidth: 1, borderColor: "#d8e1eb" }}>
@@ -5015,118 +5212,194 @@ function FieldsPage({
 
 
 
-function TemplatesPage({
-  onGenerateTemplate,
-  onRunTemplate,
-}: {
+function TemplatesPage(props: {
+  telemetrySnapshot: TelemetrySnapshot | null;
+  layerVisibility: LayerVisibility;
+  selectedLineId: string | null;
+  onSelectLine: (id: string | null) => void;
   onGenerateTemplate: (name: string, lines: PlanLine[]) => void;
-  onRunTemplate: (name: string, lines: PlanLine[]) => Promise<void>;
+  apiBaseUrl: string;
 }) {
-  const [selected, setSelected] = useState("Football");
-  const [useDefault, setUseDefault] = useState(true);
-  const [customW, setCustomW] = useState("100");
-  const [customH, setCustomH] = useState("64");
-  const [generated, setGenerated] = useState<PlanLine[] | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [shape, setShape] = useState<ShapeType>("square");
+  const [sizeInput, setSizeInput] = useState("1.0");
+  const [isParsing, setIsParsing] = useState(false);
 
-  const templates = ["Reference Sample", "Football", "Volleyball", "Badminton", "Kabaddi", "Kho-Kho", "Hockey", "Cricket Pitch"];
+  const parsedSize = Math.max(0.5, Math.min(3.0, parseFloat(sizeInput) || 1.0));
 
-  const generate = () => {
-    let lines: PlanLine[];
-    if (useDefault) {
-      const dims = defaultDimensions(selected);
-      lines = buildTemplate(selected, dims.width, dims.height);
-    } else {
-      lines = buildTemplate(selected, Number(customW) || 10, Number(customH) || 10);
-    }
-    setGenerated(lines);
-    onGenerateTemplate(selected, lines);
+  const previewLines = useMemo(() => {
+    return generateTemplateLines(shape, parsedSize);
+  }, [shape, parsedSize]);
+
+  const handleGenerate = () => {
+    const title = `${shape.charAt(0).toUpperCase() + shape.slice(1)} Template - ${parsedSize}m`;
+    props.onGenerateTemplate(title, previewLines);
   };
 
-  const exportDxf = async () => {
-    if (!generated) return;
-    const content = linesToDxf(generated, selected);
-    const uri = `${FileSystem.documentDirectory ?? ""}${selected.replace(/\s+/g, "_").toLowerCase()}_template.dxf`;
-    await FileSystem.writeAsStringAsync(uri, content, {
-      encoding: FileSystem.EncodingType.UTF8,
-    });
-    Alert.alert("Exported", `DXF saved to ${uri}`);
-  };
-
-  const uploadAndRun = async () => {
-    const lines = generated ?? (useDefault ? buildTemplate(selected, defaultDimensions(selected).width, defaultDimensions(selected).height) : buildTemplate(selected, Number(customW) || 10, Number(customH) || 10));
-    setGenerated(lines);
-    onGenerateTemplate(selected, lines);
-    setBusy(true);
+  const handleParse = async () => {
+    if (!props.apiBaseUrl) return;
+    setIsParsing(true);
     try {
-      await onRunTemplate(selected, lines);
-    } catch (error) {
-      Alert.alert("Run failed", error instanceof Error ? error.message : "Could not upload and start the template.");
+      const title = `${shape.charAt(0).toUpperCase() + shape.slice(1)} Template - ${parsedSize}m`;
+      const fileName = `${title.replace(/\s+/g, "_")}.dxf`;
+      const fileContent = linesToDxf(previewLines, fileName);
+
+      const fileUri = `${FileSystem.cacheDirectory}${fileName}`;
+      await FileSystem.writeAsStringAsync(fileUri, fileContent, {
+        encoding: FileSystem.EncodingType.UTF8,
+      });
+
+      const formData = new FormData();
+      formData.append("file", {
+        uri: fileUri,
+        name: fileName,
+        type: "application/dxf",
+      } as any);
+
+      const res = await fetch(`${props.apiBaseUrl}/api/path/parse-dxf`, {
+        method: "POST",
+        body: formData,
+      });
+
+      if (res.ok) {
+        Alert.alert("Success", `Template sent and parsed successfully.`);
+      } else {
+        const errText = await res.text();
+        Alert.alert("Parse Failed", errText || "Unknown error");
+      }
+    } catch (err: any) {
+      console.log("Error parsing template:", err);
+      Alert.alert("Error", err.message || "Failed to send template to backend.");
     } finally {
-      setBusy(false);
+      setIsParsing(false);
     }
   };
 
   return (
-    <ScrollView style={{ flex: 1, padding: 18 }}>
-      <View style={{ borderRadius: 20, padding: 18, backgroundColor: "#0f172a", marginBottom: 16 }}>
-        <Text style={{ color: "#94a3b8", fontSize: 11, fontWeight: "800", letterSpacing: 1.2, textTransform: "uppercase" }}>
-          Templates
-        </Text>
-        <Text style={{ color: "#fff", fontSize: 24, fontWeight: "900", marginTop: 6 }}>
-          Generate, export, and run field layouts
-        </Text>
-        <Text style={{ color: "#cbd5e1", fontSize: 13, lineHeight: 19, marginTop: 8 }}>
-          The selected layout can be uploaded to the backend and started immediately.
-        </Text>
-      </View>
-
-      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}>
-        {templates.map((template) => (
-          <Pressable
-            key={template}
-            onPress={() => setSelected(template)}
-            style={{
-              flexBasis: "48%",
-              minWidth: 160,
-              padding: 14,
-              borderRadius: 16,
-              backgroundColor: selected === template ? "#0f172a" : "#ffffff",
-              borderWidth: 1,
-              borderColor: selected === template ? "#0f172a" : "#d8e1eb",
-            }}
-          >
-            <Text style={{ color: selected === template ? "#fff" : "#0f172a", fontSize: 15, fontWeight: "800" }}>{template}</Text>
-            <Text style={{ color: selected === template ? "#cbd5e1" : "#64748b", fontSize: 12, marginTop: 4 }}>
-              {selected === template ? "Selected" : "Tap to select"}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
-
-      <View style={{ marginTop: 16, padding: 16, borderRadius: 18, backgroundColor: "#ffffff", borderWidth: 1, borderColor: "#d8e1eb" }}>
-        <RowToggle label="Default size" value={useDefault} onChange={setUseDefault} />
-        {!useDefault ? (
-          <View style={{ gap: 10, marginTop: 12 }}>
-            <TextInput value={customW} onChangeText={setCustomW} placeholder="Width (m)" keyboardType="numeric" style={inputStyle} />
-            <TextInput value={customH} onChangeText={setCustomH} placeholder="Height (m)" keyboardType="numeric" style={inputStyle} />
+    <View style={{ flex: 1, flexDirection: "row" }}>
+      <View style={{ width: "58%", backgroundColor: "transparent", padding: 14 }}>
+        <View style={{ flex: 1, borderRadius: 20, overflow: "hidden", backgroundColor: "#ffffff", borderWidth: 1, borderColor: "#d8e1eb" }}>
+          <View style={{ flex: 1, position: "relative" }}>
+            <PlanPreview
+              lines={previewLines}
+              visibility={props.layerVisibility}
+              selectedLineId={props.selectedLineId}
+              onSelectLine={props.onSelectLine}
+              roverPosN={props.telemetrySnapshot?.pos_n ?? null}
+              roverPosE={props.telemetrySnapshot?.pos_e ?? null}
+              roverHeadingDeg={props.telemetrySnapshot?.heading_ned_deg ?? null}
+            />
           </View>
-        ) : null}
-
-        <View style={{ flexDirection: "row", gap: 10, marginTop: 14 }}>
-          <Pressable onPress={generate} style={{ flex: 1, padding: 14, backgroundColor: "#0f172a", borderRadius: 14 }}>
-            <Text style={{ color: "#fff", textAlign: "center", fontWeight: "800" }}>Generate</Text>
-          </Pressable>
-          <Pressable onPress={uploadAndRun} disabled={busy} style={{ flex: 1, padding: 14, backgroundColor: busy ? "#94a3b8" : "#0b6b68", borderRadius: 14 }}>
-            <Text style={{ color: "#fff", textAlign: "center", fontWeight: "800" }}>{busy ? "Running..." : "Upload & Start"}</Text>
-          </Pressable>
+        </View>
+      </View>
+      
+      <View style={{ width: "42%", height: "100%", padding: 14, paddingLeft: 0, gap: 12 }}>
+        <View style={{ borderRadius: 14, padding: 14, backgroundColor: "#0f172a" }}>
+          <Text style={{ color: "#94a3b8", fontSize: 11, fontWeight: "800", letterSpacing: 1.2, textTransform: "uppercase" }}>
+            Templates
+          </Text>
+          <Text style={{ color: "#fff", fontSize: 18, fontWeight: "900", marginTop: 5 }}>
+            Shape Generator
+          </Text>
+          <Text style={{ color: "#cbd5e1", fontSize: 12, lineHeight: 17, marginTop: 6 }}>
+            Select a shape and size to preview and generate a working plan.
+          </Text>
         </View>
 
-        <Pressable onPress={exportDxf} style={{ marginTop: 10, padding: 14, backgroundColor: "#eef2f7", borderRadius: 14, borderWidth: 1, borderColor: "#cbd5e1" }}>
-          <Text style={{ color: "#0f172a", textAlign: "center", fontWeight: "700" }}>Export DXF</Text>
+        <View style={{ borderRadius: 14, padding: 14, backgroundColor: "#ffffff", borderWidth: 1, borderColor: "#d8e1eb" }}>
+          <Text style={{ color: "#64748b", fontSize: 11, fontWeight: "800", letterSpacing: 1, textTransform: "uppercase", marginBottom: 12 }}>
+            Shape Selection
+          </Text>
+          <View style={{ flexDirection: "row", gap: 10 }}>
+            {([] as ShapeType[]).concat(["square", "circle", "triangle"]).map((s) => (
+              <Pressable
+                key={s}
+                onPress={() => setShape(s)}
+                style={{
+                  flex: 1,
+                  padding: 12,
+                  borderRadius: 12,
+                  backgroundColor: shape === s ? "#0b6b68" : "#f8fafc",
+                  borderWidth: 1,
+                  borderColor: shape === s ? "#0b6b68" : "#e2e8f0",
+                  alignItems: "center"
+                }}
+              >
+                <Text style={{ color: shape === s ? "#fff" : "#0f172a", fontSize: 14, fontWeight: "800", textTransform: "capitalize" }}>
+                  {s}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        </View>
+
+        <View style={{ borderRadius: 14, padding: 14, backgroundColor: "#ffffff", borderWidth: 1, borderColor: "#d8e1eb" }}>
+          <Text style={{ color: "#64748b", fontSize: 11, fontWeight: "800", letterSpacing: 1, textTransform: "uppercase", marginBottom: 12 }}>
+            Size (Scale)
+          </Text>
+          
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+            <View style={{ flex: 1 }}>
+              <Slider
+                style={{ width: "100%", height: 40 }}
+                minimumValue={0.5}
+                maximumValue={3.0}
+                step={0.1}
+                value={parsedSize}
+                onValueChange={(val) => setSizeInput(val.toFixed(2))}
+                minimumTrackTintColor="#0f988f"
+                maximumTrackTintColor="#cbd5e1"
+                thumbTintColor="#0f172a"
+              />
+            </View>
+            <View style={{ flexDirection: "row", alignItems: "center", backgroundColor: "#f8fafc", borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, paddingHorizontal: 10 }}>
+              <TextInput
+                value={sizeInput}
+                onChangeText={setSizeInput}
+                keyboardType="numeric"
+                style={{ width: 44, height: 40, color: "#0f172a", fontSize: 14, fontWeight: "700", textAlign: "right" }}
+              />
+              <Text style={{ color: "#64748b", fontSize: 14, fontWeight: "700", marginLeft: 2 }}>m</Text>
+            </View>
+          </View>
+          <Text style={{ color: "#64748b", fontSize: 11, marginTop: 4 }}>
+            {shape === "circle" ? "Diameter in meters" : shape === "square" ? "Side length in meters" : "Height in meters"}
+          </Text>
+        </View>
+
+        <Pressable
+          onPress={handleParse}
+          disabled={isParsing}
+          style={{
+            marginTop: "auto",
+            height: 52,
+            borderRadius: 14,
+            backgroundColor: isParsing ? "#94a3b8" : "#0f988f",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <Text style={{ color: "#fff", fontSize: 15, fontWeight: "800" }}>
+            {isParsing ? "Parsing..." : "Parse"}
+          </Text>
+        </Pressable>
+
+        <Pressable
+          onPress={handleGenerate}
+          style={{
+            marginTop: 10,
+            height: 52,
+            borderRadius: 14,
+            backgroundColor: "#0f172a",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <Text style={{ color: "#fff", fontSize: 15, fontWeight: "800" }}>
+            Generate Plan
+          </Text>
         </Pressable>
       </View>
-    </ScrollView>
+    </View>
   );
 }
 
@@ -5549,6 +5822,8 @@ function PlanPreview({
         if (line.layer === "boundary") return visibility.boundary;
         if (line.layer === "marking") return visibility.marking;
         if (line.layer === "center") return visibility.center;
+        if (line.layer === "transit") return visibility.transit;
+        if (line.layer === "extension") return visibility.extension;
         return true;
       }),
     [lines, visibility]
@@ -5562,8 +5837,11 @@ function PlanPreview({
   const pathChunksByLayer = useMemo(
     () => ({
       boundary: buildSvgPathChunks(filtered.filter((line) => line.layer === "boundary" && line.id !== selectedLineId)),
-      marking: buildSvgPathChunks(filtered.filter((line) => line.layer === "marking" && line.id !== selectedLineId)),
+      marking_true: buildSvgPathChunks(filtered.filter((line) => line.layer === "marking" && line.entity?.is_mark !== false && line.id !== selectedLineId)),
+      marking_false: buildSvgPathChunks(filtered.filter((line) => line.layer === "marking" && line.entity?.is_mark === false && line.id !== selectedLineId)),
       center: buildSvgPathChunks(filtered.filter((line) => line.layer === "center" && line.id !== selectedLineId)),
+      transit: buildSvgPathChunks(filtered.filter((line) => line.layer === "transit" && line.id !== selectedLineId)),
+      extension: buildSvgPathChunks(filtered.filter((line) => line.layer === "extension" && line.id !== selectedLineId)),
     }),
     [filtered, selectedLineId]
   );
@@ -5769,9 +6047,13 @@ function PlanPreview({
     []
   );
 
-  const strokeForLayer = (layer: PlanLine["layer"]) => {
+  const strokeForLayer = (layer: string) => {
     if (layer === "boundary") return "#0f172a";
     if (layer === "center") return "#d97706";
+    if (layer === "transit") return "#94a3b8";
+    if (layer === "extension") return "#8b5cf6";
+    if (layer === "marking_true") return "#16a34a"; // Dark green for marking (spray)
+    if (layer === "marking_false") return "#86efac"; // Light green for non-spray
     return "#475569";
   };
 
@@ -5886,7 +6168,7 @@ function PlanPreview({
 
           {/* ── Plan lines ── */}
           <G transform={`translate(${layoutSize.width / 2}, ${layoutSize.height / 2}) rotate(${rotation}) translate(${-layoutSize.width / 2}, ${-layoutSize.height / 2}) translate(${viewport.panX}, ${viewport.panY}) scale(${viewport.zoom}, ${-viewport.zoom})`}>
-            {(["boundary", "marking", "center"] as const).flatMap((layer) =>
+            {(["boundary", "center", "transit", "extension", "marking_true", "marking_false"] as const).flatMap((layer) =>
               pathChunksByLayer[layer].map((d, index) => (
                 <Path
                   key={`${layer}-${index}`}
@@ -5897,6 +6179,7 @@ function PlanPreview({
                   strokeLinejoin="round"
                   fill="none"
                   opacity={0.96}
+                  {...(layer === "extension" ? { strokeDasharray: `${8 / viewport.zoom} ${6 / viewport.zoom}` } : {})}
                 />
               ))
             )}
