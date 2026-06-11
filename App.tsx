@@ -50,6 +50,7 @@ import {
   Settings,
   Signal,
   Tractor,
+  Trash2,
   ChevronRight,
   Waves,
   X,
@@ -4922,6 +4923,38 @@ function FieldsPage({
     }
   };
 
+  const handleDeletePath = async (filename: string) => {
+    Alert.alert(
+      "Delete Path",
+      `Are you sure you want to delete ${filename}?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              const res = await fetch(`${apiBaseUrl}/api/path/${encodeURIComponent(filename)}`, {
+                method: "DELETE",
+              });
+              if (res.ok) {
+                if (selectedPathName === filename) {
+                  onSelectPath("");
+                }
+                onRefreshPaths();
+              } else {
+                const errText = await res.text();
+                Alert.alert("Error", errText || "Failed to delete path");
+              }
+            } catch (err: any) {
+              Alert.alert("Error", err.message || "Failed to connect to backend");
+            }
+          }
+        }
+      ]
+    );
+  };
+
   const handleSelectPoint = (pt: { x: number; y: number }) => {
     setMissionSummary(null);
     setRefPoints(prev => {
@@ -5447,14 +5480,27 @@ function FieldsPage({
                       backgroundColor: isSelected ? "#0b6b68" : "#f8fafc",
                       borderWidth: 1,
                       borderColor: isSelected ? "#0b6b68" : "#e2e8f0",
+                      flexDirection: "row",
+                      justifyContent: "space-between",
+                      alignItems: "center"
                     }}
                   >
-                    <Text style={{ color: isSelected ? "#ffffff" : "#0f172a", fontWeight: "800", fontSize: 14 }}>
-                      {path.name}
-                    </Text>
-                    <Text style={{ color: isSelected ? "#d1fae5" : "#64748b", fontSize: 11, marginTop: 2 }}>
-                      {path.description || `Points: ${path.num_points}`}
-                    </Text>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: isSelected ? "#ffffff" : "#0f172a", fontWeight: "800", fontSize: 14 }}>
+                        {path.name}
+                      </Text>
+                      <Text style={{ color: isSelected ? "#d1fae5" : "#64748b", fontSize: 11, marginTop: 2 }}>
+                        {path.description || `Points: ${path.num_points}`}
+                      </Text>
+                    </View>
+                    {isSelected && (
+                      <Pressable 
+                        onPress={() => handleDeletePath(path.name)}
+                        style={{ padding: 8, backgroundColor: "rgba(239, 68, 68, 0.2)", borderRadius: 8 }}
+                      >
+                        <Trash2 size={18} color="#fca5a5" />
+                      </Pressable>
+                    )}
                   </Pressable>
                 );
               })
