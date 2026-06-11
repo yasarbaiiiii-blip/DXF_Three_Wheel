@@ -2,6 +2,7 @@ import "./global.css";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   Animated,
   LayoutAnimation,
@@ -62,7 +63,7 @@ import {
 
 import { readImportedPlanFile, normalizePlanLines } from "./src/utils/planImport";
 import type { ImportedPlan, PlanLine } from "./src/types/plan";
-import { generateTemplateLines, ShapeType } from "./src/utils/shapeTemplates";
+import { generateTemplateLines, ShapeType, ArcType } from "./src/utils/shapeTemplates";
 
 type Page =
   | "connection"
@@ -1244,62 +1245,104 @@ export default function App() {
     }
   }
 
-  async function connectRtkCaster() {
+  async function startNtrip() {
     if (!apiBaseUrl) return;
     setRtkConnecting(true);
     try {
-      if (rtkRunning) {
-        showToast("RTK Injection", "Stopping RTK stream...", "warning");
-        logAction("RTK_STOP_REQUEST");
-        const res = await fetch(`${apiBaseUrl}/api/rtk/stop`, {
-          method: "POST",
-        });
-        if (!res.ok) {
-          const txt = await res.text();
-          throw new Error(txt || "Failed to stop RTK correction stream.");
-        }
-        setRtkRunning(false);
-        logAction("RTK_STOP_SUCCESS");
-        Alert.alert("RTK Stopped", "NTRIP RTK correction stream stopped successfully.");
-        showToast("RTK Stopped", "RTK stream stopped.", "success");
-        setRtkModalOpen(false);
-      } else {
-        if (!rtkCaster || !rtkPort || !rtkMountPoint || !rtkUsername || !rtkPassword) {
-          Alert.alert("Missing fields", "Please fill in all 5 RTK caster credentials.");
-          setRtkConnecting(false);
-          return;
-        }
-        logAction("RTK_CONNECT_REQUEST", { caster: rtkCaster, port: rtkPort, mountpoint: rtkMountPoint });
-        showToast("RTK Injection", "Connecting to NTRIP caster...", "info");
-        const res = await fetch(`${apiBaseUrl}/api/rtk/ntrip/start`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            host: rtkCaster,
-            port: parseInt(rtkPort, 10),
-            mountpoint: rtkMountPoint,
-            user: rtkUsername,
-            pass: rtkPassword,
-          }),
-        });
-        if (!res.ok) {
-          const txt = await res.text();
-          throw new Error(txt || "NTRIP start failed.");
-        }
-        const data = await res.json();
-        setRtkRunning(data.running);
-        setRtkHealthy(data.healthy);
-        logAction("RTK_CONNECT_SUCCESS", { caster: rtkCaster });
-        Alert.alert("RTK Started", "NTRIP RTK caster started successfully.");
-        showToast("RTK Started", "NTRIP RTK stream active.", "success");
-        setRtkModalOpen(false);
+      if (!rtkCaster || !rtkPort || !rtkMountPoint || !rtkUsername || !rtkPassword) {
+        Alert.alert("Missing fields", "Please fill in all 5 RTK caster credentials.");
+        setRtkConnecting(false);
+        return;
       }
+      logAction("RTK_CONNECT_REQUEST", { caster: rtkCaster, port: rtkPort, mountpoint: rtkMountPoint });
+      showToast("RTK Injection", "Connecting to NTRIP caster...", "info");
+      const res = await fetch(`${apiBaseUrl}/api/rtk/ntrip/start`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          host: rtkCaster,
+          port: parseInt(rtkPort, 10),
+          mountpoint: rtkMountPoint,
+          user: rtkUsername,
+          pass: rtkPassword,
+        }),
+      });
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(txt || "NTRIP start failed.");
+      }
+      const data = await res.json();
+      setRtkRunning(data.running);
+      setRtkHealthy(data.healthy);
+      logAction("RTK_CONNECT_SUCCESS", { caster: rtkCaster });
+      Alert.alert("RTK Started", "NTRIP RTK caster started successfully.");
+      showToast("RTK Started", "NTRIP RTK stream active.", "success");
+      setRtkModalOpen(false);
     } catch (error) {
       logAction("RTK_ACTION_FAILED", { error: error instanceof Error ? error.message : String(error) });
       Alert.alert("RTK Action Failed", error instanceof Error ? error.message : "Failed to perform RTK action.");
       showToast("RTK Failed", error instanceof Error ? error.message : "Failed to perform RTK action.", "error");
+    } finally {
+      setRtkConnecting(false);
+    }
+  }
+
+  async function startLora() {
+    if (!apiBaseUrl) return;
+    setRtkConnecting(true);
+    try {
+      showToast("RTK Injection", "Starting LoRA...", "info");
+      const res = await fetch(`${apiBaseUrl}/api/rtk/lora/start`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          baudrate: 115200,
+          serial_port: "/dev/ttyUSB0",
+        }),
+      });
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(txt || "LoRA start failed.");
+      }
+      const data = await res.json();
+      setRtkRunning(data.running);
+      setRtkHealthy(data.healthy);
+      Alert.alert("LoRA Started", "LoRA RTK stream started successfully.");
+      showToast("LoRA Started", "LoRA RTK stream active.", "success");
+      setRtkModalOpen(false);
+    } catch (error) {
+      Alert.alert("LoRA Failed", error instanceof Error ? error.message : "Failed to start LoRA.");
+      showToast("LoRA Failed", error instanceof Error ? error.message : "Failed to start LoRA.", "error");
+    } finally {
+      setRtkConnecting(false);
+    }
+  }
+
+  async function stopRtk() {
+    if (!apiBaseUrl) return;
+    setRtkConnecting(true);
+    try {
+      showToast("RTK Injection", "Stopping RTK stream...", "warning");
+      logAction("RTK_STOP_REQUEST");
+      const res = await fetch(`${apiBaseUrl}/api/rtk/stop`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(txt || "Failed to stop RTK correction stream.");
+      }
+      setRtkRunning(false);
+      logAction("RTK_STOP_SUCCESS");
+      Alert.alert("RTK Stopped", "RTK correction stream stopped successfully.");
+      showToast("RTK Stopped", "RTK stream stopped.", "success");
+      setRtkModalOpen(false);
+    } catch (error) {
+      Alert.alert("Stop Failed", error instanceof Error ? error.message : "Failed to stop RTK action.");
+      showToast("Stop Failed", error instanceof Error ? error.message : "Failed to stop RTK action.", "error");
     } finally {
       setRtkConnecting(false);
     }
@@ -1751,7 +1794,9 @@ export default function App() {
             rtkPassword={rtkPassword}
             setRtkPassword={setRtkPassword}
             rtkConnecting={rtkConnecting}
-            connectRtkCaster={connectRtkCaster}
+            startNtrip={startNtrip}
+            startLora={startLora}
+            stopRtk={stopRtk}
             rtkRunning={rtkRunning}
             rtkHealthy={rtkHealthy}
             onParsePlan={parseDxfPlan}
@@ -1779,6 +1824,7 @@ export default function App() {
             apiBaseUrl={apiBaseUrl}
             onRefreshPaths={fetchBackendPaths}
             onBack={() => setPage("home")}
+            onNav={(p) => setPage(p)}
             onSelectLine={setSelectedLineId}
             onGenerateTemplate={(name, generatedLines) => {
               const safeGeneratedLines = sanitizePlanLines(generatedLines);
@@ -1983,7 +2029,9 @@ function HomeView({
   rtkPassword,
   setRtkPassword,
   rtkConnecting,
-  connectRtkCaster,
+  startNtrip,
+  startLora,
+  stopRtk,
   rtkRunning,
   rtkHealthy,
   onParsePlan,
@@ -2038,7 +2086,9 @@ function HomeView({
   rtkPassword: string;
   setRtkPassword: React.Dispatch<React.SetStateAction<string>>;
   rtkConnecting: boolean;
-  connectRtkCaster: () => Promise<void>;
+  startNtrip: () => Promise<void>;
+  startLora: () => Promise<void>;
+  stopRtk: () => Promise<void>;
   rtkRunning: boolean;
   rtkHealthy: boolean;
   onParsePlan: () => Promise<void>;
@@ -2090,7 +2140,7 @@ function HomeView({
         is_mark
       }));
 
-      const res = await fetch(`${apiBaseUrl}/api/path/${targetPath}/entities`, {
+      const res = await fetch(`${apiBaseUrl}/api/path/${encodeURIComponent(targetPath)}/entities`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ overrides }),
@@ -3409,37 +3459,46 @@ function HomeView({
               </View>
             </View>
 
-            <View style={{ flexDirection: "row", gap: 8, marginTop: 18 }}>
+            {/* Row 1 */}
+            <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
               <Pressable
                 onPress={() => !rtkConnecting && setRtkModalOpen(false)}
                 disabled={rtkConnecting}
-                style={{
-                  flex: 1,
-                  height: 40,
-                  borderRadius: 10,
-                  alignItems: "center",
-                  justifyContent: "center",
-                  backgroundColor: "#e2e8f0",
-                }}
+                style={{ flex: 1, height: 40, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: "#e2e8f0" }}
               >
                 <Text style={{ color: "#0f172a", fontWeight: "800", fontSize: 13 }}>Cancel</Text>
               </Pressable>
+              
               <Pressable
-                onPress={connectRtkCaster}
-                disabled={rtkConnecting}
-                style={{
-                  flex: 1,
-                  height: 40,
-                  borderRadius: 10,
-                  alignItems: "center",
-                  justifyContent: "center",
-                  backgroundColor: rtkConnecting ? "#93c5fd" : (rtkRunning ? "#dc2626" : "#0ea5e9"),
-                }}
+                onPress={startNtrip}
+                disabled={rtkConnecting || rtkRunning}
+                style={{ flex: 1, height: 40, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: (rtkConnecting || rtkRunning) ? "#93c5fd" : "#0ea5e9" }}
               >
-                <Text style={{ color: "#ffffff", fontWeight: "800", fontSize: 13 }}>
-                  {rtkConnecting ? "Processing..." : (rtkRunning ? "Stop" : "Ntrip Start")}
-                </Text>
+                <Text style={{ color: "#ffffff", fontWeight: "800", fontSize: 13 }}>Ntrip Start</Text>
               </Pressable>
+            </View>
+
+            {/* Row 2 */}
+            <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
+              <Pressable
+                onPress={startLora}
+                disabled={rtkConnecting || rtkRunning}
+                style={{ flex: 1, height: 40, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: (rtkConnecting || rtkRunning) ? "#a78bfa" : "#8b5cf6" }}
+              >
+                <Text style={{ color: "#ffffff", fontWeight: "800", fontSize: 13 }}>Lora Start</Text>
+              </Pressable>
+
+              {rtkRunning ? (
+                <Pressable
+                  onPress={stopRtk}
+                  disabled={rtkConnecting}
+                  style={{ flex: 1, height: 40, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: "#dc2626" }}
+                >
+                  <Text style={{ color: "#ffffff", fontWeight: "800", fontSize: 13 }}>Stop</Text>
+                </Pressable>
+              ) : (
+                <View style={{ flex: 1 }} />
+              )}
             </View>
           </Pressable>
         </Pressable>
@@ -4219,6 +4278,7 @@ function SectionScreen(props: {
   apiBaseUrl: string;
   onRefreshPaths: () => void;
   onParsePlan?: () => Promise<void>;
+  onNav: (page: Page) => void;
 }) {
   const { title, page, onBack } = props;
 
@@ -4705,6 +4765,10 @@ function FieldsPage({
   const [extAft, setExtAft] = useState("0.5");
   const [isExtSetting, setIsExtSetting] = useState(false);
 
+  const [scaleModalOpen, setScaleModalOpen] = useState(false);
+  const [scaleFactorInput, setScaleFactorInput] = useState("1.5");
+  const [isScaling, setIsScaling] = useState(false);
+
   const targetPathForExtensions = selectedPathName || importedPlan?.fileName;
 
   const handleSetExtension = async () => {
@@ -4714,7 +4778,7 @@ function FieldsPage({
     }
     setIsExtSetting(true);
     try {
-      const res = await fetch(`${apiBaseUrl}/api/path/${targetPathForExtensions}/extensions`, {
+      const res = await fetch(`${apiBaseUrl}/api/path/${encodeURIComponent(targetPathForExtensions)}/extensions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -4726,7 +4790,7 @@ function FieldsPage({
       if (res.ok) {
         Alert.alert("Success", "Extensions saved successfully.");
         setExtModalOpen(false);
-        onRefreshPaths(); // re-fetch the updated path
+        if (onSelectPath && targetPathForExtensions) onSelectPath(targetPathForExtensions);
       } else {
         const errText = await res.text();
         Alert.alert("Error", errText || "Failed to set extensions");
@@ -4735,6 +4799,126 @@ function FieldsPage({
       Alert.alert("Error", err.message || "Failed to connect to backend");
     } finally {
       setIsExtSetting(false);
+    }
+  };
+
+  const handleDisableExtension = async () => {
+    if (!targetPathForExtensions || !apiBaseUrl) {
+      Alert.alert("Error", "No path selected to disable extensions.");
+      return;
+    }
+    try {
+      const res = await fetch(`${apiBaseUrl}/api/path/${encodeURIComponent(targetPathForExtensions)}/extensions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          enabled: false,
+          pre_extension_m: 0.5,
+          aft_extension_m: 0.5,
+        }),
+      });
+      if (res.ok) {
+        Alert.alert("Success", "Extensions disabled.");
+        if (onSelectPath && targetPathForExtensions) onSelectPath(targetPathForExtensions);
+      } else {
+        const errText = await res.text();
+        Alert.alert("Error", errText || "Failed to disable extensions");
+      }
+    } catch (err: any) {
+      Alert.alert("Error", err.message || "Failed to connect to backend");
+    }
+  };
+
+  const handleScaleDxf = async () => {
+    if (!selectedPathName || lines.length === 0 || !apiBaseUrl) return;
+    const factor = parseFloat(scaleFactorInput);
+    if (isNaN(factor) || factor <= 0) {
+      Alert.alert("Invalid Scale", "Please enter a valid positive number.");
+      return;
+    }
+    setIsScaling(true);
+    try {
+      // Unroll complex entities into flat line segments so we don't lose arcs/circles
+      const flatLines: PlanLine[] = [];
+      lines.forEach(l => {
+        // Skip extension layers so we don't bake them permanently into the new DXF
+        if (l.layer === "extension") return;
+
+        if (l.entity && l.entity.preview_points && l.entity.preview_points.length > 1) {
+          const pts = l.entity.preview_points;
+          for (let i = 0; i < pts.length - 1; i++) {
+            flatLines.push({
+              id: `${l.id}-seg-${i}`,
+              label: l.label,
+              layer: l.layer,
+              width: l.width,
+              from: { id: 0, x: pts[i].north, y: pts[i].east },
+              to: { id: 0, x: pts[i+1].north, y: pts[i+1].east },
+            });
+          }
+        } else {
+          flatLines.push(l);
+        }
+      });
+
+      if (flatLines.length === 0) {
+        setIsScaling(false);
+        Alert.alert("Error", "No valid geometry found to scale.");
+        return;
+      }
+
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      flatLines.forEach(l => {
+        minX = Math.min(minX, l.from.x, l.to.x);
+        maxX = Math.max(maxX, l.from.x, l.to.x);
+        minY = Math.min(minY, l.from.y, l.to.y);
+        maxY = Math.max(maxY, l.from.y, l.to.y);
+      });
+      const cx = (minX + maxX) / 2;
+      const cy = (minY + maxY) / 2;
+
+      const scaledLines = flatLines.map(l => ({
+        ...l,
+        from: { ...l.from, x: cx + (l.from.x - cx) * factor, y: cy + (l.from.y - cy) * factor },
+        to: { ...l.to, x: cx + (l.to.x - cx) * factor, y: cy + (l.to.y - cy) * factor }
+      }));
+
+      const baseName = selectedPathName.replace(/\.dxf$/i, "");
+      const newName = `${baseName}_${factor}x.dxf`;
+
+      const fileContent = linesToDxf(scaledLines, newName);
+
+      const fileUri = `${FileSystem.cacheDirectory}${newName}`;
+      await FileSystem.writeAsStringAsync(fileUri, fileContent, {
+        encoding: FileSystem.EncodingType.UTF8,
+      });
+
+      const formData = new FormData();
+      formData.append("file", {
+        uri: fileUri,
+        name: newName,
+        type: "application/dxf",
+      } as any);
+
+      const res = await fetch(`${apiBaseUrl}/api/path/parse-dxf`, {
+        method: "POST",
+        body: formData,
+      });
+
+      if (res.ok) {
+        Alert.alert("Success", "Scaled plan generated and uploaded successfully.");
+        setScaleModalOpen(false);
+        onRefreshPaths();
+        onSelectPath(newName);
+      } else {
+        const errText = await res.text();
+        Alert.alert("Failed", errText || "Could not upload scaled plan.");
+      }
+    } catch (err: any) {
+      console.log("Error scaling plan:", err);
+      Alert.alert("Error", err.message || "Failed to scale plan.");
+    } finally {
+      setIsScaling(false);
     }
   };
 
@@ -4925,19 +5109,51 @@ function FieldsPage({
               </Text>
             </View>
             {selectedPathName?.toLowerCase().endsWith(".dxf") && (
-              <Pressable
-                onPress={() => setExtModalOpen(true)}
-                style={{
-                  height: 36,
-                  paddingHorizontal: 12,
-                  backgroundColor: "#8b5cf6",
-                  borderRadius: 8,
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                <Text style={{ color: "#fff", fontSize: 12, fontWeight: "800" }}>Enable Extension</Text>
-              </Pressable>
+              <View style={{ gap: 8 }}>
+                <Pressable
+                  onPress={() => setScaleModalOpen(true)}
+                  style={{
+                    height: 36,
+                    paddingHorizontal: 12,
+                    backgroundColor: "#eab308",
+                    borderRadius: 8,
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <Text style={{ color: "#fff", fontSize: 12, fontWeight: "800" }}>Scale Plan</Text>
+                </Pressable>
+                
+                <Pressable
+                  onPress={() => setExtModalOpen(true)}
+                  style={{
+                    height: 36,
+                    paddingHorizontal: 12,
+                    backgroundColor: "#8b5cf6",
+                    borderRadius: 8,
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <Text style={{ color: "#fff", fontSize: 12, fontWeight: "800" }}>Enable Extension</Text>
+                </Pressable>
+                
+                {lines.some((l) => l.layer === "extension") && (
+                  <Pressable
+                    onPress={handleDisableExtension}
+                    style={{
+                      height: 36,
+                      paddingHorizontal: 12,
+                      backgroundColor: "#ef4444",
+                      borderRadius: 8,
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <Text style={{ color: "#fff", fontSize: 12, fontWeight: "800" }}>Disable Extension</Text>
+                  </Pressable>
+                )}
+              </View>
             )}
           </View>
         </View>
@@ -4988,6 +5204,64 @@ function FieldsPage({
                   style={{ flex: 1, height: 44, backgroundColor: "#8b5cf6", borderRadius: 10, alignItems: "center", justifyContent: "center", opacity: isExtSetting ? 0.7 : 1 }}
                 >
                   <Text style={{ color: "#fff", fontSize: 14, fontWeight: "800" }}>{isExtSetting ? "Setting..." : "Set Extension"}</Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
+        {/* --- SCALE MODAL --- */}
+        <Modal visible={scaleModalOpen} transparent={true} animationType="fade">
+          <View style={{ flex: 1, backgroundColor: "rgba(15,23,42,0.6)", justifyContent: "center", alignItems: "center" }}>
+            <View style={{ width: 340, backgroundColor: "#fff", borderRadius: 16, padding: 20, elevation: 10 }}>
+              <Text style={{ color: "#0f172a", fontSize: 18, fontWeight: "900", marginBottom: 12 }}>
+                Scale Plan
+              </Text>
+              <View style={{ marginBottom: 12 }}>
+                <Text style={{ color: "#64748b", fontSize: 12, fontWeight: "700", marginBottom: 4 }}>File Name</Text>
+                <TextInput
+                  style={{ backgroundColor: "#f8fafc", borderWidth: 1, borderColor: "#e2e8f0", borderRadius: 8, padding: 10, color: "#64748b", fontWeight: "600" }}
+                  value={selectedPathName || ""}
+                  editable={false}
+                />
+              </View>
+              <View style={{ marginBottom: 20 }}>
+                <Text style={{ color: "#64748b", fontSize: 12, fontWeight: "700", marginBottom: 4 }}>Scale Multiplier</Text>
+                <TextInput
+                  style={{ backgroundColor: "#fff", borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, padding: 10, color: "#0f172a" }}
+                  value={scaleFactorInput}
+                  onChangeText={setScaleFactorInput}
+                  keyboardType="numeric"
+                  placeholder="e.g. 1.5 for 150%"
+                />
+                <Text style={{ color: "#94a3b8", fontSize: 11, marginTop: 4 }}>
+                  Generates a perfectly scaled DXF file and loads it immediately.
+                </Text>
+              </View>
+
+              <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 12 }}>
+                <Pressable
+                  onPress={() => setScaleModalOpen(false)}
+                  style={{ paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8 }}
+                >
+                  <Text style={{ color: "#64748b", fontWeight: "700" }}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  onPress={handleScaleDxf}
+                  disabled={isScaling}
+                  style={{
+                    backgroundColor: isScaling ? "#9ca3af" : "#eab308",
+                    paddingHorizontal: 20,
+                    paddingVertical: 10,
+                    borderRadius: 8,
+                    alignItems: "center"
+                  }}
+                >
+                  {isScaling ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Text style={{ color: "#fff", fontWeight: "800" }}>Generate & Scale</Text>
+                  )}
                 </Pressable>
               </View>
             </View>
@@ -5219,21 +5493,20 @@ function TemplatesPage(props: {
   onSelectLine: (id: string | null) => void;
   onGenerateTemplate: (name: string, lines: PlanLine[]) => void;
   apiBaseUrl: string;
+  onSelectPath: (name: string) => void;
+  onRefreshPaths: () => void;
+  onNav: (page: Page) => void;
 }) {
   const [shape, setShape] = useState<ShapeType>("square");
+  const [arcType, setArcType] = useState<ArcType>("full");
   const [sizeInput, setSizeInput] = useState("1.0");
   const [isParsing, setIsParsing] = useState(false);
 
   const parsedSize = Math.max(0.5, Math.min(3.0, parseFloat(sizeInput) || 1.0));
 
   const previewLines = useMemo(() => {
-    return generateTemplateLines(shape, parsedSize);
-  }, [shape, parsedSize]);
-
-  const handleGenerate = () => {
-    const title = `${shape.charAt(0).toUpperCase() + shape.slice(1)} Template - ${parsedSize}m`;
-    props.onGenerateTemplate(title, previewLines);
-  };
+    return generateTemplateLines(shape, parsedSize, arcType);
+  }, [shape, parsedSize, arcType]);
 
   const handleParse = async () => {
     if (!props.apiBaseUrl) return;
@@ -5262,6 +5535,9 @@ function TemplatesPage(props: {
 
       if (res.ok) {
         Alert.alert("Success", `Template sent and parsed successfully.`);
+        props.onRefreshPaths();
+        props.onSelectPath(fileName);
+        props.onNav("fields");
       } else {
         const errText = await res.text();
         Alert.alert("Parse Failed", errText || "Unknown error");
@@ -5332,6 +5608,35 @@ function TemplatesPage(props: {
           </View>
         </View>
 
+        {shape === "circle" && (
+          <View style={{ borderRadius: 14, padding: 14, backgroundColor: "#ffffff", borderWidth: 1, borderColor: "#d8e1eb" }}>
+            <Text style={{ color: "#64748b", fontSize: 11, fontWeight: "800", letterSpacing: 1, textTransform: "uppercase", marginBottom: 12 }}>
+              Arc Type
+            </Text>
+            <View style={{ flexDirection: "row", gap: 10 }}>
+              {([] as ArcType[]).concat(["quarter", "half", "full"]).map((a) => (
+                <Pressable
+                  key={a}
+                  onPress={() => setArcType(a)}
+                  style={{
+                    flex: 1,
+                    padding: 12,
+                    borderRadius: 12,
+                    backgroundColor: arcType === a ? "#0b6b68" : "#f8fafc",
+                    borderWidth: 1,
+                    borderColor: arcType === a ? "#0b6b68" : "#e2e8f0",
+                    alignItems: "center"
+                  }}
+                >
+                  <Text style={{ color: arcType === a ? "#fff" : "#0f172a", fontSize: 14, fontWeight: "800", textTransform: "capitalize" }}>
+                    {a === "full" ? "Full" : a === "half" ? "Half" : "Quarter"}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        )}
+
         <View style={{ borderRadius: 14, padding: 14, backgroundColor: "#ffffff", borderWidth: 1, borderColor: "#d8e1eb" }}>
           <Text style={{ color: "#64748b", fontSize: 11, fontWeight: "800", letterSpacing: 1, textTransform: "uppercase", marginBottom: 12 }}>
             Size (Scale)
@@ -5380,22 +5685,6 @@ function TemplatesPage(props: {
         >
           <Text style={{ color: "#fff", fontSize: 15, fontWeight: "800" }}>
             {isParsing ? "Parsing..." : "Parse"}
-          </Text>
-        </Pressable>
-
-        <Pressable
-          onPress={handleGenerate}
-          style={{
-            marginTop: 10,
-            height: 52,
-            borderRadius: 14,
-            backgroundColor: "#0f172a",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          <Text style={{ color: "#fff", fontSize: 15, fontWeight: "800" }}>
-            Generate Plan
           </Text>
         </Pressable>
       </View>
@@ -6058,11 +6347,13 @@ function PlanPreview({
   };
 
   const handleFocusRover = () => {
-    if (!hasRover || layoutSize.width <= 0 || layoutSize.height <= 0) return;
+    if (layoutSize.width <= 0 || layoutSize.height <= 0) return;
+    const rN = hasRover ? roverN : 0;
+    const rE = hasRover ? roverE : 0;
     const defaultZoom = viewport.zoom > 10 ? viewport.zoom : 40;
     const next: PreviewViewport = {
-      panX: layoutSize.width / 2 - roverE * defaultZoom,
-      panY: layoutSize.height / 2 - (-roverN) * defaultZoom,
+      panX: layoutSize.width / 2 - rE * defaultZoom,
+      panY: layoutSize.height / 2 - (-rN) * defaultZoom,
       zoom: defaultZoom,
     };
     viewportRef.current = next;
@@ -6109,20 +6400,20 @@ function PlanPreview({
     <View
       onLayout={handleLayout}
       style={{ flex: 1, backgroundColor: "#f0f4f8" }}
-      {...panResponder.panHandlers}
     >
-      {filtered.length === 0 && !hasRover ? (
-        // No plan, no rover: show placeholder
-        <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 18 }}>
-          <Text style={{ color: "#475569", fontSize: 15, textAlign: "center", lineHeight: 22 }}>
-            No plan lines to display yet.
-          </Text>
-          <Text style={{ color: "#94a3b8", fontSize: 12, marginTop: 6, textAlign: "center" }}>
-            Import or generate a field to see the preview here.
-          </Text>
-        </View>
-      ) : (
-        <Svg width="100%" height="100%">
+      <View style={{ flex: 1 }} {...panResponder.panHandlers}>
+        {filtered.length === 0 && !hasRover ? (
+          // No plan, no rover: show placeholder
+          <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 18 }}>
+            <Text style={{ color: "#475569", fontSize: 15, textAlign: "center", lineHeight: 22 }}>
+              No plan lines to display yet.
+            </Text>
+            <Text style={{ color: "#94a3b8", fontSize: 12, marginTop: 6, textAlign: "center" }}>
+              Import or generate a field to see the preview here.
+            </Text>
+          </View>
+        ) : (
+          <Svg width="100%" height="100%">
           {/* ── Background grid (always visible) ── */}
           {layoutSize.width > 0 && layoutSize.height > 0 && (() => {
             const gridLines: React.ReactElement[] = [];
@@ -6262,6 +6553,7 @@ function PlanPreview({
           })()}
         </Svg>
       )}
+      </View>
 
       {/* ── Single Heading Compass (always shown) ── */}
       <View
@@ -6334,29 +6626,49 @@ function PlanPreview({
           elevation: 40,
         }}
       >
+        {/* Focus Plan Button */}
+        <Pressable
+          onPress={handleFocusPlan}
+          style={({ pressed }) => ({
+            width: 48,
+            height: 48,
+            borderRadius: 24,
+            backgroundColor: pressed ? "rgba(15,23,42,0.95)" : "rgba(15,23,42,0.85)",
+            borderWidth: 1.2,
+            borderColor: "#10b981",
+            alignItems: "center",
+            justifyContent: "center",
+            shadowColor: "#000",
+            shadowOffset: { width: 0, height: 2 },
+            shadowOpacity: 0.25,
+            shadowRadius: 3.84,
+            elevation: 5,
+          })}
+        >
+          <MapIcon size={24} color="#10b981" />
+        </Pressable>
+
         {/* Focus Rover Button */}
-        {hasRover && (
-          <Pressable
-            onPress={handleFocusRover}
-            style={({ pressed }) => ({
-              width: 40,
-              height: 40,
-              borderRadius: 20,
-              backgroundColor: pressed ? "rgba(15,23,42,0.95)" : "rgba(15,23,42,0.85)",
-              borderWidth: 1.2,
-              borderColor: "#0ea5e9",
-              alignItems: "center",
-              justifyContent: "center",
-              shadowColor: "#000",
-              shadowOffset: { width: 0, height: 2 },
-              shadowOpacity: 0.25,
-              shadowRadius: 3.84,
-              elevation: 5,
-            })}
-          >
-            <Tractor size={20} color="#0ea5e9" />
-          </Pressable>
-        )}
+        <Pressable
+          onPress={handleFocusRover}
+          style={({ pressed }) => ({
+            width: 48,
+            height: 48,
+            borderRadius: 24,
+            backgroundColor: pressed ? "rgba(15,23,42,0.95)" : "rgba(15,23,42,0.85)",
+            borderWidth: 1.2,
+            borderColor: "#0ea5e9",
+            alignItems: "center",
+            justifyContent: "center",
+            shadowColor: "#000",
+            shadowOffset: { width: 0, height: 2 },
+            shadowOpacity: 0.25,
+            shadowRadius: 3.84,
+            elevation: 5,
+          })}
+        >
+          <Tractor size={26} color="#0ea5e9" />
+        </Pressable>
 
 
       </View>
