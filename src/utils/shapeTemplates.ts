@@ -10,41 +10,40 @@ export function generateTemplateLines(shape: ShapeType, size: number, arcType: A
     const half = size / 2;
     // Square coordinates (n, e)
     const pts = [
-      { n: -half, e: -half },
-      { n: half, e: -half },
-      { n: half, e: half },
-      { n: -half, e: half },
-      { n: -half, e: -half },
+      [-half, -half],
+      [half, -half],
+      [half, half],
+      [-half, half],
+      [-half, -half],
     ];
     for (let i = 0; i < 4; i++) {
-      lines.push({
-        id: `template-square-${i}`,
-        label: `Segment ${i + 1}`,
-        layer: "marking",
-        from: { id: i * 2 + 1, x: pts[i].n, y: pts[i].e },
-        to: { id: i * 2 + 2, x: pts[i+1].n, y: pts[i+1].e },
-        width: 0.1,
-      });
+        lines.push({
+            id: `shape-line-${i}`, label: `Square Side ${i + 1}`, layer: "marking", width: 0.1,
+            from: { id: i * 2, x: pts[i][0], y: pts[i][1] },
+            to: { id: i * 2 + 1, x: pts[i + 1][0], y: pts[i + 1][1] },
+        });
     }
   } else if (shape === "triangle") {
-    // Equilateral triangle with side length = size
-    const h = (Math.sqrt(3) / 2) * size;
-    const pts = [
-      { n: h / 2, e: 0 },
-      { n: -h / 2, e: -size / 2 },
-      { n: -h / 2, e: size / 2 },
-      { n: h / 2, e: 0 },
-    ];
-    for (let i = 0; i < 3; i++) {
-      lines.push({
-        id: `template-triangle-${i}`,
-        label: `Segment ${i + 1}`,
-        layer: "marking",
-        from: { id: i * 2 + 1, x: pts[i].n, y: pts[i].e },
-        to: { id: i * 2 + 2, x: pts[i+1].n, y: pts[i+1].e },
-        width: 0.1,
-      });
-    }
+        // Equilateral-ish triangle
+        const half = size / 2;
+        const height = size * (Math.sqrt(3) / 2);
+        // Center the triangle vertically
+        const yOffset = height / 3; 
+        
+        const pts = [
+            [0, height - yOffset],          // Top
+            [-half, -yOffset],              // Bottom left
+            [half, -yOffset],               // Bottom right
+            [0, height - yOffset]           // Back to top
+        ];
+
+        for (let i = 0; i < 3; i++) {
+            lines.push({
+                id: `shape-line-${i}`, label: `Triangle Side ${i + 1}`, layer: "marking", width: 0.1,
+                from: { id: i * 2, x: pts[i][0], y: pts[i][1] },
+                to: { id: i * 2 + 1, x: pts[i + 1][0], y: pts[i + 1][1] },
+            });
+        }
   } else if (shape === "circle") {
     // Circle generated using polygon segments. Size = diameter
     const radius = size / 2;

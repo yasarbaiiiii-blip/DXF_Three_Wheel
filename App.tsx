@@ -65,6 +65,8 @@ import {
 import { readImportedPlanFile, normalizePlanLines } from "./src/utils/planImport";
 import type { ImportedPlan, PlanLine } from "./src/types/plan";
 import { generateTemplateLines, ShapeType, ArcType } from "./src/utils/shapeTemplates";
+import { generateAlphabetLines, generateNumberLines, FontStyle, AlphabetType, NumberType } from "./src/utils/characterTemplates";
+import { generateRoadSignLines, RoadSignType, ROAD_SIGN_LABELS } from "./src/utils/roadSignTemplates";
 
 type Page =
   | "connection"
@@ -5646,7 +5648,12 @@ function TemplatesPage(props: {
   onRefreshPaths: () => void;
   onNav: (page: Page) => void;
 }) {
+  const [category, setCategory] = useState<"shapes" | "alphabets" | "numbers" | "road_signs">("shapes");
+  const [fontStyle, setFontStyle] = useState<FontStyle>("smooth");
   const [shape, setShape] = useState<ShapeType>("square");
+  const [selectedLetter, setSelectedLetter] = useState<AlphabetType>("A");
+  const [selectedDigit, setSelectedDigit] = useState<NumberType>("0");
+  const [selectedSign, setSelectedSign] = useState<RoadSignType>("ArrowStraight");
   const [arcType, setArcType] = useState<ArcType>("full");
   const [sizeInput, setSizeInput] = useState("1.0");
   const [isParsing, setIsParsing] = useState(false);
@@ -5654,14 +5661,28 @@ function TemplatesPage(props: {
   const parsedSize = Math.max(0.5, Math.min(3.0, parseFloat(sizeInput) || 1.0));
 
   const previewLines = useMemo(() => {
-    return generateTemplateLines(shape, parsedSize, arcType);
-  }, [shape, parsedSize, arcType]);
+    if (category === "shapes") return generateTemplateLines(shape, parsedSize, arcType);
+    if (category === "alphabets") return generateAlphabetLines(selectedLetter, parsedSize, fontStyle);
+    if (category === "numbers") return generateNumberLines(selectedDigit, parsedSize, fontStyle);
+    if (category === "road_signs") return generateRoadSignLines(selectedSign, parsedSize);
+    return [];
+  }, [category, shape, selectedLetter, selectedDigit, selectedSign, parsedSize, arcType, fontStyle]);
 
   const handleParse = async () => {
     if (!props.apiBaseUrl) return;
+    if (previewLines.length === 0) {
+      Alert.alert("Empty Template", "No valid template to generate.");
+      return;
+    }
     setIsParsing(true);
     try {
-      const title = `${shape.charAt(0).toUpperCase() + shape.slice(1)} Template - ${parsedSize}m`;
+      const title = category === "shapes" 
+        ? `${shape.charAt(0).toUpperCase() + shape.slice(1)} Template - ${parsedSize}m`
+        : category === "alphabets"
+          ? `Letter ${selectedLetter} (${fontStyle}) - ${parsedSize}m`
+          : category === "numbers"
+            ? `Number ${selectedDigit} (${fontStyle}) - ${parsedSize}m`
+            : `Road Sign - ${parsedSize}m`;
       const fileName = `${title.replace(/\s+/g, "_")}.dxf`;
       const fileContent = linesToDxf(previewLines, fileName);
 
@@ -5723,68 +5744,188 @@ function TemplatesPage(props: {
             Templates
           </Text>
           <Text style={{ color: "#fff", fontSize: 18, fontWeight: "900", marginTop: 5 }}>
-            Shape Generator
+            {category === "shapes" ? "Shape Generator" : category === "alphabets" ? "Alphabet Generator" : category === "numbers" ? "Number Generator" : "Road Signs"}
           </Text>
           <Text style={{ color: "#cbd5e1", fontSize: 12, lineHeight: 17, marginTop: 6 }}>
-            Select a shape and size to preview and generate a working plan.
+            Select a template and size to preview and generate a working plan.
           </Text>
         </View>
 
         <View style={{ borderRadius: 14, padding: 14, backgroundColor: "#ffffff", borderWidth: 1, borderColor: "#d8e1eb" }}>
           <Text style={{ color: "#64748b", fontSize: 11, fontWeight: "800", letterSpacing: 1, textTransform: "uppercase", marginBottom: 12 }}>
-            Shape Selection
+            Category
           </Text>
-          <View style={{ flexDirection: "row", gap: 10 }}>
-            {([] as ShapeType[]).concat(["square", "circle", "triangle"]).map((s) => (
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}>
+            {(["shapes", "alphabets", "numbers", "road_signs"] as const).map((c) => (
               <Pressable
-                key={s}
-                onPress={() => setShape(s)}
+                key={c}
+                onPress={() => setCategory(c)}
                 style={{
-                  flex: 1,
-                  padding: 12,
+                  flexBasis: "47%",
+                  padding: 8,
                   borderRadius: 12,
-                  backgroundColor: shape === s ? "#0b6b68" : "#f8fafc",
+                  backgroundColor: category === c ? "#0b6b68" : "#f8fafc",
                   borderWidth: 1,
-                  borderColor: shape === s ? "#0b6b68" : "#e2e8f0",
+                  borderColor: category === c ? "#0b6b68" : "#e2e8f0",
                   alignItems: "center"
                 }}
               >
-                <Text style={{ color: shape === s ? "#fff" : "#0f172a", fontSize: 14, fontWeight: "800", textTransform: "capitalize" }}>
-                  {s}
+                <Text style={{ color: category === c ? "#fff" : "#0f172a", fontSize: 13, fontWeight: "800", textTransform: "capitalize" }}>
+                  {c.replace("_", " ")}
                 </Text>
               </Pressable>
             ))}
           </View>
         </View>
 
-        {shape === "circle" && (
+        {(category === "alphabets" || category === "numbers") && (
           <View style={{ borderRadius: 14, padding: 14, backgroundColor: "#ffffff", borderWidth: 1, borderColor: "#d8e1eb" }}>
             <Text style={{ color: "#64748b", fontSize: 11, fontWeight: "800", letterSpacing: 1, textTransform: "uppercase", marginBottom: 12 }}>
-              Arc Type
+              Font Style
             </Text>
             <View style={{ flexDirection: "row", gap: 10 }}>
-              {([] as ArcType[]).concat(["quarter", "half", "full"]).map((a) => (
+              {(["smooth", "stencil"] as FontStyle[]).map((f) => (
                 <Pressable
-                  key={a}
-                  onPress={() => setArcType(a)}
+                  key={f}
+                  onPress={() => setFontStyle(f)}
                   style={{
                     flex: 1,
                     padding: 12,
                     borderRadius: 12,
-                    backgroundColor: arcType === a ? "#0b6b68" : "#f8fafc",
+                    backgroundColor: fontStyle === f ? "#0f172a" : "#f8fafc",
                     borderWidth: 1,
-                    borderColor: arcType === a ? "#0b6b68" : "#e2e8f0",
+                    borderColor: fontStyle === f ? "#0f172a" : "#e2e8f0",
                     alignItems: "center"
                   }}
                 >
-                  <Text style={{ color: arcType === a ? "#fff" : "#0f172a", fontSize: 14, fontWeight: "800", textTransform: "capitalize" }}>
-                    {a === "full" ? "Full" : a === "half" ? "Half" : "Quarter"}
+                  <Text style={{ color: fontStyle === f ? "#fff" : "#0f172a", fontSize: 14, fontWeight: "800", textTransform: "capitalize" }}>
+                    {f}
                   </Text>
                 </Pressable>
               ))}
             </View>
           </View>
         )}
+
+        <View style={{ flex: 1, borderRadius: 14, padding: 14, backgroundColor: "#ffffff", borderWidth: 1, borderColor: "#d8e1eb" }}>
+          <Text style={{ color: "#64748b", fontSize: 11, fontWeight: "800", letterSpacing: 1, textTransform: "uppercase", marginBottom: 12 }}>
+            Selection
+          </Text>
+          <ScrollView style={{ flex: 1 }}>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+              {category === "shapes" && ([] as ShapeType[]).concat(["square", "circle", "triangle"]).map((s) => (
+                <Pressable
+                  key={s}
+                  onPress={() => setShape(s)}
+                  style={{
+                    width: "30%",
+                    padding: 12,
+                    borderRadius: 12,
+                    backgroundColor: shape === s ? "#0b6b68" : "#f8fafc",
+                    borderWidth: 1,
+                    borderColor: shape === s ? "#0b6b68" : "#e2e8f0",
+                    alignItems: "center"
+                  }}
+                >
+                  <Text style={{ color: shape === s ? "#fff" : "#0f172a", fontSize: 13, fontWeight: "800", textTransform: "capitalize" }}>
+                    {s}
+                  </Text>
+                </Pressable>
+              ))}
+
+              {category === "alphabets" && Array.from("ABCDEFGHIJKLMNOPQRSTUVWXYZ").map((l) => (
+                <Pressable
+                  key={l}
+                  onPress={() => setSelectedLetter(l as AlphabetType)}
+                  style={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: 12,
+                    backgroundColor: selectedLetter === l ? "#0b6b68" : "#f8fafc",
+                    borderWidth: 1,
+                    borderColor: selectedLetter === l ? "#0b6b68" : "#e2e8f0",
+                    alignItems: "center",
+                    justifyContent: "center"
+                  }}
+                >
+                  <Text style={{ color: selectedLetter === l ? "#fff" : "#0f172a", fontSize: 18, fontWeight: "800" }}>
+                    {l}
+                  </Text>
+                </Pressable>
+              ))}
+
+              {category === "numbers" && Array.from("0123456789").map((n) => (
+                <Pressable
+                  key={n}
+                  onPress={() => setSelectedDigit(n as NumberType)}
+                  style={{
+                    width: 50,
+                    height: 50,
+                    borderRadius: 12,
+                    backgroundColor: selectedDigit === n ? "#0b6b68" : "#f8fafc",
+                    borderWidth: 1,
+                    borderColor: selectedDigit === n ? "#0b6b68" : "#e2e8f0",
+                    alignItems: "center",
+                    justifyContent: "center"
+                  }}
+                >
+                  <Text style={{ color: selectedDigit === n ? "#fff" : "#0f172a", fontSize: 20, fontWeight: "800" }}>
+                    {n}
+                  </Text>
+                </Pressable>
+              ))}
+
+              {category === "road_signs" && (Object.keys(ROAD_SIGN_LABELS) as RoadSignType[]).map((s) => (
+                <Pressable
+                  key={s}
+                  onPress={() => setSelectedSign(s)}
+                  style={{
+                    flexBasis: "31%",
+                    padding: 12,
+                    borderRadius: 12,
+                    backgroundColor: selectedSign === s ? "#0f172a" : "#f1f5f9",
+                    borderWidth: 1,
+                    borderColor: selectedSign === s ? "#0f172a" : "#e2e8f0",
+                    alignItems: "center",
+                  }}
+                >
+                  <Text style={{ color: selectedSign === s ? "#ffffff" : "#475569", fontSize: 13, fontWeight: "700", textAlign: "center" }}>
+                    {ROAD_SIGN_LABELS[s]}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+
+            {category === "shapes" && shape === "circle" && (
+              <View style={{ marginTop: 20 }}>
+                <Text style={{ color: "#64748b", fontSize: 11, fontWeight: "800", letterSpacing: 1, textTransform: "uppercase", marginBottom: 12 }}>
+                  Arc Type
+                </Text>
+                <View style={{ flexDirection: "row", gap: 10 }}>
+                  {([] as ArcType[]).concat(["quarter", "half", "full"]).map((a) => (
+                    <Pressable
+                      key={a}
+                      onPress={() => setArcType(a)}
+                      style={{
+                        flex: 1,
+                        padding: 12,
+                        borderRadius: 12,
+                        backgroundColor: arcType === a ? "#0b6b68" : "#f8fafc",
+                        borderWidth: 1,
+                        borderColor: arcType === a ? "#0b6b68" : "#e2e8f0",
+                        alignItems: "center"
+                      }}
+                    >
+                      <Text style={{ color: arcType === a ? "#fff" : "#0f172a", fontSize: 14, fontWeight: "800", textTransform: "capitalize" }}>
+                        {a === "full" ? "Full" : a === "half" ? "Half" : "Quarter"}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+            )}
+          </ScrollView>
+        </View>
 
         <View style={{ borderRadius: 14, padding: 14, backgroundColor: "#ffffff", borderWidth: 1, borderColor: "#d8e1eb" }}>
           <Text style={{ color: "#64748b", fontSize: 11, fontWeight: "800", letterSpacing: 1, textTransform: "uppercase", marginBottom: 12 }}>
@@ -5816,18 +5957,17 @@ function TemplatesPage(props: {
             </View>
           </View>
           <Text style={{ color: "#64748b", fontSize: 11, marginTop: 4 }}>
-            {shape === "circle" ? "Diameter in meters" : shape === "square" ? "Side length in meters" : "Height in meters"}
+            {category === "shapes" ? (shape === "circle" ? "Diameter in meters" : shape === "square" ? "Side length in meters" : "Height in meters") : "Height in meters"}
           </Text>
         </View>
 
         <Pressable
           onPress={handleParse}
-          disabled={isParsing}
+          disabled={isParsing || previewLines.length === 0}
           style={{
-            marginTop: "auto",
             height: 52,
             borderRadius: 14,
-            backgroundColor: isParsing ? "#94a3b8" : "#0f988f",
+            backgroundColor: isParsing || previewLines.length === 0 ? "#94a3b8" : "#0f988f",
             alignItems: "center",
             justifyContent: "center",
           }}
@@ -6380,9 +6520,11 @@ function PlanPreview({
   const handleLayout = useCallback((event: any) => {
     const { width, height } = event.nativeEvent.layout ?? {};
     if (width && height) {
-      setLayoutSize((prev) =>
-        prev.width === width && prev.height === height ? prev : { width, height }
-      );
+      setLayoutSize((prev) => {
+        const newW = Math.round(width);
+        const newH = Math.round(height);
+        return prev.width === newW && prev.height === newH ? prev : { width: newW, height: newH };
+      });
     }
   }, []);
 
