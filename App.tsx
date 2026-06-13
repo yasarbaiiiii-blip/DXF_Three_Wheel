@@ -6,7 +6,6 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
-  LayoutAnimation,
   Modal,
   PanResponder,
   Platform,
@@ -16,22 +15,14 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  UIManager,
   View,
 } from "react-native";
-
-if (
-  Platform.OS === "android" &&
-  UIManager.setLayoutAnimationEnabledExperimental
-) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
 
 import Slider from "@react-native-community/slider";
 import * as FileSystem from "expo-file-system/legacy";
 import * as DocumentPicker from "expo-document-picker";
-import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
-import { GestureHandlerRootView, TouchableOpacity as RNGHTouchableOpacity } from "react-native-gesture-handler";
+import { SafeAreaInsetsContext, SafeAreaProvider } from "react-native-safe-area-context";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import DraggableFlatList, { RenderItemParams, ScaleDecorator } from "react-native-draggable-flatlist";
 
 import Svg, { Circle, G, Line, Path, Polygon, Text as SvgText } from "react-native-svg";
@@ -1735,136 +1726,147 @@ export default function App() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
-        <SafeAreaView style={{ flex: 1, backgroundColor: BG }}>
-          {page === "connection" ? (
-            <ConnectionView
-              selectedWs={selectedWs}
-              manualHost={manualHost}
-              wsError={wsError}
-              wsStatus={wsStatus}
-              isOffline={isOffline}
-              discoveredRovers={discoveredRovers}
-              onRefresh={scanForWebsockets}
-              onSelect={handleSelectWebsocket}
-              onManualHostChange={setManualHost}
-              onConnect={connectSelectedWebsocket}
-              onOfflinePreview={enterOfflinePreview}
-            />
-          ) : page === "home" ? (
-            <HomeView
-              autoOrigin={autoOrigin}
-              setAutoOrigin={setAutoOrigin}
-              importedPlan={importedPlan}
-              lines={displayedLines}
-              setLines={setLines}
-              selectedLineId={selectedLineId}
-              onSelectLine={setSelectedLineId}
-              onDeleteSelectedLine={deleteSelectedLine}
-              onConfirmDeletePlan={deleteEntirePlan}
-              menuOpen={menuOpen}
-              onToggleMenu={() => setMenuOpen((v) => !v)}
-              onNav={(p) => {
-                logAction("NAVIGATE", { page: p });
-                setPage(p);
-                setMenuOpen(false);
+        <SafeAreaInsetsContext.Consumer>
+          {(insets) => (
+            <View
+              style={{
+                flex: 1,
+                backgroundColor: BG,
+                paddingTop: insets?.top ?? 0,
+                paddingRight: insets?.right ?? 0,
+                paddingBottom: insets?.bottom ?? 0,
+                paddingLeft: insets?.left ?? 0,
               }}
-              onDisconnect={disconnectToConnectionScreen}
-              layerVisibility={layerVisibility}
-              setLayerVisibility={setLayerVisibility}
-              onStopPlan={stopMissionOnBackend}
-              onStartPlan={startLoadedMission}
-              onPausePlan={pauseMissionOnBackend}
-              onArmVehicle={armVehicle}
-              onSetMode={setVehicleMode}
-              onEstopVehicle={estopVehicle}
-              missionActionBusy={missionActionBusy}
-              missionFileReady={missionFileReady}
-              missionLoaded={missionLoaded}
-              missionRunning={missionRunning}
-              systemHealth={systemHealth}
-              telemetrySnapshot={telemetrySnapshot}
-              activityFeed={activityFeed}
-              discoveryFeed={discoveryFeed}
-              telemetryError={telemetryError}
-              telemetryLoading={telemetryLoading}
-              isPaused={isPaused}
-              setIsPaused={setIsPaused}
-              rtkModalOpen={rtkModalOpen}
-              setRtkModalOpen={setRtkModalOpen}
-              rtkCaster={rtkCaster}
-              setRtkCaster={setRtkCaster}
-              rtkPort={rtkPort}
-              setRtkPort={setRtkPort}
-              rtkMountPoint={rtkMountPoint}
-              setRtkMountPoint={setRtkMountPoint}
-              rtkUsername={rtkUsername}
-              setRtkUsername={setRtkUsername}
-              rtkPassword={rtkPassword}
-              setRtkPassword={setRtkPassword}
-              rtkConnecting={rtkConnecting}
-              startNtrip={startNtrip}
-              startLora={startLora}
-              stopRtk={stopRtk}
-              rtkRunning={rtkRunning}
-              rtkHealthy={rtkHealthy}
-              onParsePlan={parseDxfPlan}
-              apiBaseUrl={apiBaseUrl}
-              selectedPathName={selectedPathName}
-              onRefreshPaths={() => {
-                const target = selectedPathName || importedPlan?.fileName;
-                if (target) previewSelectedPath(target);
-              }}
-            />
-          ) : (
-            <SectionScreen
-              telemetrySnapshot={telemetrySnapshot}
-              title={sectionTitle}
-              page={page}
-              importedPlan={importedPlan}
-              lines={displayedLines}
-              setLines={setLines}
-              selectedLineId={selectedLineId}
-              backendPaths={backendPaths}
-              selectedPathName={selectedPathName}
-              onSelectPath={previewSelectedPath}
-              onLoadSelectedPath={loadMissionOnBackend}
-              missionActionBusy={missionActionBusy}
-              apiBaseUrl={apiBaseUrl}
-              onRefreshPaths={fetchBackendPaths}
-              onBack={() => setPage("home")}
-              onNav={(p) => setPage(p)}
-              onSelectLine={setSelectedLineId}
-              onGenerateTemplate={(name, generatedLines) => {
-                const safeGeneratedLines = sanitizePlanLines(generatedLines);
-                setImportedPlan({ fileName: `${name}.dxf`, uri: "", fileType: "dxf", source: "generated" });
-                setLines(safeGeneratedLines);
-                setSelectedLineId(safeGeneratedLines[0]?.id ?? null);
-                setMissionFileReady(false);
-                setMissionLoaded(false);
-                setMissionRunning(false);
-                setPage("home");
-                showToast("Template ready", `${name}.dxf is ready to upload.`, "success");
-              }}
-              layerVisibility={layerVisibility}
-              setLayerVisibility={setLayerVisibility}
-              setImportedPlan={setImportedPlan}
-              onRunTemplate={runTemplateOnBackend}
-              missionFileReady={missionFileReady}
-              toggleA={toggleA}
-              toggleB={toggleB}
-              toggleC={toggleC}
-              toggleD={toggleD}
-              delayA={delayA}
-              delayB={delayB}
-              setToggleA={setToggleA}
-              setToggleB={setToggleB}
-              setToggleC={setToggleC}
-              setToggleD={setToggleD}
-              setDelayA={setDelayA}
-              setDelayB={setDelayB}
-              onParsePlan={parseDxfPlan}
-            />
-          )}
+            >
+              {page === "connection" ? (
+                <ConnectionView
+                  selectedWs={selectedWs}
+                  manualHost={manualHost}
+                  wsError={wsError}
+                  wsStatus={wsStatus}
+                  isOffline={isOffline}
+                  discoveredRovers={discoveredRovers}
+                  onRefresh={scanForWebsockets}
+                  onSelect={handleSelectWebsocket}
+                  onManualHostChange={setManualHost}
+                  onConnect={connectSelectedWebsocket}
+                  onOfflinePreview={enterOfflinePreview}
+                />
+              ) : page === "home" ? (
+                <HomeView
+                  autoOrigin={autoOrigin}
+                  setAutoOrigin={setAutoOrigin}
+                  importedPlan={importedPlan}
+                  lines={displayedLines}
+                  setLines={setLines}
+                  selectedLineId={selectedLineId}
+                  onSelectLine={setSelectedLineId}
+                  onDeleteSelectedLine={deleteSelectedLine}
+                  onConfirmDeletePlan={deleteEntirePlan}
+                  menuOpen={menuOpen}
+                  onToggleMenu={() => setMenuOpen((v) => !v)}
+                  onNav={(p) => {
+                    logAction("NAVIGATE", { page: p });
+                    setPage(p);
+                    setMenuOpen(false);
+                  }}
+                  onDisconnect={disconnectToConnectionScreen}
+                  layerVisibility={layerVisibility}
+                  setLayerVisibility={setLayerVisibility}
+                  onStopPlan={stopMissionOnBackend}
+                  onStartPlan={startLoadedMission}
+                  onPausePlan={pauseMissionOnBackend}
+                  onArmVehicle={armVehicle}
+                  onSetMode={setVehicleMode}
+                  onEstopVehicle={estopVehicle}
+                  missionActionBusy={missionActionBusy}
+                  missionFileReady={missionFileReady}
+                  missionLoaded={missionLoaded}
+                  missionRunning={missionRunning}
+                  systemHealth={systemHealth}
+                  telemetrySnapshot={telemetrySnapshot}
+                  activityFeed={activityFeed}
+                  discoveryFeed={discoveryFeed}
+                  telemetryError={telemetryError}
+                  telemetryLoading={telemetryLoading}
+                  isPaused={isPaused}
+                  setIsPaused={setIsPaused}
+                  rtkModalOpen={rtkModalOpen}
+                  setRtkModalOpen={setRtkModalOpen}
+                  rtkCaster={rtkCaster}
+                  setRtkCaster={setRtkCaster}
+                  rtkPort={rtkPort}
+                  setRtkPort={setRtkPort}
+                  rtkMountPoint={rtkMountPoint}
+                  setRtkMountPoint={setRtkMountPoint}
+                  rtkUsername={rtkUsername}
+                  setRtkUsername={setRtkUsername}
+                  rtkPassword={rtkPassword}
+                  setRtkPassword={setRtkPassword}
+                  rtkConnecting={rtkConnecting}
+                  startNtrip={startNtrip}
+                  startLora={startLora}
+                  stopRtk={stopRtk}
+                  rtkRunning={rtkRunning}
+                  rtkHealthy={rtkHealthy}
+                  onParsePlan={parseDxfPlan}
+                  apiBaseUrl={apiBaseUrl}
+                  selectedPathName={selectedPathName}
+                  onRefreshPaths={() => {
+                    const target = selectedPathName || importedPlan?.fileName;
+                    if (target) previewSelectedPath(target);
+                  }}
+                />
+              ) : (
+                <SectionScreen
+                  telemetrySnapshot={telemetrySnapshot}
+                  title={sectionTitle}
+                  page={page}
+                  importedPlan={importedPlan}
+                  lines={displayedLines}
+                  setLines={setLines}
+                  selectedLineId={selectedLineId}
+                  backendPaths={backendPaths}
+                  selectedPathName={selectedPathName}
+                  onSelectPath={previewSelectedPath}
+                  onLoadSelectedPath={loadMissionOnBackend}
+                  missionActionBusy={missionActionBusy}
+                  apiBaseUrl={apiBaseUrl}
+                  onRefreshPaths={fetchBackendPaths}
+                  onBack={() => setPage("home")}
+                  onNav={(p) => setPage(p)}
+                  onSelectLine={setSelectedLineId}
+                  onGenerateTemplate={(name, generatedLines) => {
+                    const safeGeneratedLines = sanitizePlanLines(generatedLines);
+                    setImportedPlan({ fileName: `${name}.dxf`, uri: "", fileType: "dxf", source: "generated" });
+                    setLines(safeGeneratedLines);
+                    setSelectedLineId(safeGeneratedLines[0]?.id ?? null);
+                    setMissionFileReady(false);
+                    setMissionLoaded(false);
+                    setMissionRunning(false);
+                    setPage("home");
+                    showToast("Template ready", `${name}.dxf is ready to upload.`, "success");
+                  }}
+                  layerVisibility={layerVisibility}
+                  setLayerVisibility={setLayerVisibility}
+                  setImportedPlan={setImportedPlan}
+                  onRunTemplate={runTemplateOnBackend}
+                  missionFileReady={missionFileReady}
+                  toggleA={toggleA}
+                  toggleB={toggleB}
+                  toggleC={toggleC}
+                  toggleD={toggleD}
+                  delayA={delayA}
+                  delayB={delayB}
+                  setToggleA={setToggleA}
+                  setToggleB={setToggleB}
+                  setToggleC={setToggleC}
+                  setToggleD={setToggleD}
+                  setDelayA={setDelayA}
+                  setDelayB={setDelayB}
+                  onParsePlan={parseDxfPlan}
+                />
+              )}
 
 
           {toast ? (
@@ -1919,7 +1921,9 @@ export default function App() {
               </View>
             </View>
           ) : null}
-        </SafeAreaView>
+            </View>
+          )}
+        </SafeAreaInsetsContext.Consumer>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );
@@ -5239,40 +5243,38 @@ function FieldsPage({
           {/* List Content */}
           <View style={{ flex: 1, backgroundColor: "#fff", borderRadius: 12, borderWidth: 1, borderColor: "#e2e8f0", overflow: "hidden" }}>
             {isReordering ? (
-              <GestureHandlerRootView style={{ flex: 1 }}>
-                <DraggableFlatList
-                  data={reorderedLines}
-                  onDragEnd={({ data }: { data: PlanLine[] }) => setReorderedLines(data)}
-                  keyExtractor={(item: PlanLine) => item.id}
-                  containerStyle={{ flex: 1 }}
-                  renderItem={({ item, drag, isActive }: RenderItemParams<PlanLine>) => (
-                    <ScaleDecorator>
-                      <RNGHTouchableOpacity
-                        onLongPress={drag}
-                        disabled={isActive}
-                        style={{
-                          flexDirection: "row",
-                          alignItems: "center",
-                          padding: 14,
-                          backgroundColor: isActive ? "#f8fafc" : "#fff",
-                          borderBottomWidth: 1,
-                          borderBottomColor: "#f1f5f9",
-                          opacity: isActive ? 0.8 : 1
-                        }}
-                      >
-                        <View style={{ paddingRight: 12 }}>
-                          <Text style={{ color: "#cbd5e1", fontSize: 20 }}>☰</Text>
-                        </View>
-                        <View style={{ flex: 1 }}>
-                          <Text style={{ color: "#0f172a", fontSize: 14, fontWeight: "700" }}>
-                            {item.label} <Text style={{ color: "#64748b", fontWeight: "500", fontSize: 12 }}>({item.entity?.entity_type})</Text>
-                          </Text>
-                        </View>
-                      </RNGHTouchableOpacity>
-                    </ScaleDecorator>
-                  )}
-                />
-              </GestureHandlerRootView>
+              <DraggableFlatList
+                data={reorderedLines}
+                onDragEnd={({ data }: { data: PlanLine[] }) => setReorderedLines(data)}
+                keyExtractor={(item: PlanLine) => item.id}
+                containerStyle={{ flex: 1 }}
+                renderItem={({ item, drag, isActive }: RenderItemParams<PlanLine>) => (
+                  <ScaleDecorator>
+                    <Pressable
+                      onLongPress={drag}
+                      disabled={isActive}
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        padding: 14,
+                        backgroundColor: isActive ? "#f8fafc" : "#fff",
+                        borderBottomWidth: 1,
+                        borderBottomColor: "#f1f5f9",
+                        opacity: isActive ? 0.8 : 1
+                      }}
+                    >
+                      <View style={{ paddingRight: 12 }}>
+                        <Text style={{ color: "#cbd5e1", fontSize: 20 }}>☰</Text>
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ color: "#0f172a", fontSize: 14, fontWeight: "700" }}>
+                          {item.label} <Text style={{ color: "#64748b", fontWeight: "500", fontSize: 12 }}>({item.entity?.entity_type})</Text>
+                        </Text>
+                      </View>
+                    </Pressable>
+                  </ScaleDecorator>
+                )}
+              />
             ) : (
               <ScrollView style={{ flex: 1 }}>
                 {lines
