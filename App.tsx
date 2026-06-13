@@ -4733,6 +4733,7 @@ const connectionStyles = {
 
 function FieldsPage({
   importedPlan,
+  setImportedPlan,
   lines,
   setLines,
   telemetrySnapshot,
@@ -4749,6 +4750,7 @@ function FieldsPage({
   onParsePlan,
 }: {
   importedPlan: ImportedPlan | null;
+  setImportedPlan: React.Dispatch<React.SetStateAction<ImportedPlan | null>>;
   lines: PlanLine[];
   setLines: React.Dispatch<React.SetStateAction<PlanLine[]>>;
   telemetrySnapshot: TelemetrySnapshot | null;
@@ -5102,6 +5104,9 @@ function FieldsPage({
 
       if (res.ok) {
         Alert.alert("Success", `${pickedFile.name} imported successfully.`);
+        if (ext === 'dxf') {
+          setImportedPlan({ fileName: pickedFile.name, uri: pickedFile.uri, fileType: "dxf", source: "builtin" });
+        }
         setPickedFile(null);
         onRefreshPaths();
       } else {
@@ -5399,7 +5404,7 @@ function FieldsPage({
                 Select a path directly from the rover.
               </Text>
             </View>
-            {selectedPathName?.toLowerCase().endsWith(".dxf") && (
+            {(selectedPathName?.toLowerCase().endsWith(".dxf") || importedPlan?.fileName?.toLowerCase().endsWith(".dxf")) && (
               <View style={{ gap: 8 }}>
                 <Pressable
                   onPress={() => setIsPathPlanningMode(true)}
