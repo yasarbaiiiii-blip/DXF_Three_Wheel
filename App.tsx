@@ -5233,10 +5233,10 @@ function FieldsPage({
               <GestureHandlerRootView style={{ flex: 1 }}>
                 <DraggableFlatList
                   data={reorderedLines}
-                  onDragEnd={({ data }) => setReorderedLines(data)}
-                  keyExtractor={(item) => item.id}
+                  onDragEnd={({ data }: { data: PlanLine[] }) => setReorderedLines(data)}
+                  keyExtractor={(item: PlanLine) => item.id}
                   containerStyle={{ flex: 1 }}
-                  renderItem={({ item, drag, isActive }) => (
+                  renderItem={({ item, drag, isActive }: RenderItemParams<PlanLine>) => (
                     <ScaleDecorator>
                       <Animated.View>
                         <Pressable
