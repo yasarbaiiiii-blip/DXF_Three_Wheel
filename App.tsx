@@ -31,7 +31,7 @@ import Slider from "@react-native-community/slider";
 import * as FileSystem from "expo-file-system/legacy";
 import * as DocumentPicker from "expo-document-picker";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
-import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { GestureHandlerRootView, TouchableOpacity as RNGHTouchableOpacity } from "react-native-gesture-handler";
 import DraggableFlatList, { RenderItemParams, ScaleDecorator } from "react-native-draggable-flatlist";
 
 import Svg, { Circle, G, Line, Path, Polygon, Text as SvgText } from "react-native-svg";
@@ -5247,7 +5247,7 @@ function FieldsPage({
                   containerStyle={{ flex: 1 }}
                   renderItem={({ item, drag, isActive }: RenderItemParams<PlanLine>) => (
                     <ScaleDecorator>
-                      <Pressable
+                      <RNGHTouchableOpacity
                         onLongPress={drag}
                         disabled={isActive}
                         style={{
@@ -5268,7 +5268,7 @@ function FieldsPage({
                             {item.label} <Text style={{ color: "#64748b", fontWeight: "500", fontSize: 12 }}>({item.entity?.entity_type})</Text>
                           </Text>
                         </View>
-                      </Pressable>
+                      </RNGHTouchableOpacity>
                     </ScaleDecorator>
                   )}
                 />
