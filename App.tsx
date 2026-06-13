@@ -4912,18 +4912,18 @@ function FieldsPage({
 
       if (res.ok) {
         setIsReordering(false);
-        // Refresh paths to fetch the new order & new transits
+        // Refresh paths list (if needed)
         onRefreshPaths();
-        if (onParsePlan) {
-          await onParsePlan();
+        // Fetch the updated entities and transits
+        if (onSelectPath && targetPath) {
+          onSelectPath(targetPath);
         }
       } else {
         const errJson = await res.json().catch(() => null);
         Alert.alert("Validation Error", errJson?.detail || "Failed to save the new order. The plan might be stale.");
-        // If 422, the plan is stale. Refresh instantly.
         onRefreshPaths();
-        if (onParsePlan) {
-          await onParsePlan();
+        if (onSelectPath && targetPath) {
+          onSelectPath(targetPath);
         }
       }
     } catch (err: any) {
@@ -5128,7 +5128,11 @@ function FieldsPage({
           <View style={{ flex: 1, position: "relative" }}>
             <PlanPreview
               lines={lines}
-              visibility={layerVisibility}
+              visibility={
+                isReordering
+                  ? { ...layerVisibility, transit: false, extension: false }
+                  : layerVisibility
+              }
               selectedLineId={selectedLineId}
               onSelectLine={onSelectLine}
               roverPosN={telemetrySnapshot?.pos_n ?? null}
@@ -6556,6 +6560,7 @@ function PlanPreview({
     pinchViewport: PreviewViewport | null;
     pinchRotation: number;
     isTap: boolean;
+    lastFocal: LocalPoint | null;
   }>({
     lastTouch: null,
     startTouch: null,
@@ -6564,6 +6569,7 @@ function PlanPreview({
     pinchViewport: null,
     pinchRotation: 0,
     isTap: false,
+    lastFocal: null,
   });
 
   useEffect(() => {
@@ -6656,36 +6662,65 @@ function PlanPreview({
         onPanResponderMove: (evt) => {
           const touches = evt.nativeEvent.touches;
 
-          if (touches.length === 1 && gestureRef.current.lastTouch) {
-            const current = { x: touches[0].locationX, y: touches[0].locationY };
-            if (Math.hypot(current.x - gestureRef.current.startTouch!.x, current.y - gestureRef.current.startTouch!.y) > 4) {
-              gestureRef.current.isTap = false;
+          if (touches.length === 1) {
+            if (gestureRef.current.pinchDistance != null) {
+              // Transitioned from 2 fingers back to 1. Reset touch tracking to prevent jumping.
+              gestureRef.current.pinchDistance = null;
+              gestureRef.current.lastFocal = null;
+              gestureRef.current.lastTouch = { x: touches[0].locationX, y: touches[0].locationY };
+              return;
             }
-            const dx = current.x - gestureRef.current.lastTouch.x;
-            const dy = current.y - gestureRef.current.lastTouch.y;
-            userPannedRef.current = true;
-            
-            setViewport(prev => {
-              const next = { ...prev, panX: prev.panX + dx, panY: prev.panY + dy };
-              viewportRef.current = next;
-              return next;
-            });
-            gestureRef.current.lastTouch = current;
+
+            if (gestureRef.current.lastTouch) {
+              const current = { x: touches[0].locationX, y: touches[0].locationY };
+              if (gestureRef.current.startTouch && Math.hypot(current.x - gestureRef.current.startTouch.x, current.y - gestureRef.current.startTouch.y) > 4) {
+                gestureRef.current.isTap = false;
+              }
+              const dx = current.x - gestureRef.current.lastTouch.x;
+              const dy = current.y - gestureRef.current.lastTouch.y;
+              userPannedRef.current = true;
+              
+              setViewport(prev => {
+                const next = { ...prev, panX: prev.panX + dx, panY: prev.panY + dy };
+                viewportRef.current = next;
+                return next;
+              });
+              gestureRef.current.lastTouch = current;
+            }
             return;
           }
 
-          if (touches.length >= 2 && gestureRef.current.pinchDistance != null && gestureRef.current.pinchViewport) {
+          if (touches.length >= 2) {
             gestureRef.current.isTap = false;
             userPannedRef.current = true;
 
-            const dist = touchDistance(touches[0], touches[1]);
-            const scale = dist / gestureRef.current.pinchDistance;
-            
+            const currentDist = touchDistance(touches[0], touches[1]);
+            const currentFocalX = (touches[0].locationX + touches[1].locationX) / 2;
+            const currentFocalY = (touches[0].locationY + touches[1].locationY) / 2;
+
+            if (gestureRef.current.pinchDistance == null || gestureRef.current.lastFocal == null) {
+              gestureRef.current.pinchDistance = currentDist;
+              gestureRef.current.lastFocal = { x: currentFocalX, y: currentFocalY };
+              return;
+            }
+
+            const scale = currentDist / gestureRef.current.pinchDistance;
+            const focalDx = currentFocalX - gestureRef.current.lastFocal.x;
+            const focalDy = currentFocalY - gestureRef.current.lastFocal.y;
+
             setViewport(prev => {
-              const next = { ...prev, zoom: Math.max(1, gestureRef.current.pinchViewport!.zoom * scale) };
+              const newZoom = Math.max(1, prev.zoom * scale);
+              const zoomRatio = newZoom / prev.zoom;
+              const newPanX = gestureRef.current.lastFocal!.x - (gestureRef.current.lastFocal!.x - prev.panX) * zoomRatio + focalDx;
+              const newPanY = gestureRef.current.lastFocal!.y - (gestureRef.current.lastFocal!.y - prev.panY) * zoomRatio + focalDy;
+              
+              const next = { ...prev, zoom: newZoom, panX: newPanX, panY: newPanY };
               viewportRef.current = next;
               return next;
             });
+
+            gestureRef.current.pinchDistance = currentDist;
+            gestureRef.current.lastFocal = { x: currentFocalX, y: currentFocalY };
           }
         },
 
