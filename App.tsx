@@ -1,3 +1,4 @@
+import "react-native-gesture-handler";
 import "./global.css";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -14,6 +15,7 @@ import {
   Switch,
   Text,
   TextInput,
+  TouchableOpacity,
   UIManager,
   View,
 } from "react-native";
@@ -29,6 +31,8 @@ import Slider from "@react-native-community/slider";
 import * as FileSystem from "expo-file-system/legacy";
 import * as DocumentPicker from "expo-document-picker";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
+import DraggableFlatList, { RenderItemParams, ScaleDecorator } from "react-native-draggable-flatlist";
 
 import Svg, { Circle, G, Line, Path, Polygon, Text as SvgText } from "react-native-svg";
 import { io, Socket } from "socket.io-client";
@@ -1729,193 +1733,195 @@ export default function App() {
   }
 
   return (
-    <SafeAreaProvider>
-      <SafeAreaView style={{ flex: 1, backgroundColor: BG }}>
-        {page === "connection" ? (
-          <ConnectionView
-            selectedWs={selectedWs}
-            manualHost={manualHost}
-            wsError={wsError}
-            wsStatus={wsStatus}
-            isOffline={isOffline}
-            discoveredRovers={discoveredRovers}
-            onRefresh={scanForWebsockets}
-            onSelect={handleSelectWebsocket}
-            onManualHostChange={setManualHost}
-            onConnect={connectSelectedWebsocket}
-            onOfflinePreview={enterOfflinePreview}
-          />
-        ) : page === "home" ? (
-          <HomeView
-            autoOrigin={autoOrigin}
-            setAutoOrigin={setAutoOrigin}
-            importedPlan={importedPlan}
-            lines={displayedLines}
-            setLines={setLines}
-            selectedLineId={selectedLineId}
-            onSelectLine={setSelectedLineId}
-            onDeleteSelectedLine={deleteSelectedLine}
-            onConfirmDeletePlan={deleteEntirePlan}
-            menuOpen={menuOpen}
-            onToggleMenu={() => setMenuOpen((v) => !v)}
-            onNav={(p) => {
-              logAction("NAVIGATE", { page: p });
-              setPage(p);
-              setMenuOpen(false);
-            }}
-            onDisconnect={disconnectToConnectionScreen}
-            layerVisibility={layerVisibility}
-            setLayerVisibility={setLayerVisibility}
-            onStopPlan={stopMissionOnBackend}
-            onStartPlan={startLoadedMission}
-            onPausePlan={pauseMissionOnBackend}
-            onArmVehicle={armVehicle}
-            onSetMode={setVehicleMode}
-            onEstopVehicle={estopVehicle}
-            missionActionBusy={missionActionBusy}
-            missionFileReady={missionFileReady}
-            missionLoaded={missionLoaded}
-            missionRunning={missionRunning}
-            systemHealth={systemHealth}
-            telemetrySnapshot={telemetrySnapshot}
-            activityFeed={activityFeed}
-            discoveryFeed={discoveryFeed}
-            telemetryError={telemetryError}
-            telemetryLoading={telemetryLoading}
-            isPaused={isPaused}
-            setIsPaused={setIsPaused}
-            rtkModalOpen={rtkModalOpen}
-            setRtkModalOpen={setRtkModalOpen}
-            rtkCaster={rtkCaster}
-            setRtkCaster={setRtkCaster}
-            rtkPort={rtkPort}
-            setRtkPort={setRtkPort}
-            rtkMountPoint={rtkMountPoint}
-            setRtkMountPoint={setRtkMountPoint}
-            rtkUsername={rtkUsername}
-            setRtkUsername={setRtkUsername}
-            rtkPassword={rtkPassword}
-            setRtkPassword={setRtkPassword}
-            rtkConnecting={rtkConnecting}
-            startNtrip={startNtrip}
-            startLora={startLora}
-            stopRtk={stopRtk}
-            rtkRunning={rtkRunning}
-            rtkHealthy={rtkHealthy}
-            onParsePlan={parseDxfPlan}
-            apiBaseUrl={apiBaseUrl}
-            selectedPathName={selectedPathName}
-            onRefreshPaths={() => {
-              const target = selectedPathName || importedPlan?.fileName;
-              if (target) previewSelectedPath(target);
-            }}
-          />
-        ) : (
-          <SectionScreen
-            telemetrySnapshot={telemetrySnapshot}
-            title={sectionTitle}
-            page={page}
-            importedPlan={importedPlan}
-            lines={displayedLines}
-            setLines={setLines}
-            selectedLineId={selectedLineId}
-            backendPaths={backendPaths}
-            selectedPathName={selectedPathName}
-            onSelectPath={previewSelectedPath}
-            onLoadSelectedPath={loadMissionOnBackend}
-            missionActionBusy={missionActionBusy}
-            apiBaseUrl={apiBaseUrl}
-            onRefreshPaths={fetchBackendPaths}
-            onBack={() => setPage("home")}
-            onNav={(p) => setPage(p)}
-            onSelectLine={setSelectedLineId}
-            onGenerateTemplate={(name, generatedLines) => {
-              const safeGeneratedLines = sanitizePlanLines(generatedLines);
-              setImportedPlan({ fileName: `${name}.dxf`, uri: "", fileType: "dxf", source: "generated" });
-              setLines(safeGeneratedLines);
-              setSelectedLineId(safeGeneratedLines[0]?.id ?? null);
-              setMissionFileReady(false);
-              setMissionLoaded(false);
-              setMissionRunning(false);
-              setPage("home");
-              showToast("Template ready", `${name}.dxf is ready to upload.`, "success");
-            }}
-            layerVisibility={layerVisibility}
-            setLayerVisibility={setLayerVisibility}
-            setImportedPlan={setImportedPlan}
-            onRunTemplate={runTemplateOnBackend}
-            missionFileReady={missionFileReady}
-            toggleA={toggleA}
-            toggleB={toggleB}
-            toggleC={toggleC}
-            toggleD={toggleD}
-            delayA={delayA}
-            delayB={delayB}
-            setToggleA={setToggleA}
-            setToggleB={setToggleB}
-            setToggleC={setToggleC}
-            setToggleD={setToggleD}
-            setDelayA={setDelayA}
-            setDelayB={setDelayB}
-            onParsePlan={parseDxfPlan}
-          />
-        )}
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <SafeAreaView style={{ flex: 1, backgroundColor: BG }}>
+          {page === "connection" ? (
+            <ConnectionView
+              selectedWs={selectedWs}
+              manualHost={manualHost}
+              wsError={wsError}
+              wsStatus={wsStatus}
+              isOffline={isOffline}
+              discoveredRovers={discoveredRovers}
+              onRefresh={scanForWebsockets}
+              onSelect={handleSelectWebsocket}
+              onManualHostChange={setManualHost}
+              onConnect={connectSelectedWebsocket}
+              onOfflinePreview={enterOfflinePreview}
+            />
+          ) : page === "home" ? (
+            <HomeView
+              autoOrigin={autoOrigin}
+              setAutoOrigin={setAutoOrigin}
+              importedPlan={importedPlan}
+              lines={displayedLines}
+              setLines={setLines}
+              selectedLineId={selectedLineId}
+              onSelectLine={setSelectedLineId}
+              onDeleteSelectedLine={deleteSelectedLine}
+              onConfirmDeletePlan={deleteEntirePlan}
+              menuOpen={menuOpen}
+              onToggleMenu={() => setMenuOpen((v) => !v)}
+              onNav={(p) => {
+                logAction("NAVIGATE", { page: p });
+                setPage(p);
+                setMenuOpen(false);
+              }}
+              onDisconnect={disconnectToConnectionScreen}
+              layerVisibility={layerVisibility}
+              setLayerVisibility={setLayerVisibility}
+              onStopPlan={stopMissionOnBackend}
+              onStartPlan={startLoadedMission}
+              onPausePlan={pauseMissionOnBackend}
+              onArmVehicle={armVehicle}
+              onSetMode={setVehicleMode}
+              onEstopVehicle={estopVehicle}
+              missionActionBusy={missionActionBusy}
+              missionFileReady={missionFileReady}
+              missionLoaded={missionLoaded}
+              missionRunning={missionRunning}
+              systemHealth={systemHealth}
+              telemetrySnapshot={telemetrySnapshot}
+              activityFeed={activityFeed}
+              discoveryFeed={discoveryFeed}
+              telemetryError={telemetryError}
+              telemetryLoading={telemetryLoading}
+              isPaused={isPaused}
+              setIsPaused={setIsPaused}
+              rtkModalOpen={rtkModalOpen}
+              setRtkModalOpen={setRtkModalOpen}
+              rtkCaster={rtkCaster}
+              setRtkCaster={setRtkCaster}
+              rtkPort={rtkPort}
+              setRtkPort={setRtkPort}
+              rtkMountPoint={rtkMountPoint}
+              setRtkMountPoint={setRtkMountPoint}
+              rtkUsername={rtkUsername}
+              setRtkUsername={setRtkUsername}
+              rtkPassword={rtkPassword}
+              setRtkPassword={setRtkPassword}
+              rtkConnecting={rtkConnecting}
+              startNtrip={startNtrip}
+              startLora={startLora}
+              stopRtk={stopRtk}
+              rtkRunning={rtkRunning}
+              rtkHealthy={rtkHealthy}
+              onParsePlan={parseDxfPlan}
+              apiBaseUrl={apiBaseUrl}
+              selectedPathName={selectedPathName}
+              onRefreshPaths={() => {
+                const target = selectedPathName || importedPlan?.fileName;
+                if (target) previewSelectedPath(target);
+              }}
+            />
+          ) : (
+            <SectionScreen
+              telemetrySnapshot={telemetrySnapshot}
+              title={sectionTitle}
+              page={page}
+              importedPlan={importedPlan}
+              lines={displayedLines}
+              setLines={setLines}
+              selectedLineId={selectedLineId}
+              backendPaths={backendPaths}
+              selectedPathName={selectedPathName}
+              onSelectPath={previewSelectedPath}
+              onLoadSelectedPath={loadMissionOnBackend}
+              missionActionBusy={missionActionBusy}
+              apiBaseUrl={apiBaseUrl}
+              onRefreshPaths={fetchBackendPaths}
+              onBack={() => setPage("home")}
+              onNav={(p) => setPage(p)}
+              onSelectLine={setSelectedLineId}
+              onGenerateTemplate={(name, generatedLines) => {
+                const safeGeneratedLines = sanitizePlanLines(generatedLines);
+                setImportedPlan({ fileName: `${name}.dxf`, uri: "", fileType: "dxf", source: "generated" });
+                setLines(safeGeneratedLines);
+                setSelectedLineId(safeGeneratedLines[0]?.id ?? null);
+                setMissionFileReady(false);
+                setMissionLoaded(false);
+                setMissionRunning(false);
+                setPage("home");
+                showToast("Template ready", `${name}.dxf is ready to upload.`, "success");
+              }}
+              layerVisibility={layerVisibility}
+              setLayerVisibility={setLayerVisibility}
+              setImportedPlan={setImportedPlan}
+              onRunTemplate={runTemplateOnBackend}
+              missionFileReady={missionFileReady}
+              toggleA={toggleA}
+              toggleB={toggleB}
+              toggleC={toggleC}
+              toggleD={toggleD}
+              delayA={delayA}
+              delayB={delayB}
+              setToggleA={setToggleA}
+              setToggleB={setToggleB}
+              setToggleC={setToggleC}
+              setToggleD={setToggleD}
+              setDelayA={setDelayA}
+              setDelayB={setDelayB}
+              onParsePlan={parseDxfPlan}
+            />
+          )}
 
 
-        {toast ? (
-          <View
-            pointerEvents="none"
-            style={{
-              position: "absolute",
-              left: 16,
-              right: 16,
-              bottom: 18,
-              zIndex: 999,
-              alignItems: "center",
-            }}
-          >
+          {toast ? (
             <View
+              pointerEvents="none"
               style={{
-                maxWidth: 560,
-                width: "100%",
-                borderRadius: 16,
-                paddingHorizontal: 14,
-                paddingVertical: 12,
-                backgroundColor:
-                  toast.tone === "success"
-                    ? "#0f766e"
-                    : toast.tone === "warning"
-                      ? "#b45309"
-                      : toast.tone === "error"
-                        ? "#991b1b"
-                        : "#0f172a",
-                borderWidth: 1,
-                borderColor:
-                  toast.tone === "success"
-                    ? "#5eead4"
-                    : toast.tone === "warning"
-                      ? "#fdba74"
-                      : toast.tone === "error"
-                        ? "#fca5a5"
-                        : "#334155",
-                shadowColor: "#000",
-                shadowOpacity: 0.16,
-                shadowRadius: 16,
-                shadowOffset: { width: 0, height: 8 },
-                elevation: 10,
+                position: "absolute",
+                left: 16,
+                right: 16,
+                bottom: 18,
+                zIndex: 999,
+                alignItems: "center",
               }}
             >
-              <Text style={{ color: "#fff", fontSize: 12, fontWeight: "900", letterSpacing: 0.6, textTransform: "uppercase" }}>
-                {toast.title}
-              </Text>
-              <Text style={{ color: "#e2e8f0", marginTop: 4, fontSize: 13, lineHeight: 18 }}>
-                {toast.message}
-              </Text>
+              <View
+                style={{
+                  maxWidth: 560,
+                  width: "100%",
+                  borderRadius: 16,
+                  paddingHorizontal: 14,
+                  paddingVertical: 12,
+                  backgroundColor:
+                    toast.tone === "success"
+                      ? "#0f766e"
+                      : toast.tone === "warning"
+                        ? "#b45309"
+                        : toast.tone === "error"
+                          ? "#991b1b"
+                          : "#0f172a",
+                  borderWidth: 1,
+                  borderColor:
+                    toast.tone === "success"
+                      ? "#5eead4"
+                      : toast.tone === "warning"
+                        ? "#fdba74"
+                        : toast.tone === "error"
+                          ? "#fca5a5"
+                          : "#334155",
+                  shadowColor: "#000",
+                  shadowOpacity: 0.16,
+                  shadowRadius: 16,
+                  shadowOffset: { width: 0, height: 8 },
+                  elevation: 10,
+                }}
+              >
+                <Text style={{ color: "#fff", fontSize: 12, fontWeight: "900", letterSpacing: 0.6, textTransform: "uppercase" }}>
+                  {toast.title}
+                </Text>
+                <Text style={{ color: "#e2e8f0", marginTop: 4, fontSize: 13, lineHeight: 18 }}>
+                  {toast.message}
+                </Text>
+              </View>
             </View>
-          </View>
-        ) : null}
-      </SafeAreaView>
-    </SafeAreaProvider>
+          ) : null}
+        </SafeAreaView>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }
 
@@ -4740,6 +4746,7 @@ function FieldsPage({
   onSelectLine,
   apiBaseUrl,
   onRefreshPaths,
+  onParsePlan,
 }: {
   importedPlan: ImportedPlan | null;
   lines: PlanLine[];
@@ -4768,10 +4775,20 @@ function FieldsPage({
   const [extAft, setExtAft] = useState("0.5");
   const [isExtSetting, setIsExtSetting] = useState(false);
 
-  const [scaleModalOpen, setScaleModalOpen] = useState(false);
-  const [scaleTargetSize, setScaleTargetSize] = useState("");
-  const [isScaling, setIsScaling] = useState(false);
-  const [scaleDimension, setScaleDimension] = useState<"width" | "height">("width");
+  const [isPathPlanningMode, setIsPathPlanningMode] = useState(false);
+  const [pathFilter, setPathFilter] = useState<"All" | "lines" | "arcs" | "transits" | "extensions">("All");
+  const [isReordering, setIsReordering] = useState(false);
+  const [infoModalOpen, setInfoModalOpen] = useState(false);
+  const [isSavingOrder, setIsSavingOrder] = useState(false);
+  const [isSprayingSet, setIsSprayingSet] = useState(false);
+  const [reorderedLines, setReorderedLines] = useState<PlanLine[]>([]);
+  
+  // Track order state when reordering starts
+  useEffect(() => {
+    if (isReordering) {
+      setReorderedLines(lines.filter(l => ["line", "arc", "circle"].includes(l.entity?.entity_type || "")));
+    }
+  }, [isReordering, lines]);
 
   const targetPathForExtensions = selectedPathName || importedPlan?.fileName;
 
@@ -4833,146 +4850,84 @@ function FieldsPage({
     }
   };
 
-  // Compute current plan dimensions from entities (in meters)
-  const currentPlanDims = useMemo(() => {
-    const planLines = lines.filter(l => l.layer !== "extension");
-    if (planLines.length === 0) return { width: 0, height: 0 };
-
-    let minN = Infinity, maxN = -Infinity, minE = Infinity, maxE = -Infinity;
-    planLines.forEach(l => {
-      if (l.entity && l.entity.preview_points && l.entity.preview_points.length > 1) {
-        l.entity.preview_points.forEach(pt => {
-          minN = Math.min(minN, pt.north);
-          maxN = Math.max(maxN, pt.north);
-          minE = Math.min(minE, pt.east);
-          maxE = Math.max(maxE, pt.east);
-        });
-      } else {
-        minN = Math.min(minN, l.from.x, l.to.x);
-        maxN = Math.max(maxN, l.from.x, l.to.x);
-        minE = Math.min(minE, l.from.y, l.to.y);
-        maxE = Math.max(maxE, l.from.y, l.to.y);
-      }
-    });
-    return {
-      width: Math.abs(maxE - minE),
-      height: Math.abs(maxN - minN),
-    };
-  }, [lines]);
-
-  const handleScaleDxf = async () => {
-    if (!selectedPathName || lines.length === 0 || !apiBaseUrl) return;
-    const targetMeters = parseFloat(scaleTargetSize);
-    if (isNaN(targetMeters) || targetMeters <= 0) {
-      Alert.alert("Invalid Size", "Please enter a valid size in meters.");
+  const handleSetSpray = async () => {
+    const targetPath = selectedPathName || importedPlan?.fileName;
+    if (!apiBaseUrl || !targetPath) {
+      Alert.alert("Error", "No path selected to save overrides to.");
       return;
     }
-
-    const currentSize = scaleDimension === "width" ? currentPlanDims.width : currentPlanDims.height;
-    if (currentSize <= 0.001) {
-      Alert.alert("Error", "Current plan size is too small or zero to scale.");
-      return;
-    }
-
-    const factor = targetMeters / currentSize;
-    setIsScaling(true);
+    setIsSprayingSet(true);
     try {
-      // Collect ALL geometry from complex entities using their original DXF geometry
-      // The backend returns preview_points as {north, east}
-      // Our PlanLine stores: from.x = north, from.y = east
-      // linesToDxf writes: DXF group 10 = from.x, group 20 = from.y
-      // The backend's DXF parser reads: DXF group 10 → X, group 20 → Y
-      // and outputs preview_points as: north = Y (group 20), east = X (group 10)
-      // So we need: DXF X (group 10) = east, DXF Y (group 20) = north
-      // That means: from.x should be EAST, from.y should be NORTH
+      const overridesMap = new Map<string, boolean>();
+      lines
+        .filter(l => l.entity && l.entity.entity_id && l.layer !== "extension" && l.layer !== "transit")
+        .forEach(l => {
+          overridesMap.set(l.entity!.entity_id, !!l.entity!.is_mark);
+        });
 
-      const flatLines: PlanLine[] = [];
-      lines.forEach(l => {
-        if (l.layer === "extension") return;
-
-        if (l.entity && l.entity.preview_points && l.entity.preview_points.length > 1) {
-          const pts = l.entity.preview_points;
-          for (let i = 0; i < pts.length - 1; i++) {
-            flatLines.push({
-              id: `${l.id}-seg-${i}`,
-              label: l.label,
-              layer: l.layer,
-              width: l.width,
-              // Store as: from.x = east (→ DXF X), from.y = north (→ DXF Y)
-              from: { id: 0, x: pts[i].east, y: pts[i].north },
-              to: { id: 0, x: pts[i+1].east, y: pts[i+1].north },
-            });
-          }
-        } else {
-          // Existing lines already have from.x = north, from.y = east
-          // Swap to: from.x = east, from.y = north for correct DXF output
-          flatLines.push({
-            ...l,
-            from: { ...l.from, x: l.from.y, y: l.from.x },
-            to: { ...l.to, x: l.to.y, y: l.to.x },
-          });
-        }
-      });
-
-      if (flatLines.length === 0) {
-        setIsScaling(false);
-        Alert.alert("Error", "No valid geometry found to scale.");
-        return;
-      }
-
-      // Compute center in DXF coordinate space (x=east, y=north)
-      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-      flatLines.forEach(l => {
-        minX = Math.min(minX, l.from.x, l.to.x);
-        maxX = Math.max(maxX, l.from.x, l.to.x);
-        minY = Math.min(minY, l.from.y, l.to.y);
-        maxY = Math.max(maxY, l.from.y, l.to.y);
-      });
-      const cx = (minX + maxX) / 2;
-      const cy = (minY + maxY) / 2;
-
-      const scaledLines = flatLines.map(l => ({
-        ...l,
-        from: { ...l.from, x: cx + (l.from.x - cx) * factor, y: cy + (l.from.y - cy) * factor },
-        to: { ...l.to, x: cx + (l.to.x - cx) * factor, y: cy + (l.to.y - cy) * factor }
+      const overrides = Array.from(overridesMap.entries()).map(([entity_id, is_mark]) => ({
+        entity_id,
+        is_mark
       }));
 
-      const baseName = selectedPathName.replace(/\.dxf$/i, "");
-      const newName = `${baseName}_${targetMeters}m.dxf`;
-
-      const fileContent = linesToDxf(scaledLines, newName);
-
-      const fileUri = `${FileSystem.cacheDirectory}${newName}`;
-      await FileSystem.writeAsStringAsync(fileUri, fileContent, {
-        encoding: FileSystem.EncodingType.UTF8,
-      });
-
-      const formData = new FormData();
-      formData.append("file", {
-        uri: fileUri,
-        name: newName,
-        type: "application/dxf",
-      } as any);
-
-      const res = await fetch(`${apiBaseUrl}/api/path/parse-dxf`, {
+      const res = await fetch(`${apiBaseUrl}/api/path/${encodeURIComponent(targetPath)}/entities`, {
         method: "POST",
-        body: formData,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ overrides })
       });
 
       if (res.ok) {
-        Alert.alert("Success", `Plan scaled to ${targetMeters}m and uploaded.`);
-        setScaleModalOpen(false);
-        onRefreshPaths();
-        onSelectPath(newName);
+        Alert.alert("Success", "Spray settings saved successfully.");
       } else {
         const errText = await res.text();
-        Alert.alert("Failed", errText || "Could not upload scaled plan.");
+        Alert.alert("Error", errText || "Failed to save spray settings");
       }
     } catch (err: any) {
-      console.log("Error scaling plan:", err);
-      Alert.alert("Error", err.message || "Failed to scale plan.");
+      Alert.alert("Error", err.message || "Failed to connect to backend");
     } finally {
-      setIsScaling(false);
+      setIsSprayingSet(false);
+    }
+  };
+
+  const handleSetOrder = async () => {
+    const targetPath = selectedPathName || importedPlan?.fileName;
+    if (!apiBaseUrl || !targetPath) {
+      Alert.alert("Error", "No path selected to reorder.");
+      return;
+    }
+    setIsSavingOrder(true);
+    try {
+      // Send only primary entity IDs for the new order
+      const entity_order = reorderedLines
+        .filter(l => l.entity && l.entity.entity_id)
+        .map(l => l.entity!.entity_id);
+
+      const res = await fetch(`${apiBaseUrl}/api/path/${encodeURIComponent(targetPath)}/entities/order`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entity_order })
+      });
+
+      if (res.ok) {
+        setIsReordering(false);
+        // Refresh paths to fetch the new order & new transits
+        onRefreshPaths();
+        if (onParsePlan) {
+          await onParsePlan();
+        }
+      } else {
+        const errJson = await res.json().catch(() => null);
+        Alert.alert("Validation Error", errJson?.detail || "Failed to save the new order. The plan might be stale.");
+        // If 422, the plan is stale. Refresh instantly.
+        onRefreshPaths();
+        if (onParsePlan) {
+          await onParsePlan();
+        }
+      }
+    } catch (err: any) {
+      Alert.alert("Error", err.message || "Failed to connect to backend");
+    } finally {
+      setIsSavingOrder(false);
     }
   };
 
@@ -5180,6 +5135,256 @@ function FieldsPage({
           </View>
         </View>
       </View>
+      
+      {isPathPlanningMode ? (
+        <View style={{ width: "42%", height: "100%", padding: 14, paddingLeft: 0, gap: 12 }}>
+          {/* Path Planning Header */}
+          <View style={{ borderRadius: 14, padding: 14, backgroundColor: "#0f172a" }}>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+              <View>
+                <Text style={{ color: "#94a3b8", fontSize: 11, fontWeight: "800", letterSpacing: 1.2, textTransform: "uppercase" }}>
+                  Field Workspace
+                </Text>
+                <Text style={{ color: "#fff", fontSize: 18, fontWeight: "900", marginTop: 5 }}>
+                  Path Planning
+                </Text>
+              </View>
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                <Pressable
+                  onPress={() => setInfoModalOpen(true)}
+                  style={{
+                    height: 36,
+                    paddingHorizontal: 12,
+                    backgroundColor: "#334155",
+                    borderRadius: 8,
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <Text style={{ color: "#fff", fontSize: 12, fontWeight: "800" }}>Info</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => {
+                    setIsPathPlanningMode(false);
+                    setIsReordering(false);
+                  }}
+                  style={{
+                    height: 36,
+                    paddingHorizontal: 12,
+                    backgroundColor: "#ef4444",
+                    borderRadius: 8,
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <Text style={{ color: "#fff", fontSize: 12, fontWeight: "800" }}>Exit</Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+
+          {/* Filters & Actions */}
+          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+              {(["All", "lines", "arcs", "transits", "extensions"] as const).map(f => (
+                <Pressable
+                  key={f}
+                  onPress={() => setPathFilter(f)}
+                  style={{
+                    paddingHorizontal: 12,
+                    paddingVertical: 8,
+                    borderRadius: 20,
+                    backgroundColor: pathFilter === f ? "#0f172a" : "#f1f5f9",
+                    borderWidth: 1,
+                    borderColor: pathFilter === f ? "#0f172a" : "#e2e8f0"
+                  }}
+                >
+                  <Text style={{ color: pathFilter === f ? "#fff" : "#475569", fontSize: 12, fontWeight: "700", textTransform: "capitalize" }}>
+                    {f}
+                  </Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+            <Pressable
+              onPress={() => {
+                if (isReordering) {
+                  handleSetOrder();
+                } else {
+                  setIsReordering(true);
+                  setPathFilter("All");
+                }
+              }}
+              style={{
+                paddingHorizontal: 16,
+                paddingVertical: 10,
+                borderRadius: 8,
+                backgroundColor: isReordering ? "#10b981" : "#8b5cf6",
+              }}
+            >
+              <Text style={{ color: "#fff", fontSize: 12, fontWeight: "800" }}>
+                {isReordering ? (isSavingOrder ? "Saving..." : "Save Order") : "Reorder Path"}
+              </Text>
+            </Pressable>
+          </View>
+
+          {/* List Content */}
+          <View style={{ flex: 1, backgroundColor: "#fff", borderRadius: 12, borderWidth: 1, borderColor: "#e2e8f0", overflow: "hidden" }}>
+            {isReordering ? (
+              <GestureHandlerRootView style={{ flex: 1 }}>
+                <DraggableFlatList
+                  data={reorderedLines}
+                  onDragEnd={({ data }) => setReorderedLines(data)}
+                  keyExtractor={(item) => item.id}
+                  containerStyle={{ flex: 1 }}
+                  renderItem={({ item, drag, isActive }) => (
+                    <ScaleDecorator>
+                      <Animated.View>
+                        <Pressable
+                          onLongPress={drag}
+                          disabled={isActive}
+                          style={{
+                            flexDirection: "row",
+                            alignItems: "center",
+                            padding: 14,
+                            backgroundColor: isActive ? "#f8fafc" : "#fff",
+                            borderBottomWidth: 1,
+                            borderBottomColor: "#f1f5f9",
+                            opacity: isActive ? 0.8 : 1
+                          }}
+                        >
+                          <View style={{ paddingRight: 12 }}>
+                            <Text style={{ color: "#cbd5e1", fontSize: 20 }}>☰</Text>
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ color: "#0f172a", fontSize: 14, fontWeight: "700" }}>
+                              {item.label} <Text style={{ color: "#64748b", fontWeight: "500", fontSize: 12 }}>({item.entity?.entity_type})</Text>
+                            </Text>
+                          </View>
+                        </Pressable>
+                      </Animated.View>
+                    </ScaleDecorator>
+                  )}
+                />
+              </GestureHandlerRootView>
+            ) : (
+              <ScrollView style={{ flex: 1 }}>
+                {lines
+                  .filter(l => {
+                    if (pathFilter === "All") return true;
+                    if (pathFilter === "lines") return l.entity?.entity_type === "line" && l.layer !== "transit" && l.layer !== "extension";
+                    if (pathFilter === "arcs") return l.entity?.entity_type === "arc" || l.entity?.entity_type === "circle";
+                    if (pathFilter === "transits") return l.layer === "transit";
+                    if (pathFilter === "extensions") return l.layer === "extension";
+                    return true;
+                  })
+                  .map(l => {
+                    const isPrimary = ["line", "arc", "circle"].includes(l.entity?.entity_type || "") && l.layer !== "transit" && l.layer !== "extension";
+                    const isSelected = selectedLineId === l.id;
+                    return (
+                      <Pressable
+                        key={l.id}
+                        onPress={() => onSelectLine(isSelected ? null : l.id)}
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          padding: 14,
+                          backgroundColor: isSelected ? "#f0fdfa" : "#fff",
+                          borderBottomWidth: 1,
+                          borderBottomColor: "#f1f5f9"
+                        }}
+                      >
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ color: isSelected ? "#0d9488" : "#0f172a", fontSize: 14, fontWeight: "700" }}>
+                            {l.label} <Text style={{ color: "#64748b", fontWeight: "500", fontSize: 12 }}>({l.layer === "transit" || l.layer === "extension" ? l.layer : l.entity?.entity_type})</Text>
+                          </Text>
+                        </View>
+                        {isPrimary && l.entity && (
+                          <Pressable
+                            onPress={() => {
+                              const newLines = [...lines];
+                              const idx = newLines.findIndex(x => x.id === l.id);
+                              if (idx !== -1 && newLines[idx].entity) {
+                                newLines[idx].entity!.is_mark = !newLines[idx].entity!.is_mark;
+                                setLines(newLines);
+                              }
+                            }}
+                            style={{
+                              width: 24, height: 24, borderRadius: 6,
+                              borderWidth: 1,
+                                borderColor: l.entity.is_mark ? "#0d9488" : "rgba(148,163,184,0.5)",
+                                backgroundColor: l.entity.is_mark ? "#0d9488" : "transparent",
+                                alignItems: "center", justifyContent: "center"
+                              }}
+                            >
+                              {l.entity.is_mark && <CheckIcon size={14} color="#fff" />}
+                          </Pressable>
+                        )}
+                      </Pressable>
+                    );
+                  })}
+              </ScrollView>
+            )}
+          </View>
+          
+          {!isReordering && (
+            <Pressable
+              onPress={handleSetSpray}
+              disabled={isSprayingSet}
+              style={{
+                height: 48,
+                backgroundColor: isSprayingSet ? "#475569" : "#0ea5e9",
+                borderRadius: 12,
+                alignItems: "center",
+                justifyContent: "center"
+              }}
+            >
+              <Text style={{ color: "#fff", fontSize: 14, fontWeight: "800" }}>{isSprayingSet ? "Saving..." : "Save Spray Settings"}</Text>
+            </Pressable>
+          )}
+
+          {/* Info Modal */}
+          <Modal visible={infoModalOpen} transparent={true} animationType="fade">
+            <View style={{ flex: 1, backgroundColor: "rgba(15,23,42,0.6)", justifyContent: "center", alignItems: "center" }}>
+              <View style={{ width: 340, backgroundColor: "#fff", borderRadius: 16, padding: 20, elevation: 10 }}>
+                <Text style={{ color: "#0f172a", fontSize: 18, fontWeight: "900", marginBottom: 16 }}>Path Summary</Text>
+                
+                <View style={{ gap: 12, marginBottom: 20 }}>
+                  <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                    <Text style={{ color: "#64748b", fontWeight: "700" }}>Primary Lines</Text>
+                    <Text style={{ color: "#0f172a", fontWeight: "800" }}>
+                      {lines.filter(l => l.entity?.entity_type === "line" && l.layer !== "transit" && l.layer !== "extension").length} total 
+                      ({lines.filter(l => l.entity?.entity_type === "line" && l.layer !== "transit" && l.layer !== "extension" && l.entity.is_mark).length} spray ready)
+                    </Text>
+                  </View>
+                  <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                    <Text style={{ color: "#64748b", fontWeight: "700" }}>Arcs/Circles</Text>
+                    <Text style={{ color: "#0f172a", fontWeight: "800" }}>
+                      {lines.filter(l => (l.entity?.entity_type === "arc" || l.entity?.entity_type === "circle") && l.layer !== "transit" && l.layer !== "extension").length} total
+                      ({lines.filter(l => (l.entity?.entity_type === "arc" || l.entity?.entity_type === "circle") && l.layer !== "transit" && l.layer !== "extension" && l.entity.is_mark).length} spray ready)
+                    </Text>
+                  </View>
+                  <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                    <Text style={{ color: "#64748b", fontWeight: "700" }}>Transits</Text>
+                    <Text style={{ color: "#0f172a", fontWeight: "800" }}>{lines.filter(l => l.layer === "transit").length} total (No spray)</Text>
+                  </View>
+                  <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                    <Text style={{ color: "#64748b", fontWeight: "700" }}>Extensions</Text>
+                    <Text style={{ color: "#0f172a", fontWeight: "800" }}>{lines.filter(l => l.layer === "extension").length} total (No spray)</Text>
+                  </View>
+                </View>
+
+                <Pressable
+                  onPress={() => setInfoModalOpen(false)}
+                  style={{ height: 44, backgroundColor: "#f1f5f9", borderRadius: 10, alignItems: "center", justifyContent: "center" }}
+                >
+                  <Text style={{ color: "#0f172a", fontSize: 14, fontWeight: "800" }}>Close</Text>
+                </Pressable>
+              </View>
+            </View>
+          </Modal>
+
+        </View>
+      ) : (
       <View style={{ width: "42%", height: "100%", padding: 14, paddingLeft: 0, gap: 12 }}>
         <View style={{ borderRadius: 14, padding: 14, backgroundColor: "#0f172a" }}>
           <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" }}>
@@ -5197,7 +5402,7 @@ function FieldsPage({
             {selectedPathName?.toLowerCase().endsWith(".dxf") && (
               <View style={{ gap: 8 }}>
                 <Pressable
-                  onPress={() => setScaleModalOpen(true)}
+                  onPress={() => setIsPathPlanningMode(true)}
                   style={{
                     height: 36,
                     paddingHorizontal: 12,
@@ -5207,7 +5412,7 @@ function FieldsPage({
                     justifyContent: "center",
                   }}
                 >
-                  <Text style={{ color: "#fff", fontSize: 12, fontWeight: "800" }}>Scale Plan</Text>
+                  <Text style={{ color: "#0f172a", fontSize: 12, fontWeight: "800" }}>Path Planning</Text>
                 </Pressable>
                 
                 <Pressable
@@ -5296,115 +5501,7 @@ function FieldsPage({
           </View>
         </Modal>
 
-        {/* --- SCALE MODAL --- */}
-        <Modal visible={scaleModalOpen} transparent={true} animationType="fade">
-          <View style={{ flex: 1, backgroundColor: "rgba(15,23,42,0.6)", justifyContent: "center", alignItems: "center" }}>
-            <View style={{ width: 380, backgroundColor: "#fff", borderRadius: 16, padding: 20, elevation: 10 }}>
-              <Text style={{ color: "#0f172a", fontSize: 18, fontWeight: "900", marginBottom: 16 }}>
-                Scale Plan
-              </Text>
-
-              {/* Current Dimensions */}
-              <View style={{ backgroundColor: "#f0f4f8", borderRadius: 10, padding: 12, marginBottom: 16 }}>
-                <Text style={{ color: "#64748b", fontSize: 11, fontWeight: "800", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 6 }}>
-                  Current Plan Size
-                </Text>
-                <View style={{ flexDirection: "row", gap: 16 }}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ color: "#94a3b8", fontSize: 10, fontWeight: "700" }}>Width</Text>
-                    <Text style={{ color: "#0f172a", fontSize: 16, fontWeight: "900" }}>
-                      {currentPlanDims.width.toFixed(2)} m
-                    </Text>
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ color: "#94a3b8", fontSize: 10, fontWeight: "700" }}>Height</Text>
-                    <Text style={{ color: "#0f172a", fontSize: 16, fontWeight: "900" }}>
-                      {currentPlanDims.height.toFixed(2)} m
-                    </Text>
-                  </View>
-                </View>
-              </View>
-
-              {/* Dimension Picker */}
-              <View style={{ marginBottom: 12 }}>
-                <Text style={{ color: "#64748b", fontSize: 12, fontWeight: "700", marginBottom: 6 }}>Scale By</Text>
-                <View style={{ flexDirection: "row", gap: 8 }}>
-                  <Pressable
-                    onPress={() => setScaleDimension("width")}
-                    style={{
-                      flex: 1, height: 40, borderRadius: 8, alignItems: "center", justifyContent: "center",
-                      backgroundColor: scaleDimension === "width" ? "#0f172a" : "#f0f4f8",
-                      borderWidth: 1, borderColor: scaleDimension === "width" ? "#0f172a" : "#d8e1eb",
-                    }}
-                  >
-                    <Text style={{ color: scaleDimension === "width" ? "#fff" : "#64748b", fontSize: 13, fontWeight: "800" }}>Width</Text>
-                  </Pressable>
-                  <Pressable
-                    onPress={() => setScaleDimension("height")}
-                    style={{
-                      flex: 1, height: 40, borderRadius: 8, alignItems: "center", justifyContent: "center",
-                      backgroundColor: scaleDimension === "height" ? "#0f172a" : "#f0f4f8",
-                      borderWidth: 1, borderColor: scaleDimension === "height" ? "#0f172a" : "#d8e1eb",
-                    }}
-                  >
-                    <Text style={{ color: scaleDimension === "height" ? "#fff" : "#64748b", fontSize: 13, fontWeight: "800" }}>Height</Text>
-                  </Pressable>
-                </View>
-              </View>
-
-              {/* Target Size */}
-              <View style={{ marginBottom: 12 }}>
-                <Text style={{ color: "#64748b", fontSize: 12, fontWeight: "700", marginBottom: 4 }}>
-                  Target {scaleDimension === "width" ? "Width" : "Height"} (meters)
-                </Text>
-                <TextInput
-                  style={{ backgroundColor: "#fff", borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, padding: 10, color: "#0f172a", fontSize: 16, fontWeight: "700" }}
-                  value={scaleTargetSize}
-                  onChangeText={setScaleTargetSize}
-                  keyboardType="numeric"
-                  placeholder={`e.g. ${((scaleDimension === "width" ? currentPlanDims.width : currentPlanDims.height) * 2).toFixed(1)}`}
-                />
-              </View>
-
-              {/* Scale Factor Preview */}
-              {scaleTargetSize.trim() !== "" && !isNaN(parseFloat(scaleTargetSize)) && (
-                <View style={{ backgroundColor: "#f0fdf4", borderRadius: 8, padding: 10, marginBottom: 16, borderWidth: 1, borderColor: "#bbf7d0" }}>
-                  <Text style={{ color: "#166534", fontSize: 12, fontWeight: "700" }}>
-                    Scale Factor: {(parseFloat(scaleTargetSize) / (scaleDimension === "width" ? currentPlanDims.width : currentPlanDims.height)).toFixed(3)}x
-                  </Text>
-                  <Text style={{ color: "#166534", fontSize: 11, marginTop: 2 }}>
-                    Result: {parseFloat(scaleTargetSize).toFixed(2)}m × {(
-                      (scaleDimension === "width"
-                        ? currentPlanDims.height * (parseFloat(scaleTargetSize) / currentPlanDims.width)
-                        : currentPlanDims.width * (parseFloat(scaleTargetSize) / currentPlanDims.height)
-                      )
-                    ).toFixed(2)}m
-                  </Text>
-                </View>
-              )}
-
-              <View style={{ flexDirection: "row", gap: 10 }}>
-                <Pressable
-                  onPress={() => setScaleModalOpen(false)}
-                  style={{ flex: 1, height: 44, backgroundColor: "#e2e8f0", borderRadius: 10, alignItems: "center", justifyContent: "center" }}
-                >
-                  <Text style={{ color: "#475569", fontSize: 14, fontWeight: "700" }}>Cancel</Text>
-                </Pressable>
-                <Pressable
-                  onPress={handleScaleDxf}
-                  disabled={isScaling}
-                  style={{ flex: 1, height: 44, backgroundColor: isScaling ? "#9ca3af" : "#eab308", borderRadius: 10, alignItems: "center", justifyContent: "center" }}
-                >
-                  {isScaling ? (
-                    <ActivityIndicator size="small" color="#fff" />
-                  ) : (
-                    <Text style={{ color: "#fff", fontSize: 14, fontWeight: "800" }}>Scale & Generate</Text>
-                  )}
-                </Pressable>
-              </View>
-            </View>
-          </View>
-        </Modal>
+        
 
         {/* --- IMPORT SECTION --- */}
         <View style={{ borderRadius: 14, padding: 14, backgroundColor: "#ffffff", borderWidth: 1, borderColor: "#d8e1eb" }}>
@@ -5631,6 +5728,7 @@ function FieldsPage({
           ) : null}
         </View>
       </View>
+      )}
     </View>
   );
 }
