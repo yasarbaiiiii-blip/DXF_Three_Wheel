@@ -5247,30 +5247,28 @@ function FieldsPage({
                   containerStyle={{ flex: 1 }}
                   renderItem={({ item, drag, isActive }: RenderItemParams<PlanLine>) => (
                     <ScaleDecorator>
-                      <Animated.View>
-                        <Pressable
-                          onLongPress={drag}
-                          disabled={isActive}
-                          style={{
-                            flexDirection: "row",
-                            alignItems: "center",
-                            padding: 14,
-                            backgroundColor: isActive ? "#f8fafc" : "#fff",
-                            borderBottomWidth: 1,
-                            borderBottomColor: "#f1f5f9",
-                            opacity: isActive ? 0.8 : 1
-                          }}
-                        >
-                          <View style={{ paddingRight: 12 }}>
-                            <Text style={{ color: "#cbd5e1", fontSize: 20 }}>☰</Text>
-                          </View>
-                          <View style={{ flex: 1 }}>
-                            <Text style={{ color: "#0f172a", fontSize: 14, fontWeight: "700" }}>
-                              {item.label} <Text style={{ color: "#64748b", fontWeight: "500", fontSize: 12 }}>({item.entity?.entity_type})</Text>
-                            </Text>
-                          </View>
-                        </Pressable>
-                      </Animated.View>
+                      <Pressable
+                        onLongPress={drag}
+                        disabled={isActive}
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          padding: 14,
+                          backgroundColor: isActive ? "#f8fafc" : "#fff",
+                          borderBottomWidth: 1,
+                          borderBottomColor: "#f1f5f9",
+                          opacity: isActive ? 0.8 : 1
+                        }}
+                      >
+                        <View style={{ paddingRight: 12 }}>
+                          <Text style={{ color: "#cbd5e1", fontSize: 20 }}>☰</Text>
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ color: "#0f172a", fontSize: 14, fontWeight: "700" }}>
+                            {item.label} <Text style={{ color: "#64748b", fontWeight: "500", fontSize: 12 }}>({item.entity?.entity_type})</Text>
+                          </Text>
+                        </View>
+                      </Pressable>
                     </ScaleDecorator>
                   )}
                 />
