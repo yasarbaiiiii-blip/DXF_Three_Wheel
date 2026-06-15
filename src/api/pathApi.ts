@@ -178,13 +178,14 @@ export function alignPath(apiBaseUrl: string, pathName: string, payload: AlignPa
 export type PathSegmentInfo = {
   index: number;
   sequence: number;
-  type: string;
+  type: "MARK" | "TRANSIT" | string;
   segment_role?: string | null;
-  source_entity: string;
-  is_extension: boolean;
-  spray_on: boolean;
-  speed: number;
-  length_m: number;
+  extension_role?: string | null;
+  source_entity?: string;
+  is_extension?: boolean;
+  spray_on?: boolean;
+  speed?: number;
+  length_m?: number;
   points?: number[][];
 };
 

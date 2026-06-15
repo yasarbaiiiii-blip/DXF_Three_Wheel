@@ -102,10 +102,88 @@ function normalizeEntityType(entityType: unknown) {
   return String(entityType ?? "").trim().toLowerCase();
 }
 
-function segmentExtensionRole(segmentRole: unknown): "pre" | "aft" | "none" {
-  const role = String(segmentRole ?? "").trim().toLowerCase();
-  if (role === "pre_transit") return "pre";
-  if (role === "aft_transit") return "aft";
+type NormalizedExtensionRole = "PRE" | "AFT" | "none";
+
+type NormalizedPathSegment = {
+  index: number;
+  sequence: number;
+  type: "MARK" | "TRANSIT" | string;
+  extensionRole: NormalizedExtensionRole;
+  sprayOn: boolean;
+  sourceEntity: string;
+  lengthM: number | null;
+};
+
+function normalizeSegmentType(rawType: unknown): "MARK" | "TRANSIT" | string {
+  const type = String(rawType ?? "").trim().toUpperCase();
+  if (type === "MARK") return "MARK";
+  if (type === "TRANSIT") return "TRANSIT";
+  return type || "UNKNOWN";
+}
+
+function normalizeExtensionRole(segment: pathApi.PathSegmentInfo): NormalizedExtensionRole {
+  const roleSources = [segment.segment_role, segment.extension_role];
+  for (const raw of roleSources) {
+    const role = String(raw ?? "").trim().toLowerCase();
+    if (role === "pre" || role === "pre_transit") return "PRE";
+    if (role === "aft" || role === "aft_transit") return "AFT";
+  }
+  return "none";
+}
+
+function normalizePathSegment(segment: pathApi.PathSegmentInfo): NormalizedPathSegment {
+  return {
+    index: segment.index,
+    sequence: segment.sequence,
+    type: normalizeSegmentType(segment.type),
+    extensionRole: normalizeExtensionRole(segment),
+    sprayOn: !!segment.spray_on,
+    sourceEntity: String(segment.source_entity ?? "").trim(),
+    lengthM: coerceFiniteNumber(segment.length_m),
+  };
+}
+
+function summarizeNormalizedSegments(segments: pathApi.PathSegmentInfo[]) {
+  const normalized = segments.map(normalizePathSegment);
+  let markCount = 0;
+  let transitCount = 0;
+  let preExtensionCount = 0;
+  let aftExtensionCount = 0;
+  let sprayOnCount = 0;
+  let sprayOffCount = 0;
+
+  for (const segment of normalized) {
+    if (segment.type === "MARK") markCount += 1;
+    if (segment.type === "TRANSIT") transitCount += 1;
+    if (segment.extensionRole === "PRE") preExtensionCount += 1;
+    if (segment.extensionRole === "AFT") aftExtensionCount += 1;
+    if (segment.sprayOn) sprayOnCount += 1;
+    else sprayOffCount += 1;
+  }
+
+  return {
+    normalized,
+    markCount,
+    transitCount,
+    preExtensionCount,
+    aftExtensionCount,
+    sprayOnCount,
+    sprayOffCount,
+  };
+}
+
+function parsePathSegmentsResponse(data: unknown): pathApi.PathSegmentsResponse | null {
+  if (!data || typeof data !== "object") return null;
+  const body = data as Record<string, unknown>;
+  if (!Object.prototype.hasOwnProperty.call(body, "segments")) return null;
+  if (!Array.isArray(body.segments)) return null;
+  if (body.segments.length === 0) return null;
+  return body as pathApi.PathSegmentsResponse;
+}
+
+function formatExtensionRoleLabel(role: NormalizedExtensionRole) {
+  if (role === "PRE") return "pre";
+  if (role === "AFT") return "aft";
   return "none";
 }
 
@@ -5137,30 +5215,20 @@ function FieldsPage({
     () => lines.filter(isPrimaryEditableLine),
     [lines]
   );
-  const segmentCounts = useMemo(() => {
-    const segments = segmentVerification?.segments ?? [];
-    let markCount = 0;
-    let transitCount = 0;
-    let preExtensionCount = 0;
-    let aftExtensionCount = 0;
-    let sprayOnCount = 0;
-    let sprayOffCount = 0;
-    for (const segment of segments) {
-      if (segment.type === "MARK") markCount += 1;
-      if (segment.type === "TRANSIT") transitCount += 1;
-      if (segment.segment_role === "pre_transit") preExtensionCount += 1;
-      if (segment.segment_role === "aft_transit") aftExtensionCount += 1;
-      if (segment.spray_on) sprayOnCount += 1;
-      else sprayOffCount += 1;
+  const segmentSummary = useMemo(() => {
+    const segments = segmentVerification?.segments;
+    if (!Array.isArray(segments) || segments.length === 0) {
+      return {
+        normalized: [] as NormalizedPathSegment[],
+        markCount: 0,
+        transitCount: 0,
+        preExtensionCount: 0,
+        aftExtensionCount: 0,
+        sprayOnCount: 0,
+        sprayOffCount: 0,
+      };
     }
-    return {
-      markCount,
-      transitCount,
-      preExtensionCount,
-      aftExtensionCount,
-      sprayOnCount,
-      sprayOffCount,
-    };
+    return summarizeNormalizedSegments(segments);
   }, [segmentVerification]);
 
   const targetPathForExtensions = selectedPathName || importedPlan?.fileName;
@@ -5253,10 +5321,14 @@ function FieldsPage({
   const handleVerifySpraySegments = async () => {
     const targetPath = selectedPathName || importedPlan?.fileName;
     if (!apiBaseUrl || !targetPath) {
+      setSegmentVerification(null);
+      onWorkflowStep?.("spray", "failed");
       Alert.alert("Error", "No path selected to verify segments.");
       return;
     }
     if (!targetPath.toLowerCase().endsWith(".dxf")) {
+      setSegmentVerification(null);
+      onWorkflowStep?.("spray", "failed");
       Alert.alert("Error", "Segment verification is only available for DXF paths.");
       return;
     }
@@ -5265,7 +5337,14 @@ function FieldsPage({
     try {
       const res = await pathApi.getPathSegments(apiBaseUrl, targetPath);
       if (res.ok) {
-        const data = (await res.json()) as pathApi.PathSegmentsResponse;
+        const raw = await res.json();
+        const data = parsePathSegmentsResponse(raw);
+        if (!data) {
+          setSegmentVerification(null);
+          onWorkflowStep?.("spray", "failed");
+          Alert.alert("Verification Failed", "Response did not include a non-empty segments array.");
+          return;
+        }
         setSegmentVerification(data);
         onWorkflowStep?.("spray", "verified");
         Alert.alert("Success", "Segment verification complete.");
@@ -5743,14 +5822,17 @@ function FieldsPage({
 
                 {segmentVerification && (
                   <View style={{ gap: 8 }}>
+                    <Text style={{ color: "#475569", fontSize: 10, lineHeight: 15 }}>
+                      Segments: {formatFinite(segmentVerification.num_segments, 0)} | Waypoints: {formatFinite(segmentVerification.num_waypoints, 0)} | Total: {formatFinite(segmentVerification.total_length_m, 1)} m | Mark: {formatFinite(segmentVerification.mark_length_m, 1)} m | Transit: {formatFinite(segmentVerification.transit_length_m, 1)} m
+                    </Text>
                     <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
                       {[
-                        { label: "MARK", value: segmentCounts.markCount, color: "#166534", bg: "#dcfce7" },
-                        { label: "TRANSIT", value: segmentCounts.transitCount, color: "#334155", bg: "#e2e8f0" },
-                        { label: "PRE", value: segmentCounts.preExtensionCount, color: "#7c3aed", bg: "#ede9fe" },
-                        { label: "AFT", value: segmentCounts.aftExtensionCount, color: "#7c3aed", bg: "#ede9fe" },
-                        { label: "Spray ON", value: segmentCounts.sprayOnCount, color: "#0f766e", bg: "#ccfbf1" },
-                        { label: "Spray OFF", value: segmentCounts.sprayOffCount, color: "#475569", bg: "#f1f5f9" },
+                        { label: "MARK", value: segmentSummary.markCount, color: "#166534", bg: "#dcfce7" },
+                        { label: "TRANSIT", value: segmentSummary.transitCount, color: "#334155", bg: "#e2e8f0" },
+                        { label: "PRE", value: segmentSummary.preExtensionCount, color: "#7c3aed", bg: "#ede9fe" },
+                        { label: "AFT", value: segmentSummary.aftExtensionCount, color: "#7c3aed", bg: "#ede9fe" },
+                        { label: "Spray ON", value: segmentSummary.sprayOnCount, color: "#0f766e", bg: "#ccfbf1" },
+                        { label: "Spray OFF", value: segmentSummary.sprayOffCount, color: "#475569", bg: "#f1f5f9" },
                       ].map((chip) => (
                         <View
                           key={chip.label}
@@ -5765,7 +5847,7 @@ function FieldsPage({
 
                     <View style={{ borderRadius: 8, borderWidth: 1, borderColor: "#e2e8f0", overflow: "hidden" }}>
                       <View style={{ flexDirection: "row", backgroundColor: "#f8fafc", paddingVertical: 6, paddingHorizontal: 8, borderBottomWidth: 1, borderBottomColor: "#e2e8f0" }}>
-                        {["#", "Seq", "Type", "Ext", "Spray", "Entity", "Len"].map((heading) => (
+                        {["#", "Seq", "Type", "Ext", "Spray", "Entity", "Len (m)"].map((heading) => (
                           <Text
                             key={heading}
                             style={{
@@ -5781,27 +5863,35 @@ function FieldsPage({
                         ))}
                       </View>
                       <ScrollView style={{ maxHeight: 180 }} nestedScrollEnabled>
-                        {segmentVerification.segments.map((segment) => {
-                          const extRole = segmentExtensionRole(segment.segment_role);
-                          const typeColor = segment.type === "MARK" ? "#166534" : "#475569";
-                          const sprayColor = segment.spray_on ? "#0f766e" : "#94a3b8";
-                          return (
-                            <View
-                              key={`${segment.index}-${segment.sequence}`}
-                              style={{ flexDirection: "row", paddingVertical: 6, paddingHorizontal: 8, borderBottomWidth: 1, borderBottomColor: "#f1f5f9" }}
-                            >
-                              <Text style={{ flex: 1, color: "#0f172a", fontSize: 10, fontWeight: "700" }}>{segment.index}</Text>
-                              <Text style={{ flex: 1, color: "#0f172a", fontSize: 10 }}>{segment.sequence}</Text>
-                              <Text style={{ flex: 1, color: typeColor, fontSize: 10, fontWeight: "700" }}>{segment.type}</Text>
-                              <Text style={{ flex: 1, color: extRole === "none" ? "#94a3b8" : "#7c3aed", fontSize: 10, fontWeight: "700" }}>{extRole}</Text>
-                              <Text style={{ flex: 1, color: sprayColor, fontSize: 10, fontWeight: "700" }}>{segment.spray_on ? "ON" : "OFF"}</Text>
-                              <Text style={{ flex: 2, color: "#334155", fontSize: 10 }} numberOfLines={1}>
-                                {segment.source_entity || "—"}
-                              </Text>
-                              <Text style={{ flex: 1, color: "#334155", fontSize: 10 }}>{formatFinite(segment.length_m, 1)}</Text>
-                            </View>
-                          );
-                        })}
+                        {segmentSummary.normalized.length === 0 ? (
+                          <View style={{ paddingVertical: 16, paddingHorizontal: 8, alignItems: "center" }}>
+                            <Text style={{ color: "#94a3b8", fontSize: 11, fontStyle: "italic" }}>
+                              No segments returned.
+                            </Text>
+                          </View>
+                        ) : (
+                          segmentSummary.normalized.map((segment) => {
+                            const extLabel = formatExtensionRoleLabel(segment.extensionRole);
+                            const typeColor = segment.type === "MARK" ? "#166534" : segment.type === "TRANSIT" ? "#475569" : "#64748b";
+                            const sprayColor = segment.sprayOn ? "#0f766e" : "#94a3b8";
+                            return (
+                              <View
+                                key={`${segment.index}-${segment.sequence}`}
+                                style={{ flexDirection: "row", paddingVertical: 6, paddingHorizontal: 8, borderBottomWidth: 1, borderBottomColor: "#f1f5f9" }}
+                              >
+                                <Text style={{ flex: 1, color: "#0f172a", fontSize: 10, fontWeight: "700" }}>{segment.index}</Text>
+                                <Text style={{ flex: 1, color: "#0f172a", fontSize: 10 }}>{segment.sequence}</Text>
+                                <Text style={{ flex: 1, color: typeColor, fontSize: 10, fontWeight: "700" }}>{segment.type}</Text>
+                                <Text style={{ flex: 1, color: extLabel === "none" ? "#94a3b8" : "#7c3aed", fontSize: 10, fontWeight: "700" }}>{extLabel}</Text>
+                                <Text style={{ flex: 1, color: sprayColor, fontSize: 10, fontWeight: "700" }}>{segment.sprayOn ? "ON" : "OFF"}</Text>
+                                <Text style={{ flex: 2, color: "#334155", fontSize: 10 }} numberOfLines={1}>
+                                  {segment.sourceEntity || "—"}
+                                </Text>
+                                <Text style={{ flex: 1, color: "#334155", fontSize: 10 }}>{formatFinite(segment.lengthM, 1)}</Text>
+                              </View>
+                            );
+                          })
+                        )}
                       </ScrollView>
                     </View>
 
