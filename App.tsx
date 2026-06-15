@@ -254,6 +254,38 @@ function buildSvgPathChunks(lines: PlanLine[]) {
   return chunks;
 }
 
+function buildSvgPathForLine(line: PlanLine) {
+  return buildSvgPathChunks([line]).join(" ");
+}
+
+function getLineAnchorPoint(line: PlanLine) {
+  const pts = line.entity?.preview_points;
+  if (pts && pts.length > 0) {
+    const midIndex = Math.floor(pts.length / 2);
+    const mid = pts[midIndex];
+    if (mid && isFiniteNumber(mid.north) && isFiniteNumber(mid.east)) {
+      return { x: mid.north, y: mid.east };
+    }
+    const sum = pts.reduce(
+      (acc, pt) => {
+        acc.north += Number(pt.north) || 0;
+        acc.east += Number(pt.east) || 0;
+        return acc;
+      },
+      { north: 0, east: 0 }
+    );
+    return {
+      x: sum.north / pts.length,
+      y: sum.east / pts.length,
+    };
+  }
+
+  return {
+    x: (line.from.x + line.to.x) / 2,
+    y: (line.from.y + line.to.y) / 2,
+  };
+}
+
 type DiscoveredRover = {
   id: string;
   name: string;
@@ -6678,6 +6710,10 @@ function PlanPreview({
   );
 
   const cornerPoints = useMemo(() => getCornerPoints(filtered).slice(0, MAX_PREVIEW_CORNERS), [filtered]);
+  const primarySequenceLines = useMemo(
+    () => filtered.filter(isPrimaryEditableLine),
+    [filtered]
+  );
   const selectedLine = useMemo(
     () => filtered.find((line) => line.id === selectedLineId) ?? null,
     [filtered, selectedLineId]
@@ -6715,8 +6751,7 @@ function PlanPreview({
   const [rotation, setRotation] = useState(0);
   // Track whether user has manually panned so auto-pan doesn't fight them
   const userPannedRef = React.useRef(false);
-  const roverAutoFocusPausedRef = React.useRef(false);
-  const roverAutoFocusTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [trackRoverEnabled, setTrackRoverEnabled] = useState(false);
 
   const rotationRef = React.useRef(rotation);
   useEffect(() => {
@@ -6823,21 +6858,13 @@ function PlanPreview({
     setRotation(0);
   }, [filteredPlanSignature, layoutSize.width, layoutSize.height, roverE, roverN]);
 
-  const clearRoverAutoFocusTimer = useCallback(() => {
-    if (roverAutoFocusTimerRef.current) {
-      clearTimeout(roverAutoFocusTimerRef.current);
-      roverAutoFocusTimerRef.current = null;
-    }
-  }, []);
-
   const focusRover = useCallback(() => {
     if (layoutSize.width <= 0 || layoutSize.height <= 0) return;
-    const rN = hasRover ? roverN : 0;
-    const rE = hasRover ? roverE : 0;
+    const pose = displayRoverPoseRef.current ?? { north: hasRover ? roverN : 0, east: hasRover ? roverE : 0 };
     const nextZoom = viewportRef.current.zoom || viewport.zoom || 1;
     const next: PreviewViewport = {
-      panX: layoutSize.width / 2 - rE * nextZoom,
-      panY: layoutSize.height / 2 - (-rN) * nextZoom,
+      panX: layoutSize.width / 2 - pose.east * nextZoom,
+      panY: layoutSize.height / 2 - (-pose.north) * nextZoom,
       zoom: nextZoom,
     };
     viewportRef.current = next;
@@ -6846,24 +6873,18 @@ function PlanPreview({
   }, [hasRover, layoutSize.height, layoutSize.width, roverE, roverN, viewport.zoom]);
 
   useEffect(() => {
-    if (!missionRunning || !hasRover) {
-      roverAutoFocusPausedRef.current = false;
-      clearRoverAutoFocusTimer();
-      return;
+    if (!missionRunning) {
+      setTrackRoverEnabled(false);
     }
+  }, [missionRunning]);
 
-    if (roverAutoFocusPausedRef.current) {
+  useEffect(() => {
+    if (!missionRunning || !hasRover || !trackRoverEnabled) {
       return;
     }
 
     focusRover();
-  }, [clearRoverAutoFocusTimer, focusRover, hasRover, missionRunning]);
-
-  useEffect(() => {
-    return () => {
-      clearRoverAutoFocusTimer();
-    };
-  }, [clearRoverAutoFocusTimer]);
+  }, [focusRover, hasRover, missionRunning, roverDeg, roverE, roverN, trackRoverEnabled]);
 
   const handleLayout = useCallback((event: any) => {
     const { width, height } = event.nativeEvent.layout ?? {};
@@ -6879,14 +6900,10 @@ function PlanPreview({
   const panResponder = useMemo(
     () =>
       PanResponder.create({
-        onStartShouldSetPanResponder: () => true,
-        onMoveShouldSetPanResponder: () => true,
+        onStartShouldSetPanResponder: () => !trackRoverEnabled,
+        onMoveShouldSetPanResponder: () => !trackRoverEnabled,
 
         onPanResponderGrant: (evt) => {
-          if (missionRunning && hasRover) {
-            roverAutoFocusPausedRef.current = true;
-            clearRoverAutoFocusTimer();
-          }
           const touches = evt.nativeEvent.touches;
           gestureRef.current.isTap = true;
           gestureRef.current.startTouch = { x: evt.nativeEvent.locationX, y: evt.nativeEvent.locationY };
@@ -6995,14 +7012,6 @@ function PlanPreview({
           gestureRef.current.pinchDistance = null;
           gestureRef.current.pinchAngle = null;
           gestureRef.current.isTap = false;
-
-          if (missionRunning && hasRover) {
-            clearRoverAutoFocusTimer();
-            roverAutoFocusTimerRef.current = setTimeout(() => {
-              roverAutoFocusPausedRef.current = false;
-              focusRover();
-            }, 5000);
-          }
         },
 
         onPanResponderTerminate: () => {
@@ -7011,17 +7020,9 @@ function PlanPreview({
           gestureRef.current.pinchDistance = null;
           gestureRef.current.pinchAngle = null;
           gestureRef.current.isTap = false;
-
-          if (missionRunning && hasRover) {
-            clearRoverAutoFocusTimer();
-            roverAutoFocusTimerRef.current = setTimeout(() => {
-              roverAutoFocusPausedRef.current = false;
-              focusRover();
-            }, 5000);
-          }
         },
       }),
-    [clearRoverAutoFocusTimer, focusRover, hasRover, missionRunning, layoutSize.height, layoutSize.width, rotation]
+    [focusRover, hasRover, layoutSize.height, layoutSize.width, rotation, trackRoverEnabled]
   );
 
   const strokeForLayer = (layer: string) => {
@@ -7035,16 +7036,14 @@ function PlanPreview({
   };
 
   const handleFocusRover = () => {
-    clearRoverAutoFocusTimer();
-    roverAutoFocusPausedRef.current = false;
+    setTrackRoverEnabled(true);
     focusRover();
   };
 
   const handleFocusPlan = () => {
     if (layoutSize.width <= 0 || layoutSize.height <= 0) return;
-    clearRoverAutoFocusTimer();
-    roverAutoFocusPausedRef.current = true;
     userPannedRef.current = true;
+    setTrackRoverEnabled(false);
     if (filtered.length === 0) {
       const next: PreviewViewport = {
         panX: layoutSize.width / 2,
@@ -7088,7 +7087,7 @@ function PlanPreview({
       onLayout={handleLayout}
       style={{ flex: 1, backgroundColor: "#f0f4f8" }}
     >
-      <View style={{ flex: 1 }} {...panResponder.panHandlers}>
+      <View style={{ flex: 1, position: "relative" }} {...panResponder.panHandlers}>
         {filtered.length === 0 && !hasRover ? (
           // No plan, no rover: show placeholder
           <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 18 }}>
@@ -7163,7 +7162,7 @@ function PlanPreview({
             )}
             {selectedLine ? (
               <Path
-                d={buildSvgPathChunks([selectedLine])[0] || ""}
+                d={buildSvgPathForLine(selectedLine)}
                 stroke="#ef4444"
                 strokeWidth={3 / viewport.zoom}
                 strokeLinecap="round"
@@ -7188,6 +7187,22 @@ function PlanPreview({
                 strokeWidth={1.5 / viewport.zoom}
               />
             ))}
+            {filtered.map((line) => {
+              const d = buildSvgPathForLine(line);
+              if (!d) return null;
+              return (
+                <Path
+                  key={`hit-${line.id}`}
+                  d={d}
+                  stroke="rgba(0,0,0,0)"
+                  strokeWidth={18 / viewport.zoom}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  fill="none"
+                  onPress={() => onSelectLineRef.current?.(selectedLineId === line.id ? null : line.id)}
+                />
+              );
+            })}
           </G>
 
           {/* ── Rover icon (top-down car shape) ── */}
@@ -7238,8 +7253,59 @@ function PlanPreview({
               </G>
             );
           })()}
-        </Svg>
-      )}
+          {primarySequenceLines.map((line, index) => {
+            const anchor = getLineAnchorPoint(line);
+            const screenPoint = toScreenPoint(anchor, viewport);
+            const labelPoint = rotation !== 0 && layoutSize.width > 0 && layoutSize.height > 0
+              ? rotatePoint(screenPoint.x, screenPoint.y, layoutSize.width / 2, layoutSize.height / 2, rotation)
+              : screenPoint;
+            return (
+              <G key={`order-${line.id}`} transform={`translate(${labelPoint.x}, ${labelPoint.y})`}>
+                <Circle cx={0} cy={0} r={11} fill="rgba(15,23,42,0.85)" stroke="#38bdf8" strokeWidth={1.2} />
+                <SvgText x={0} y={4} fontSize={11} fill="#ffffff" fontWeight="900" textAnchor="middle">
+                  {index + 1}
+                </SvgText>
+              </G>
+            );
+          })}
+          </Svg>
+        )}
+
+        {missionRunning ? (
+          <Pressable
+            onPress={() => {
+              if (trackRoverEnabled) {
+                setTrackRoverEnabled(false);
+              } else {
+                setTrackRoverEnabled(true);
+                focusRover();
+              }
+            }}
+            style={({ pressed }) => ({
+              position: "absolute",
+              top: 14,
+              right: 14,
+              zIndex: 60,
+              elevation: 60,
+              paddingHorizontal: 14,
+              height: 40,
+              borderRadius: 20,
+              alignItems: "center",
+              justifyContent: "center",
+              backgroundColor: trackRoverEnabled ? (pressed ? "rgba(14,165,233,0.95)" : "rgba(14,165,233,0.88)") : (pressed ? "rgba(15,23,42,0.95)" : "rgba(15,23,42,0.82)"),
+              borderWidth: 1.2,
+              borderColor: trackRoverEnabled ? "#38bdf8" : "#94a3b8",
+              shadowColor: "#000",
+              shadowOffset: { width: 0, height: 2 },
+              shadowOpacity: 0.2,
+              shadowRadius: 3.5,
+            })}
+          >
+            <Text style={{ color: "#fff", fontSize: 12, fontWeight: "800", letterSpacing: 0.2 }}>
+              {trackRoverEnabled ? "Stop Track" : "Track Rover"}
+            </Text>
+          </Pressable>
+        ) : null}
       </View>
 
       {/* ── Single Heading Compass (always shown) ── */}
@@ -7315,14 +7381,19 @@ function PlanPreview({
       >
         {/* Focus Plan Button */}
         <Pressable
-          onPress={handleFocusPlan}
+          onPress={trackRoverEnabled ? undefined : handleFocusPlan}
+          disabled={trackRoverEnabled}
           style={({ pressed }) => ({
             width: 48,
             height: 48,
             borderRadius: 24,
-            backgroundColor: pressed ? "rgba(15,23,42,0.95)" : "rgba(15,23,42,0.85)",
+            backgroundColor: trackRoverEnabled
+              ? "rgba(15,23,42,0.35)"
+              : pressed
+                ? "rgba(15,23,42,0.95)"
+                : "rgba(15,23,42,0.85)",
             borderWidth: 1.2,
-            borderColor: "#10b981",
+            borderColor: trackRoverEnabled ? "rgba(16,185,129,0.35)" : "#10b981",
             alignItems: "center",
             justifyContent: "center",
             shadowColor: "#000",
@@ -7337,14 +7408,19 @@ function PlanPreview({
 
         {/* Focus Rover Button */}
         <Pressable
-          onPress={handleFocusRover}
+          onPress={trackRoverEnabled ? undefined : handleFocusRover}
+          disabled={trackRoverEnabled}
           style={({ pressed }) => ({
             width: 48,
             height: 48,
             borderRadius: 24,
-            backgroundColor: pressed ? "rgba(15,23,42,0.95)" : "rgba(15,23,42,0.85)",
+            backgroundColor: trackRoverEnabled
+              ? "rgba(15,23,42,0.35)"
+              : pressed
+                ? "rgba(15,23,42,0.95)"
+                : "rgba(15,23,42,0.85)",
             borderWidth: 1.2,
-            borderColor: "#0ea5e9",
+            borderColor: trackRoverEnabled ? "rgba(14,165,233,0.35)" : "#0ea5e9",
             alignItems: "center",
             justifyContent: "center",
             shadowColor: "#000",
