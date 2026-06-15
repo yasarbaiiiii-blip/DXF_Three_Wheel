@@ -12,6 +12,7 @@ import {
   useWindowDimensions,
 } from "react-native";
 import Slider from "@react-native-community/slider";
+import * as FileSystem from "expo-file-system/legacy";
 import {
   Battery,
   ChevronLeft,
@@ -66,6 +67,7 @@ interface LeftSidebarProps {
   onDeleteSelectedLine: () => void;
   planNotes: string;
   onSavePlanNotes: (notes: string) => void;
+  apiBaseUrl?: string;
 }
 
 export function LeftSidebar({
@@ -92,6 +94,7 @@ export function LeftSidebar({
   onDeleteSelectedLine,
   planNotes,
   onSavePlanNotes,
+  apiBaseUrl,
 }: LeftSidebarProps) {
   const { width: screenWidth } = useWindowDimensions();
   const selectedMetrics = useMemo(() => {
@@ -299,6 +302,7 @@ export function LeftSidebar({
             onDeleteSelectedLine={onDeleteSelectedLine}
             planNotes={planNotes}
             onSavePlanNotes={onSavePlanNotes}
+            apiBaseUrl={apiBaseUrl}
           />
         </ScrollView>
       </View>
@@ -333,6 +337,7 @@ function PanelContent({
   onDeleteSelectedLine,
   planNotes,
   onSavePlanNotes,
+  apiBaseUrl,
 }: {
   activePanel: SidebarPanel;
   palette: Palette;
@@ -358,6 +363,7 @@ function PanelContent({
   onDeleteSelectedLine: () => void;
   planNotes: string;
   onSavePlanNotes: (notes: string) => void;
+  apiBaseUrl?: string;
 }) {
   const [fieldName, setFieldName] = useState("");
   const [fieldNotes, setFieldNotes] = useState(planNotes);
@@ -408,6 +414,13 @@ function PanelContent({
     offsetUp !== savedDimensions.offsetUp ||
     mowDeckCutWidth !== savedDimensions.mowDeckCutWidth;
 
+  function resolveApiUrl(path: string) {
+    if (apiBaseUrl) {
+      return `${apiBaseUrl.replace(/\/$/, "")}${path}`;
+    }
+    return path;
+  }
+
   if (activePanel === "import") {
     return (
       <View className="gap-6">
@@ -455,7 +468,7 @@ function PanelContent({
                   onPress={async () => {
                     if (!importedPlan) return;
                     try {
-                      const resp = await fetch(`/api/mission/load`, {
+                      const resp = await fetch(resolveApiUrl(`/api/mission/load`), {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({ mission_file: importedPlan.fileName }),
@@ -486,7 +499,7 @@ function PanelContent({
                       onPress={async () => {
                         try {
                           if (missionRunning) {
-                            const resp = await fetch(`/api/mission/stop`, { method: "POST" });
+                            const resp = await fetch(resolveApiUrl(`/api/mission/stop`), { method: "POST" });
                             if (!resp.ok) {
                               const txt = await resp.text();
                               console.error("Stop failed:", resp.status, txt);
@@ -494,7 +507,7 @@ function PanelContent({
                             }
                             onToggleMission();
                           } else {
-                            const resp = await fetch(`/api/mission/start`, { method: "POST" });
+                            const resp = await fetch(resolveApiUrl(`/api/mission/start`), { method: "POST" });
                             if (!resp.ok) {
                               const txt = await resp.text();
                               console.error("Start failed:", resp.status, txt);
@@ -556,10 +569,18 @@ function PanelContent({
                           const safeName = hasExt ? fname : `${fname}.csv`;
                           const content = fieldNotes || "";
                           try {
+                            const tempFileName = `${Date.now()}-${safeName.replace(/[\\/:*?"<>|]/g, "_")}`;
+                            const tempFileUri = `${FileSystem.cacheDirectory ?? ""}${tempFileName}`;
+                            await FileSystem.writeAsStringAsync(tempFileUri, content, {
+                              encoding: FileSystem.EncodingType.UTF8,
+                            });
                             const form = new FormData();
-                            // @ts-ignore
-                            form.append("file", new Blob([content], { type: "text/plain" }), safeName);
-                            const resp = await fetch(`/api/path/upload`, { method: "POST", body: form });
+                            form.append("file", {
+                              uri: tempFileUri,
+                              name: safeName,
+                              type: "text/plain",
+                            } as any);
+                            const resp = await fetch(resolveApiUrl(`/api/path/upload`), { method: "POST", body: form });
                             if (!resp.ok) {
                               const txt = await resp.text();
                               console.error("Export/upload failed:", resp.status, txt);

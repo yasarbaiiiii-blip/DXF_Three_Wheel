@@ -23,7 +23,7 @@ import * as FileSystem from "expo-file-system/legacy";
 import * as DocumentPicker from "expo-document-picker";
 import { SafeAreaInsetsContext, SafeAreaProvider } from "react-native-safe-area-context";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
-import DraggableFlatList, { RenderItemParams, ScaleDecorator } from "react-native-draggable-flatlist";
+import type { RenderItemParams } from "react-native-draggable-flatlist";
 
 import Svg, { Circle, G, Line, Path, Polygon, Text as SvgText } from "react-native-svg";
 import { io, Socket } from "socket.io-client";
@@ -91,6 +91,86 @@ function coerceFiniteNumber(value: unknown): number | null {
 function formatFinite(value: unknown, digits = 2, fallback = "n/a") {
   const next = coerceFiniteNumber(value);
   return next == null ? fallback : next.toFixed(digits);
+}
+
+const PRIMARY_ENTITY_TYPES = new Set(["line", "arc", "circle"]);
+
+function normalizeEntityType(entityType: unknown) {
+  return String(entityType ?? "").trim().toLowerCase();
+}
+
+function isPrimaryEditableLine(line: PlanLine) {
+  if (line.layer === "transit" || line.layer === "extension") {
+    return false;
+  }
+
+  return PRIMARY_ENTITY_TYPES.has(normalizeEntityType(line.entity?.entity_type));
+}
+
+function getPlanStartPoint(lines: PlanLine[]) {
+  const primaryLine = lines.find(isPrimaryEditableLine) ?? lines[0];
+  if (!primaryLine) return null;
+
+  const north = coerceFiniteNumber(primaryLine.from?.x);
+  const east = coerceFiniteNumber(primaryLine.from?.y);
+  if (north == null || east == null) return null;
+
+  return { north, east };
+}
+
+function createUploadFormData(fileUri: string, fileName: string, mimeType: string) {
+  const form = new FormData();
+  form.append("file", {
+    uri: fileUri,
+    name: fileName,
+    type: mimeType,
+  } as any);
+  return form;
+}
+
+function ReorderableLineList({
+  data,
+  onDragEnd,
+}: {
+  data: PlanLine[];
+  onDragEnd: (next: PlanLine[]) => void;
+}) {
+  const { default: DraggableFlatList, ScaleDecorator } = require("react-native-draggable-flatlist") as typeof import("react-native-draggable-flatlist");
+
+  return (
+    <DraggableFlatList
+      data={data}
+      onDragEnd={({ data: nextData }: { data: PlanLine[] }) => onDragEnd(nextData)}
+      keyExtractor={(item: PlanLine) => item.id}
+      containerStyle={{ flex: 1 }}
+      renderItem={({ item, drag, isActive }: RenderItemParams<PlanLine>) => (
+        <ScaleDecorator>
+          <Pressable
+            onLongPress={drag}
+            disabled={isActive}
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              padding: 14,
+              backgroundColor: isActive ? "#f8fafc" : "#fff",
+              borderBottomWidth: 1,
+              borderBottomColor: "#f1f5f9",
+              opacity: isActive ? 0.8 : 1,
+            }}
+          >
+            <View style={{ paddingRight: 12 }}>
+              <Text style={{ color: "#cbd5e1", fontSize: 20 }}>===</Text>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: "#0f172a", fontSize: 14, fontWeight: "700" }}>
+                {item.label} <Text style={{ color: "#64748b", fontWeight: "500", fontSize: 12 }}>({item.entity?.entity_type})</Text>
+              </Text>
+            </View>
+          </Pressable>
+        </ScaleDecorator>
+      )}
+    />
+  );
 }
 
 function isRenderableLine(line: PlanLine | null | undefined): line is PlanLine {
@@ -348,6 +428,30 @@ export default function App() {
     }
     return sanitizePlanLines(lines);
   }, [lines, originShift]);
+
+  const previewRoverPoint = useMemo(() => {
+    const telemetryPoint =
+      telemetrySnapshot?.pos_n != null && telemetrySnapshot?.pos_e != null
+        ? { north: telemetrySnapshot.pos_n, east: telemetrySnapshot.pos_e }
+        : null;
+    const planStartPoint = getPlanStartPoint(displayedLines);
+
+    if (autoOrigin && !missionRunning) {
+      return planStartPoint ?? telemetryPoint;
+    }
+
+    if (missionRunning) {
+      return telemetryPoint ?? planStartPoint;
+    }
+
+    return telemetryPoint ?? planStartPoint;
+  }, [
+    autoOrigin,
+    displayedLines,
+    missionRunning,
+    telemetrySnapshot?.pos_e,
+    telemetrySnapshot?.pos_n,
+  ]);
 
   const frozenRoverPos = useMemo(() => {
     if (telemetrySnapshot?.pos_n == null || telemetrySnapshot?.pos_e == null) {
@@ -975,11 +1079,13 @@ export default function App() {
       
       // Sending an empty file if the backend expects multipart/form-data for /parse-dxf
       // But passing the modified entities in some way if possible.
-      const form = new FormData();
-      // Attempting to send a file to parse-dxf as requested
       const content = linesToDxf(lines, importedPlan.fileName);
-      // @ts-ignore
-      form.append("file", new Blob([content], { type: "application/dxf" }), importedPlan.fileName);
+      const tempFileName = `${Date.now()}-${importedPlan.fileName.replace(/[\\/:*?"<>|]/g, "_")}`;
+      const tempFileUri = `${FileSystem.cacheDirectory ?? ""}${tempFileName}`;
+      await FileSystem.writeAsStringAsync(tempFileUri, content, {
+        encoding: FileSystem.EncodingType.UTF8,
+      });
+      const form = createUploadFormData(tempFileUri, importedPlan.fileName, "application/dxf");
       
       const res = await fetch(`${apiBaseUrl}/api/path/parse-dxf`, {
         method: "POST",
@@ -1756,6 +1862,7 @@ export default function App() {
                 <HomeView
                   autoOrigin={autoOrigin}
                   setAutoOrigin={setAutoOrigin}
+                  previewRoverPoint={previewRoverPoint}
                   importedPlan={importedPlan}
                   lines={displayedLines}
                   setLines={setLines}
@@ -1820,6 +1927,8 @@ export default function App() {
               ) : (
                 <SectionScreen
                   telemetrySnapshot={telemetrySnapshot}
+                  missionRunning={missionRunning}
+                  previewRoverPoint={previewRoverPoint}
                   title={sectionTitle}
                   page={page}
                   importedPlan={importedPlan}
@@ -1999,6 +2108,7 @@ function TopBar({
 function HomeView({
   autoOrigin,
   setAutoOrigin,
+  previewRoverPoint,
   importedPlan,
   lines,
   selectedLineId,
@@ -2055,6 +2165,7 @@ function HomeView({
 }: {
   autoOrigin: boolean;
   setAutoOrigin: React.Dispatch<React.SetStateAction<boolean>>;
+  previewRoverPoint: { north: number; east: number } | null;
   importedPlan: ImportedPlan | null;
   lines: PlanLine[];
   setLines: React.Dispatch<React.SetStateAction<PlanLine[]>>;
@@ -2388,9 +2499,10 @@ function HomeView({
                   visibility={layerVisibility}
                   selectedLineId={selectedLineId}
                   onSelectLine={onSelectLine}
-                  roverPosN={telemetrySnapshot?.pos_n ?? null}
-                  roverPosE={telemetrySnapshot?.pos_e ?? null}
+                  roverPosN={previewRoverPoint?.north ?? null}
+                  roverPosE={previewRoverPoint?.east ?? null}
                   roverHeadingDeg={telemetrySnapshot?.heading_ned_deg ?? null}
+                  missionRunning={missionRunning}
                 />
               </View>
             </View>
@@ -2940,11 +3052,11 @@ function HomeView({
                               onPress={() => {
                                 const entityLines = lines.filter(l => l.entity && l.entity.entity_id && l.layer !== "extension" && l.layer !== "transit");
                                 const anyUnmarked = entityLines.some(l => !l.entity!.is_mark);
-                                setLines(prev => prev.map(l => {
-                                  if (l.entity && l.entity.entity_id && l.layer !== "extension" && l.layer !== "transit") {
-                                    return { ...l, entity: { ...l.entity, is_mark: anyUnmarked } };
+                                setLines(prev => prev.map((entry) => {
+                                  if (entry.entity && entry.entity.entity_id && entry.layer !== "extension" && entry.layer !== "transit") {
+                                    return { ...entry, entity: { ...entry.entity, is_mark: anyUnmarked } };
                                   }
-                                  return l;
+                                  return entry;
                                 }));
                               }}
                               style={{ backgroundColor: "rgba(255,255,255,0.08)", paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 }}
@@ -2963,9 +3075,19 @@ function HomeView({
                                 <Pressable
                                   onPress={() => {
                                     if (line.entity) {
-                                      const val = !line.entity.is_mark;
-                                      line.entity.is_mark = val;
-                                      setLines([...lines]); // trigger re-render
+                                      setLines(prev =>
+                                        prev.map((entry) =>
+                                          entry.id === line.id && entry.entity
+                                            ? {
+                                                ...entry,
+                                                entity: {
+                                                  ...entry.entity,
+                                                  is_mark: !entry.entity.is_mark,
+                                                },
+                                              }
+                                            : entry
+                                        )
+                                      );
                                     }
                                   }}
                                   style={{
@@ -4259,6 +4381,8 @@ function SectionScreen(props: {
   title: string;
   page: Page;
   telemetrySnapshot: TelemetrySnapshot | null;
+  missionRunning: boolean;
+  previewRoverPoint: { north: number; east: number } | null;
   importedPlan: ImportedPlan | null;
   lines: PlanLine[];
   setLines: React.Dispatch<React.SetStateAction<PlanLine[]>>;
@@ -4740,6 +4864,8 @@ function FieldsPage({
   setImportedPlan,
   lines,
   setLines,
+  previewRoverPoint,
+  missionRunning,
   telemetrySnapshot,
   selectedLineId,
   layerVisibility,
@@ -4755,8 +4881,10 @@ function FieldsPage({
 }: {
   importedPlan: ImportedPlan | null;
   setImportedPlan: React.Dispatch<React.SetStateAction<ImportedPlan | null>>;
-  lines: PlanLine[];
+  lines: PlanLine[]; 
   setLines: React.Dispatch<React.SetStateAction<PlanLine[]>>;
+  previewRoverPoint: { north: number; east: number } | null;
+  missionRunning: boolean;
   telemetrySnapshot: TelemetrySnapshot | null;
   selectedLineId: string | null;
   layerVisibility: LayerVisibility;
@@ -4788,13 +4916,10 @@ function FieldsPage({
   const [isSavingOrder, setIsSavingOrder] = useState(false);
   const [isSprayingSet, setIsSprayingSet] = useState(false);
   const [reorderedLines, setReorderedLines] = useState<PlanLine[]>([]);
-  
-  // Track order state when reordering starts
-  useEffect(() => {
-    if (isReordering) {
-      setReorderedLines(lines.filter(l => ["line", "arc", "circle"].includes(l.entity?.entity_type || "")));
-    }
-  }, [isReordering, lines]);
+  const primaryReorderableLines = useMemo(
+    () => lines.filter(isPrimaryEditableLine),
+    [lines]
+  );
 
   const targetPathForExtensions = selectedPathName || importedPlan?.fileName;
 
@@ -5139,8 +5264,8 @@ function FieldsPage({
               }
               selectedLineId={selectedLineId}
               onSelectLine={onSelectLine}
-              roverPosN={telemetrySnapshot?.pos_n ?? null}
-              roverPosE={telemetrySnapshot?.pos_e ?? null}
+              roverPosN={previewRoverPoint?.north ?? null}
+              roverPosE={previewRoverPoint?.east ?? null}
               roverHeadingDeg={telemetrySnapshot?.heading_ned_deg ?? null}
               selectedPoints={refPoints.map(p => ({ x: p.dxf_y, y: p.dxf_x }))}
               onSelectPoint={handleSelectPoint}
@@ -5223,6 +5348,7 @@ function FieldsPage({
                 if (isReordering) {
                   handleSetOrder();
                 } else {
+                  setReorderedLines(primaryReorderableLines);
                   setIsReordering(true);
                   setPathFilter("All");
                 }
@@ -5243,51 +5369,21 @@ function FieldsPage({
           {/* List Content */}
           <View style={{ flex: 1, backgroundColor: "#fff", borderRadius: 12, borderWidth: 1, borderColor: "#e2e8f0", overflow: "hidden" }}>
             {isReordering ? (
-              <DraggableFlatList
-                data={reorderedLines}
-                onDragEnd={({ data }: { data: PlanLine[] }) => setReorderedLines(data)}
-                keyExtractor={(item: PlanLine) => item.id}
-                containerStyle={{ flex: 1 }}
-                renderItem={({ item, drag, isActive }: RenderItemParams<PlanLine>) => (
-                  <ScaleDecorator>
-                    <Pressable
-                      onLongPress={drag}
-                      disabled={isActive}
-                      style={{
-                        flexDirection: "row",
-                        alignItems: "center",
-                        padding: 14,
-                        backgroundColor: isActive ? "#f8fafc" : "#fff",
-                        borderBottomWidth: 1,
-                        borderBottomColor: "#f1f5f9",
-                        opacity: isActive ? 0.8 : 1
-                      }}
-                    >
-                      <View style={{ paddingRight: 12 }}>
-                        <Text style={{ color: "#cbd5e1", fontSize: 20 }}>☰</Text>
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={{ color: "#0f172a", fontSize: 14, fontWeight: "700" }}>
-                          {item.label} <Text style={{ color: "#64748b", fontWeight: "500", fontSize: 12 }}>({item.entity?.entity_type})</Text>
-                        </Text>
-                      </View>
-                    </Pressable>
-                  </ScaleDecorator>
-                )}
-              />
+              <ReorderableLineList data={reorderedLines} onDragEnd={setReorderedLines} />
             ) : (
               <ScrollView style={{ flex: 1 }}>
                 {lines
                   .filter(l => {
+                    const entityType = normalizeEntityType(l.entity?.entity_type);
                     if (pathFilter === "All") return true;
-                    if (pathFilter === "lines") return l.entity?.entity_type === "line" && l.layer !== "transit" && l.layer !== "extension";
-                    if (pathFilter === "arcs") return l.entity?.entity_type === "arc" || l.entity?.entity_type === "circle";
+                    if (pathFilter === "lines") return entityType === "line" && l.layer !== "transit" && l.layer !== "extension";
+                    if (pathFilter === "arcs") return entityType === "arc" || entityType === "circle";
                     if (pathFilter === "transits") return l.layer === "transit";
                     if (pathFilter === "extensions") return l.layer === "extension";
                     return true;
                   })
                   .map(l => {
-                    const isPrimary = ["line", "arc", "circle"].includes(l.entity?.entity_type || "") && l.layer !== "transit" && l.layer !== "extension";
+                    const isPrimary = isPrimaryEditableLine(l);
                     const isSelected = selectedLineId === l.id;
                     return (
                       <Pressable
@@ -5361,15 +5457,21 @@ function FieldsPage({
                   <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
                     <Text style={{ color: "#64748b", fontWeight: "700" }}>Primary Lines</Text>
                     <Text style={{ color: "#0f172a", fontWeight: "800" }}>
-                      {lines.filter(l => l.entity?.entity_type === "line" && l.layer !== "transit" && l.layer !== "extension").length} total 
-                      ({lines.filter(l => l.entity?.entity_type === "line" && l.layer !== "transit" && l.layer !== "extension" && l.entity.is_mark).length} spray ready)
+                      {lines.filter(l => normalizeEntityType(l.entity?.entity_type) === "line" && l.layer !== "transit" && l.layer !== "extension").length} total 
+                      ({lines.filter(l => normalizeEntityType(l.entity?.entity_type) === "line" && l.layer !== "transit" && l.layer !== "extension" && l.entity?.is_mark).length} spray ready)
                     </Text>
                   </View>
                   <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
                     <Text style={{ color: "#64748b", fontWeight: "700" }}>Arcs/Circles</Text>
                     <Text style={{ color: "#0f172a", fontWeight: "800" }}>
-                      {lines.filter(l => (l.entity?.entity_type === "arc" || l.entity?.entity_type === "circle") && l.layer !== "transit" && l.layer !== "extension").length} total
-                      ({lines.filter(l => (l.entity?.entity_type === "arc" || l.entity?.entity_type === "circle") && l.layer !== "transit" && l.layer !== "extension" && l.entity.is_mark).length} spray ready)
+                      {lines.filter(l => {
+                        const entityType = normalizeEntityType(l.entity?.entity_type);
+                        return (entityType === "arc" || entityType === "circle") && l.layer !== "transit" && l.layer !== "extension";
+                      }).length} total
+                      ({lines.filter(l => {
+                        const entityType = normalizeEntityType(l.entity?.entity_type);
+                        return (entityType === "arc" || entityType === "circle") && l.layer !== "transit" && l.layer !== "extension" && l.entity?.is_mark;
+                      }).length} spray ready)
                     </Text>
                   </View>
                   <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
@@ -5749,6 +5851,7 @@ function TemplatesPage(props: {
   layerVisibility: LayerVisibility;
   selectedLineId: string | null;
   onSelectLine: (id: string | null) => void;
+  previewRoverPoint: { north: number; east: number } | null;
   onGenerateTemplate: (name: string, lines: PlanLine[]) => void;
   apiBaseUrl: string;
   onSelectPath: (name: string) => void;
@@ -5837,8 +5940,8 @@ function TemplatesPage(props: {
               visibility={props.layerVisibility}
               selectedLineId={props.selectedLineId}
               onSelectLine={props.onSelectLine}
-              roverPosN={props.telemetrySnapshot?.pos_n ?? null}
-              roverPosE={props.telemetrySnapshot?.pos_e ?? null}
+              roverPosN={props.previewRoverPoint?.north ?? null}
+              roverPosE={props.previewRoverPoint?.east ?? null}
               roverHeadingDeg={props.telemetrySnapshot?.heading_ned_deg ?? null}
             />
           </View>
@@ -6488,6 +6591,7 @@ function PlanPreview({
   roverPosN,
   roverPosE,
   roverHeadingDeg,
+  missionRunning = false,
   selectedPoints,
   onSelectPoint,
 }: {
@@ -6498,6 +6602,7 @@ function PlanPreview({
   roverPosN?: number | null;
   roverPosE?: number | null;
   roverHeadingDeg?: number | null;
+  missionRunning?: boolean;
   selectedPoints?: { x: number; y: number }[];
   onSelectPoint?: (pt: { x: number; y: number }) => void;
 }) {
@@ -6512,6 +6617,24 @@ function PlanPreview({
         return true;
       }),
     [lines, visibility]
+  );
+
+  const filteredPlanSignature = useMemo(
+    () =>
+      filtered
+        .map((line) =>
+          [
+            line.id,
+            line.layer,
+            line.from.x.toFixed(3),
+            line.from.y.toFixed(3),
+            line.to.x.toFixed(3),
+            line.to.y.toFixed(3),
+            normalizeEntityType(line.entity?.entity_type),
+          ].join(":")
+        )
+        .join("|"),
+    [filtered]
   );
 
   const cornerPoints = useMemo(() => getCornerPoints(filtered).slice(0, MAX_PREVIEW_CORNERS), [filtered]);
@@ -6546,6 +6669,8 @@ function PlanPreview({
   const [rotation, setRotation] = useState(0);
   // Track whether user has manually panned so auto-pan doesn't fight them
   const userPannedRef = React.useRef(false);
+  const roverAutoFocusPausedRef = React.useRef(false);
+  const roverAutoFocusTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const rotationRef = React.useRef(rotation);
   useEffect(() => {
@@ -6589,14 +6714,8 @@ function PlanPreview({
   }, [viewport]);
 
   // Auto-fit when plan lines change
-  const filteredLengthRef = React.useRef(-1);
   useEffect(() => {
     if (layoutSize.width <= 0 || layoutSize.height <= 0) return;
-
-    if (filteredLengthRef.current === filtered.length) {
-      return;
-    }
-    filteredLengthRef.current = filtered.length;
 
     if (filtered.length === 0) {
       // No plan: centre on rover if available, else use origin
@@ -6614,17 +6733,55 @@ function PlanPreview({
       setRotation(0);
       return;
     }
+
     userPannedRef.current = false;
     const fitted = computeAutoFitViewport(filtered, layoutSize.width, layoutSize.height);
     viewportRef.current = fitted;
     setViewport(fitted);
     setRotation(0);
-  }, [filtered, layoutSize.width, layoutSize.height]);
+  }, [filteredPlanSignature, layoutSize.width, layoutSize.height, roverE, roverN]);
 
-  // Auto-pan to keep rover in view (only when not manually panned by user)
+  const clearRoverAutoFocusTimer = useCallback(() => {
+    if (roverAutoFocusTimerRef.current) {
+      clearTimeout(roverAutoFocusTimerRef.current);
+      roverAutoFocusTimerRef.current = null;
+    }
+  }, []);
+
+  const focusRover = useCallback(() => {
+    if (layoutSize.width <= 0 || layoutSize.height <= 0) return;
+    const rN = hasRover ? roverN : 0;
+    const rE = hasRover ? roverE : 0;
+    const nextZoom = viewportRef.current.zoom || viewport.zoom || 1;
+    const next: PreviewViewport = {
+      panX: layoutSize.width / 2 - rE * nextZoom,
+      panY: layoutSize.height / 2 - (-rN) * nextZoom,
+      zoom: nextZoom,
+    };
+    viewportRef.current = next;
+    setViewport(next);
+    userPannedRef.current = false;
+  }, [hasRover, layoutSize.height, layoutSize.width, roverE, roverN, viewport.zoom]);
+
   useEffect(() => {
-    // Disabled to keep view static and fitted to plan
-  }, [roverN, roverE, hasRover, layoutSize]);
+    if (!missionRunning || !hasRover) {
+      roverAutoFocusPausedRef.current = false;
+      clearRoverAutoFocusTimer();
+      return;
+    }
+
+    if (roverAutoFocusPausedRef.current) {
+      return;
+    }
+
+    focusRover();
+  }, [clearRoverAutoFocusTimer, focusRover, hasRover, missionRunning, roverE, roverN, roverDeg]);
+
+  useEffect(() => {
+    return () => {
+      clearRoverAutoFocusTimer();
+    };
+  }, [clearRoverAutoFocusTimer]);
 
   const handleLayout = useCallback((event: any) => {
     const { width, height } = event.nativeEvent.layout ?? {};
@@ -6644,6 +6801,10 @@ function PlanPreview({
         onMoveShouldSetPanResponder: () => true,
 
         onPanResponderGrant: (evt) => {
+          if (missionRunning && hasRover) {
+            roverAutoFocusPausedRef.current = true;
+            clearRoverAutoFocusTimer();
+          }
           const touches = evt.nativeEvent.touches;
           gestureRef.current.isTap = true;
           gestureRef.current.startTouch = { x: evt.nativeEvent.locationX, y: evt.nativeEvent.locationY };
@@ -6752,6 +6913,14 @@ function PlanPreview({
           gestureRef.current.pinchDistance = null;
           gestureRef.current.pinchAngle = null;
           gestureRef.current.isTap = false;
+
+          if (missionRunning && hasRover) {
+            clearRoverAutoFocusTimer();
+            roverAutoFocusTimerRef.current = setTimeout(() => {
+              roverAutoFocusPausedRef.current = false;
+              focusRover();
+            }, 5000);
+          }
         },
 
         onPanResponderTerminate: () => {
@@ -6760,9 +6929,17 @@ function PlanPreview({
           gestureRef.current.pinchDistance = null;
           gestureRef.current.pinchAngle = null;
           gestureRef.current.isTap = false;
+
+          if (missionRunning && hasRover) {
+            clearRoverAutoFocusTimer();
+            roverAutoFocusTimerRef.current = setTimeout(() => {
+              roverAutoFocusPausedRef.current = false;
+              focusRover();
+            }, 5000);
+          }
         },
       }),
-    []
+    [clearRoverAutoFocusTimer, focusRover, hasRover, missionRunning, layoutSize.height, layoutSize.width, rotation]
   );
 
   const strokeForLayer = (layer: string) => {
@@ -6775,20 +6952,7 @@ function PlanPreview({
     return "#475569";
   };
 
-  const handleFocusRover = () => {
-    if (layoutSize.width <= 0 || layoutSize.height <= 0) return;
-    const rN = hasRover ? roverN : 0;
-    const rE = hasRover ? roverE : 0;
-    const defaultZoom = viewport.zoom > 10 ? viewport.zoom : 40;
-    const next: PreviewViewport = {
-      panX: layoutSize.width / 2 - rE * defaultZoom,
-      panY: layoutSize.height / 2 - (-rN) * defaultZoom,
-      zoom: defaultZoom,
-    };
-    viewportRef.current = next;
-    setViewport(next);
-    userPannedRef.current = false;
-  };
+  const handleFocusRover = focusRover;
 
   const handleFocusPlan = () => {
     if (layoutSize.width <= 0 || layoutSize.height <= 0) return;
