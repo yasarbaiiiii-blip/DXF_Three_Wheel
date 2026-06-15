@@ -77,7 +77,12 @@ export type PathPlanResponse = {
   [key: string]: unknown;
 };
 
-export type AlignPathRequest = PathPlanRequest;
+export type AlignPathRequest = {
+  ref_points?: RefPoint[];
+  origin_gps?: [number, number];
+  rotation_deg?: number;
+  [key: string]: unknown;
+};
 export type PlanAndStageRequest = PathPlanRequest;
 
 function apiUrl(apiBaseUrl: string, path: string) {
@@ -169,6 +174,31 @@ export function planPath(apiBaseUrl: string, payload: PathPlanRequest): Promise<
 export function alignPath(apiBaseUrl: string, pathName: string, payload: AlignPathRequest): Promise<Response> {
   return postJson(apiBaseUrl, `/api/path/${encodeURIComponent(pathName)}/align`, payload);
 }
+
+export type PathSegmentInfo = {
+  index: number;
+  sequence: number;
+  type: string;
+  segment_role?: string | null;
+  source_entity: string;
+  is_extension: boolean;
+  spray_on: boolean;
+  speed: number;
+  length_m: number;
+  points?: number[][];
+};
+
+export type PathSegmentsResponse = {
+  name: string;
+  num_segments: number;
+  num_waypoints: number;
+  mark_length_m: number;
+  transit_length_m: number;
+  total_length_m: number;
+  segments: PathSegmentInfo[];
+  warnings?: string[] | null;
+  [key: string]: unknown;
+};
 
 export function getPathSegments(apiBaseUrl: string, pathName: string): Promise<Response> {
   return fetch(apiUrl(apiBaseUrl, `/api/path/${encodeURIComponent(pathName)}/segments`), {

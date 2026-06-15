@@ -102,6 +102,13 @@ function normalizeEntityType(entityType: unknown) {
   return String(entityType ?? "").trim().toLowerCase();
 }
 
+function segmentExtensionRole(segmentRole: unknown): "pre" | "aft" | "none" {
+  const role = String(segmentRole ?? "").trim().toLowerCase();
+  if (role === "pre_transit") return "pre";
+  if (role === "aft_transit") return "aft";
+  return "none";
+}
+
 function isPrimaryEditableLine(line: PlanLine) {
   if (line.layer === "transit" || line.layer === "extension") {
     return false;
@@ -593,6 +600,7 @@ export default function App() {
   const selectedWsRef = useRef(selectedWs);
   const manualHostRef = useRef(manualHost);
   const backendPinnedRef = useRef(backendPinned);
+  const previousSelectedPathRef = useRef<string | null>(null);
 
   const activeMenu = useMemo(() => MENU_ITEMS.find((x) => x.key === page), [page]);
   const sectionTitle =
@@ -625,6 +633,19 @@ export default function App() {
   const setWorkflowStep = useCallback((step: StagedWorkflowStep, status: StagedWorkflowStatus) => {
     setStagedWorkflow((prev) => (prev[step] === status ? prev : { ...prev, [step]: status }));
   }, []);
+
+  useEffect(() => {
+    if (previousSelectedPathRef.current === selectedPathName) return;
+    previousSelectedPathRef.current = selectedPathName;
+    setStagedWorkflow((prev) => ({
+      ...prev,
+      alignment: "pending",
+      spray: "pending",
+      staged: "pending",
+      loaded: "pending",
+      started: "pending",
+    }));
+  }, [selectedPathName]);
 
   useEffect(() => {
     return () => {
@@ -5036,10 +5057,16 @@ const connectionStyles = {
 };
 
 type AlignmentResultState = {
-  alignment_metadata: Record<string, unknown> | null;
+  method: unknown;
+  scale: number | null;
+  rotation_deg: number | null;
+  offset_n: number | null;
+  offset_e: number | null;
+  origin_gps: unknown;
   rmse_m: number | null;
   sample_coords: unknown;
   residuals: unknown;
+  warnings: unknown;
 };
 
 function FieldsPage({
@@ -5103,11 +5130,38 @@ function FieldsPage({
   const [infoModalOpen, setInfoModalOpen] = useState(false);
   const [isSavingOrder, setIsSavingOrder] = useState(false);
   const [isSprayingSet, setIsSprayingSet] = useState(false);
+  const [isVerifyingSegments, setIsVerifyingSegments] = useState(false);
+  const [segmentVerification, setSegmentVerification] = useState<pathApi.PathSegmentsResponse | null>(null);
   const [reorderedLines, setReorderedLines] = useState<PlanLine[]>([]);
   const primaryReorderableLines = useMemo(
     () => lines.filter(isPrimaryEditableLine),
     [lines]
   );
+  const segmentCounts = useMemo(() => {
+    const segments = segmentVerification?.segments ?? [];
+    let markCount = 0;
+    let transitCount = 0;
+    let preExtensionCount = 0;
+    let aftExtensionCount = 0;
+    let sprayOnCount = 0;
+    let sprayOffCount = 0;
+    for (const segment of segments) {
+      if (segment.type === "MARK") markCount += 1;
+      if (segment.type === "TRANSIT") transitCount += 1;
+      if (segment.segment_role === "pre_transit") preExtensionCount += 1;
+      if (segment.segment_role === "aft_transit") aftExtensionCount += 1;
+      if (segment.spray_on) sprayOnCount += 1;
+      else sprayOffCount += 1;
+    }
+    return {
+      markCount,
+      transitCount,
+      preExtensionCount,
+      aftExtensionCount,
+      sprayOnCount,
+      sprayOffCount,
+    };
+  }, [segmentVerification]);
 
   const targetPathForExtensions = selectedPathName || importedPlan?.fileName;
 
@@ -5193,6 +5247,41 @@ function FieldsPage({
       Alert.alert("Error", err.message || "Failed to connect to backend");
     } finally {
       setIsSprayingSet(false);
+    }
+  };
+
+  const handleVerifySpraySegments = async () => {
+    const targetPath = selectedPathName || importedPlan?.fileName;
+    if (!apiBaseUrl || !targetPath) {
+      Alert.alert("Error", "No path selected to verify segments.");
+      return;
+    }
+    if (!targetPath.toLowerCase().endsWith(".dxf")) {
+      Alert.alert("Error", "Segment verification is only available for DXF paths.");
+      return;
+    }
+
+    setIsVerifyingSegments(true);
+    try {
+      const res = await pathApi.getPathSegments(apiBaseUrl, targetPath);
+      if (res.ok) {
+        const data = (await res.json()) as pathApi.PathSegmentsResponse;
+        setSegmentVerification(data);
+        onWorkflowStep?.("spray", "verified");
+        Alert.alert("Success", "Segment verification complete.");
+      } else {
+        setSegmentVerification(null);
+        onWorkflowStep?.("spray", "failed");
+        const errText = await res.text();
+        Alert.alert("Verification Failed", errText || "Could not fetch segments.");
+      }
+    } catch (err) {
+      setSegmentVerification(null);
+      onWorkflowStep?.("spray", "failed");
+      console.log("Error verifying segments:", err);
+      Alert.alert("Error", "Could not connect to the rover to verify segments.");
+    } finally {
+      setIsVerifyingSegments(false);
     }
   };
 
@@ -5291,7 +5380,10 @@ function FieldsPage({
   };
 
   const handleFixAlignment = async () => {
-    if (!selectedPathName || !apiBaseUrl || refPoints.length === 0) return;
+    if (!selectedPathName || !apiBaseUrl || refPoints.length === 0) {
+      onWorkflowStep?.("alignment", "failed");
+      return;
+    }
     setIsFixing(true);
     try {
       const validPoints = refPoints
@@ -5304,24 +5396,26 @@ function FieldsPage({
         }));
 
       if (alignmentMethod === "least_squares" && validPoints.length < 2) {
+        onWorkflowStep?.("alignment", "failed");
         Alert.alert("Validation", "Please select 2 points and enter their WGS84 coordinates.");
         setIsFixing(false);
         return;
       }
       if (alignmentMethod === "single_point" && validPoints.length === 0) {
+        onWorkflowStep?.("alignment", "failed");
         Alert.alert("Validation", "Please select a point and enter its coordinates.");
         setIsFixing(false);
         return;
       }
 
       const payload: pathApi.AlignPathRequest = {
-        source: selectedPathName,
         ref_points: validPoints,
       };
 
       if (alignmentMethod === "single_point") {
         const rot = parseFloat(rotationDeg);
         if (isNaN(rot)) {
+          onWorkflowStep?.("alignment", "failed");
           Alert.alert("Validation", "Please enter a valid Heading (Degrees).");
           setIsFixing(false);
           return;
@@ -5329,22 +5423,22 @@ function FieldsPage({
         payload.rotation_deg = rot;
       }
 
-      if (telemetrySnapshot?.lat != null && telemetrySnapshot?.lon != null) {
-        payload.origin_gps = [telemetrySnapshot.lat, telemetrySnapshot.lon];
-      }
-
       const res = await pathApi.alignPath(apiBaseUrl, selectedPathName, payload);
 
       if (res.ok) {
         const data = await res.json();
-        const alignmentMetadata = data.alignment_metadata ?? null;
-        const rmseM = coerceFiniteNumber(data.rmse_m ?? alignmentMetadata?.rmse);
         setMissionSummary(null);
         setAlignmentResult({
-          alignment_metadata: alignmentMetadata,
-          rmse_m: rmseM,
+          method: data.method ?? null,
+          scale: coerceFiniteNumber(data.scale),
+          rotation_deg: coerceFiniteNumber(data.rotation_deg),
+          offset_n: coerceFiniteNumber(data.offset_n),
+          offset_e: coerceFiniteNumber(data.offset_e),
+          origin_gps: data.origin_gps ?? null,
+          rmse_m: coerceFiniteNumber(data.rmse_m),
           sample_coords: data.sample_coords ?? null,
           residuals: data.residuals ?? null,
+          warnings: data.warnings ?? null,
         });
         onWorkflowStep?.("alignment", "verified");
         Alert.alert("Success", "Alignment verified.");
@@ -5609,19 +5703,117 @@ function FieldsPage({
           </View>
           
           {!isReordering && (
-            <Pressable
-              onPress={handleSetSpray}
-              disabled={isSprayingSet}
-              style={{
-                height: 48,
-                backgroundColor: isSprayingSet ? "#475569" : "#0ea5e9",
-                borderRadius: 12,
-                alignItems: "center",
-                justifyContent: "center"
-              }}
-            >
-              <Text style={{ color: "#fff", fontSize: 14, fontWeight: "800" }}>{isSprayingSet ? "Saving..." : "Save Spray Settings"}</Text>
-            </Pressable>
+            <>
+              <Pressable
+                onPress={handleSetSpray}
+                disabled={isSprayingSet}
+                style={{
+                  height: 48,
+                  backgroundColor: isSprayingSet ? "#475569" : "#0ea5e9",
+                  borderRadius: 12,
+                  alignItems: "center",
+                  justifyContent: "center"
+                }}
+              >
+                <Text style={{ color: "#fff", fontSize: 14, fontWeight: "800" }}>{isSprayingSet ? "Saving..." : "Save Spray Settings"}</Text>
+              </Pressable>
+
+              <View style={{ borderRadius: 12, padding: 12, backgroundColor: "#ffffff", borderWidth: 1, borderColor: "#d8e1eb", gap: 10 }}>
+                <Text style={{ color: "#64748b", fontSize: 11, fontWeight: "800", letterSpacing: 1, textTransform: "uppercase" }}>
+                  Verify Segments
+                </Text>
+                <Text style={{ color: "#94a3b8", fontSize: 11, lineHeight: 16 }}>
+                  Fetch runtime segment roles from the rover before staging.
+                </Text>
+                <Pressable
+                  onPress={handleVerifySpraySegments}
+                  disabled={isVerifyingSegments || !selectedPathName}
+                  style={{
+                    height: 44,
+                    borderRadius: 10,
+                    alignItems: "center",
+                    justifyContent: "center",
+                    backgroundColor: isVerifyingSegments || !selectedPathName ? "#94a3b8" : "#0f988f",
+                  }}
+                >
+                  <Text style={{ color: "#fff", fontSize: 14, fontWeight: "700" }}>
+                    {isVerifyingSegments ? "Verifying..." : "Verify Spray Segments"}
+                  </Text>
+                </Pressable>
+
+                {segmentVerification && (
+                  <View style={{ gap: 8 }}>
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+                      {[
+                        { label: "MARK", value: segmentCounts.markCount, color: "#166534", bg: "#dcfce7" },
+                        { label: "TRANSIT", value: segmentCounts.transitCount, color: "#334155", bg: "#e2e8f0" },
+                        { label: "PRE", value: segmentCounts.preExtensionCount, color: "#7c3aed", bg: "#ede9fe" },
+                        { label: "AFT", value: segmentCounts.aftExtensionCount, color: "#7c3aed", bg: "#ede9fe" },
+                        { label: "Spray ON", value: segmentCounts.sprayOnCount, color: "#0f766e", bg: "#ccfbf1" },
+                        { label: "Spray OFF", value: segmentCounts.sprayOffCount, color: "#475569", bg: "#f1f5f9" },
+                      ].map((chip) => (
+                        <View
+                          key={chip.label}
+                          style={{ paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999, backgroundColor: chip.bg }}
+                        >
+                          <Text style={{ color: chip.color, fontSize: 10, fontWeight: "800" }}>
+                            {chip.label}: {chip.value}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+
+                    <View style={{ borderRadius: 8, borderWidth: 1, borderColor: "#e2e8f0", overflow: "hidden" }}>
+                      <View style={{ flexDirection: "row", backgroundColor: "#f8fafc", paddingVertical: 6, paddingHorizontal: 8, borderBottomWidth: 1, borderBottomColor: "#e2e8f0" }}>
+                        {["#", "Seq", "Type", "Ext", "Spray", "Entity", "Len"].map((heading) => (
+                          <Text
+                            key={heading}
+                            style={{
+                              flex: heading === "Entity" ? 2 : 1,
+                              color: "#64748b",
+                              fontSize: 9,
+                              fontWeight: "800",
+                              textTransform: "uppercase",
+                            }}
+                          >
+                            {heading}
+                          </Text>
+                        ))}
+                      </View>
+                      <ScrollView style={{ maxHeight: 180 }} nestedScrollEnabled>
+                        {segmentVerification.segments.map((segment) => {
+                          const extRole = segmentExtensionRole(segment.segment_role);
+                          const typeColor = segment.type === "MARK" ? "#166534" : "#475569";
+                          const sprayColor = segment.spray_on ? "#0f766e" : "#94a3b8";
+                          return (
+                            <View
+                              key={`${segment.index}-${segment.sequence}`}
+                              style={{ flexDirection: "row", paddingVertical: 6, paddingHorizontal: 8, borderBottomWidth: 1, borderBottomColor: "#f1f5f9" }}
+                            >
+                              <Text style={{ flex: 1, color: "#0f172a", fontSize: 10, fontWeight: "700" }}>{segment.index}</Text>
+                              <Text style={{ flex: 1, color: "#0f172a", fontSize: 10 }}>{segment.sequence}</Text>
+                              <Text style={{ flex: 1, color: typeColor, fontSize: 10, fontWeight: "700" }}>{segment.type}</Text>
+                              <Text style={{ flex: 1, color: extRole === "none" ? "#94a3b8" : "#7c3aed", fontSize: 10, fontWeight: "700" }}>{extRole}</Text>
+                              <Text style={{ flex: 1, color: sprayColor, fontSize: 10, fontWeight: "700" }}>{segment.spray_on ? "ON" : "OFF"}</Text>
+                              <Text style={{ flex: 2, color: "#334155", fontSize: 10 }} numberOfLines={1}>
+                                {segment.source_entity || "—"}
+                              </Text>
+                              <Text style={{ flex: 1, color: "#334155", fontSize: 10 }}>{formatFinite(segment.length_m, 1)}</Text>
+                            </View>
+                          );
+                        })}
+                      </ScrollView>
+                    </View>
+
+                    {segmentVerification.warnings && segmentVerification.warnings.length > 0 && (
+                      <Text style={{ color: "#b45309", fontSize: 10 }} numberOfLines={3}>
+                        Warnings: {segmentVerification.warnings.join("; ")}
+                      </Text>
+                    )}
+                  </View>
+                )}
+              </View>
+            </>
           )}
 
           {/* Info Modal */}
@@ -5948,16 +6140,31 @@ function FieldsPage({
                 <View style={{ marginTop: 12, padding: 12, backgroundColor: "#f0fdf4", borderRadius: 8, borderWidth: 1, borderColor: "#bbf7d0" }}>
                   <Text style={{ color: "#166534", fontWeight: "800", marginBottom: 8, fontSize: 13 }}>Alignment Verified</Text>
                   <Text style={{ color: "#166534", fontSize: 12, marginBottom: 4 }}>
-                    RMSE: {formatFinite(alignmentResult.rmse_m, 3)}
+                    Method: {alignmentResult.method != null ? String(alignmentResult.method) : "n/a"}
                   </Text>
-                  <Text style={{ color: "#166534", fontSize: 11, marginBottom: 4 }} numberOfLines={4}>
-                    Metadata: {alignmentResult.alignment_metadata ? JSON.stringify(alignmentResult.alignment_metadata) : "n/a"}
+                  <Text style={{ color: "#166534", fontSize: 12, marginBottom: 4 }}>
+                    Scale: {formatFinite(alignmentResult.scale, 6)}
+                  </Text>
+                  <Text style={{ color: "#166534", fontSize: 12, marginBottom: 4 }}>
+                    Rotation: {formatFinite(alignmentResult.rotation_deg, 3)} deg
+                  </Text>
+                  <Text style={{ color: "#166534", fontSize: 12, marginBottom: 4 }}>
+                    Offset: N {formatFinite(alignmentResult.offset_n, 3)} / E {formatFinite(alignmentResult.offset_e, 3)}
+                  </Text>
+                  <Text style={{ color: "#166534", fontSize: 12, marginBottom: 4 }}>
+                    Origin GPS: {alignmentResult.origin_gps ? JSON.stringify(alignmentResult.origin_gps) : "n/a"}
+                  </Text>
+                  <Text style={{ color: "#166534", fontSize: 12, marginBottom: 4 }}>
+                    RMSE: {formatFinite(alignmentResult.rmse_m, 3)}
                   </Text>
                   <Text style={{ color: "#166534", fontSize: 11, marginBottom: 4 }} numberOfLines={4}>
                     Samples: {alignmentResult.sample_coords ? JSON.stringify(alignmentResult.sample_coords) : "n/a"}
                   </Text>
-                  <Text style={{ color: "#166534", fontSize: 11 }} numberOfLines={4}>
+                  <Text style={{ color: "#166534", fontSize: 11, marginBottom: 4 }} numberOfLines={4}>
                     Residuals: {alignmentResult.residuals ? JSON.stringify(alignmentResult.residuals) : "n/a"}
+                  </Text>
+                  <Text style={{ color: "#166534", fontSize: 11 }} numberOfLines={4}>
+                    Warnings: {alignmentResult.warnings ? JSON.stringify(alignmentResult.warnings) : "n/a"}
                   </Text>
                 </View>
               )}
@@ -5984,6 +6191,7 @@ function FieldsPage({
                     onPress={() => {
                       setMissionSummary(null);
                       setAlignmentResult(null);
+                      setSegmentVerification(null);
                       onSelectPath(path.name);
                     }}
                     style={{
