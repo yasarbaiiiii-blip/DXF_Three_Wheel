@@ -60,6 +60,8 @@ import {
 
 import { readImportedPlanFile, normalizePlanLines } from "./src/utils/planImport";
 import type { ImportedPlan, PlanLine } from "./src/types/plan";
+import * as missionApi from "./src/api/missionApi";
+import * as pathApi from "./src/api/pathApi";
 import { generateTemplateLines, ShapeType, ArcType } from "./src/utils/shapeTemplates";
 import { generateAlphabetLines, generateNumberLines, FontStyle, AlphabetType, NumberType } from "./src/utils/characterTemplates";
 import { generateRoadSignLines, RoadSignType, ROAD_SIGN_LABELS } from "./src/utils/roadSignTemplates";
@@ -348,6 +350,21 @@ type AppToast = {
   tone: ToastTone;
 };
 
+type StagedWorkflowStep = "upload" | "entities" | "order" | "alignment" | "spray" | "staged" | "loaded" | "started";
+type StagedWorkflowStatus = "pending" | "verified" | "failed";
+type StagedWorkflowState = Record<StagedWorkflowStep, StagedWorkflowStatus>;
+
+const INITIAL_STAGED_WORKFLOW_STATE: StagedWorkflowState = {
+  upload: "pending",
+  entities: "pending",
+  order: "pending",
+  alignment: "pending",
+  spray: "pending",
+  staged: "pending",
+  loaded: "pending",
+  started: "pending",
+};
+
 const BG = "#d9d9dc";
 const TOP = "#ececee";
 const GREEN = "#eef2f7";
@@ -434,6 +451,7 @@ export default function App() {
   const [delayB, setDelayB] = useState(0.1);
   const [backendPaths, setBackendPaths] = useState<any[]>([]);
   const [selectedPathName, setSelectedPathName] = useState<string | null>(null);
+  const [stagedWorkflow, setStagedWorkflow] = useState<StagedWorkflowState>(INITIAL_STAGED_WORKFLOW_STATE);
   const [isPaused, setIsPaused] = useState(false);
 
   const [prevMissionState, setPrevMissionState] = useState<string | null>(null);
@@ -602,6 +620,10 @@ export default function App() {
     toastTimerRef.current = setTimeout(() => {
       setToast((current) => (current?.id === id ? null : current));
     }, 2800);
+  }, []);
+
+  const setWorkflowStep = useCallback((step: StagedWorkflowStep, status: StagedWorkflowStatus) => {
+    setStagedWorkflow((prev) => (prev[step] === status ? prev : { ...prev, [step]: status }));
   }, []);
 
   useEffect(() => {
@@ -973,23 +995,18 @@ export default function App() {
     if (!apiBaseUrl) return;
     try {
       console.log("[API GET] /api/paths - Polling paths list...");
-      const res = await fetch(`${apiBaseUrl}/api/paths`);
-      if (res.ok) {
-        const data = await res.json();
-        console.log(`[API GET] /api/paths - Success, found ${data.length} paths`);
-        setBackendPaths(data);
-      } else {
-        console.error(`[API GET] /api/paths - Failed with status ${res.status}`);
-      }
+      const data = await pathApi.getPaths(apiBaseUrl);
+      console.log(`[API GET] /api/paths - Success, found ${data.length} paths`);
+      setBackendPaths(data);
     } catch (err) {
       console.log("[API GET] /api/paths - Error fetching paths:", err);
     }
   };
 
-  const fetchWithRetry = async (url: string, options: RequestInit, retries = 2) => {
+  const fetchWithRetry = async (request: () => Promise<Response>, retries = 2) => {
     for (let i = 0; i < retries; i++) {
       try {
-        const res = await fetch(url, options);
+        const res = await request();
         if (res.ok) return res;
         // If not ok, it might be a 404, which shouldn't be retried if the endpoint really doesn't exist
         if (res.status === 404) return res; 
@@ -998,7 +1015,7 @@ export default function App() {
         await new Promise(r => setTimeout(r, 1000));
       }
     }
-    return fetch(url, options); // fallback final attempt
+    return request(); // fallback final attempt
   };
 
   const previewSelectedPath = async (pathName: string) => {
@@ -1010,13 +1027,11 @@ export default function App() {
       let generatedLines: PlanLine[] = [];
       try {
         if (pathName.toLowerCase().endsWith(".dxf")) {
-          const res = await fetchWithRetry(`${apiBaseUrl}/api/path/${encodeURIComponent(pathName)}/entities`, {
-            method: "GET",
-            headers: { Accept: "application/json" },
-          });
+          const res = await fetchWithRetry(() => pathApi.getPathEntities(apiBaseUrl, pathName));
           if (res.ok) {
             const body = await res.json();
             console.log(`[API GET] /api/path/${pathName}/entities - Success, loaded ${body.num_entities} entities`);
+            setWorkflowStep("entities", "verified");
             const entities = body.entities || [];
             // Per-entity extension run-ups are only drawn in the fallback path.
             // When /plan succeeds, extensions arrive as non-spray runs in the
@@ -1094,11 +1109,7 @@ export default function App() {
             // gets a usable picture.
             let runtimePathApplied = false;
             try {
-              const planRes = await fetch(`${apiBaseUrl}/api/path/plan`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ source: pathName, include_waypoints: true }),
-              });
+              const planRes = await pathApi.planPath(apiBaseUrl, { source: pathName, include_waypoints: true });
               if (planRes.ok) {
                 const planData = await planRes.json();
                 const wps = Array.isArray(planData.merged_waypoints) ? planData.merged_waypoints : [];
@@ -1155,12 +1166,7 @@ export default function App() {
             throw new Error(`Entities endpoint failed with status ${res.status}`);
           }
         } else {
-          const res = await fetchWithRetry(`${apiBaseUrl}/api/path/${encodeURIComponent(pathName)}/preview`, {
-            method: "GET",
-            headers: {
-              Accept: "application/json",
-            },
-          });
+          const res = await fetchWithRetry(() => pathApi.getPathPreview(apiBaseUrl, pathName));
           if (res.ok) {
             const body = await res.json();
             console.log(`[API GET] /api/path/${pathName}/preview - Success, loaded ${body.num_points} points`);
@@ -1255,8 +1261,7 @@ export default function App() {
       if (Platform.OS === "web") {
         // Browsers require a real Blob/File in a multipart body. The native
         // {uri,name,type} descriptor serialises to "[object Object]" in the
-        // browser, so the backend received garbage and returned 422 — which is
-        // why uploaded DXFs never appeared in the path list on web.
+        // browser, so the backend received garbage and returned 422.
         form = new FormData();
         form.append("file", new Blob([content], { type: "application/dxf" }), importedPlan.fileName);
       } else {
@@ -1268,19 +1273,18 @@ export default function App() {
         form = createUploadFormData(tempFileUri, importedPlan.fileName, "application/dxf");
       }
 
-      const res = await fetch(`${apiBaseUrl}/api/path/parse-dxf`, {
-        method: "POST",
-        body: form,
-      });
+      const res = await pathApi.parseDxf(apiBaseUrl, form);
       if (!res.ok) {
         const errMsg = await parseFetchError(res, "Parse failed");
         throw new Error(errMsg);
       }
+      setWorkflowStep("upload", "verified");
       
       // Choice A: Refresh preview immediately!
       await previewSelectedPath(importedPlan.fileName);
       showToast("Parsed", "Plan updated successfully.", "success");
     } catch (error) {
+      setWorkflowStep("upload", "failed");
       logAction("PARSE_FAILED", { error: error instanceof Error ? error.message : String(error) });
       Alert.alert("Parse failed", error instanceof Error ? error.message : "Could not parse.");
       showToast("Parse failed", error instanceof Error ? error.message : "Parse failed.", "error");
@@ -1304,14 +1308,7 @@ export default function App() {
     setTelemetryError("");
     try {
       const [statusRes, healthRes, telemetryRes] = await Promise.all([
-        fetchJson<{
-          state: string;
-          rpp_state: number;
-          rpp_state_name: string;
-          dist_to_goal: number;
-          speed: number;
-          xtrack: number;
-        }>(`${apiBaseUrl}/api/mission/status`),
+        fetchMissionStatus(apiBaseUrl),
         fetchJson<{
           ros_node: boolean;
           fcu_connected: boolean;
@@ -1413,6 +1410,16 @@ export default function App() {
     }
   }
 
+  async function fetchMissionStatus(apiBaseUrl: string): Promise<missionApi.MissionStatus> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 2000);
+    try {
+      return await missionApi.getMissionStatus(apiBaseUrl, { signal: controller.signal });
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
 
 
   async function parseFetchError(res: Response, fallbackPrefix: string): Promise<string> {
@@ -1447,19 +1454,11 @@ export default function App() {
       
       let res;
       if (stagedMissionId) {
-        res = await fetch(`${apiBaseUrl}/api/path/load-to-controller`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ mission_id: stagedMissionId }),
-        });
+        res = await missionApi.loadMissionToController(apiBaseUrl, { mission_id: stagedMissionId });
       } else {
-        res = await fetch(`${apiBaseUrl}/api/mission/load`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            path_name: importedPlan!.fileName,
-            mission_file: "",
-          }),
+        res = await missionApi.loadMission(apiBaseUrl, {
+          path_name: importedPlan!.fileName,
+          mission_file: "",
         });
       }
 
@@ -1469,12 +1468,14 @@ export default function App() {
       }
 
       setMissionLoaded(true);
+      setWorkflowStep("loaded", "verified");
       setMissionRunning(false);
       void refreshTelemetryPanel();
       logAction("LOAD_SUCCESS", { fileName: importedPlan?.fileName });
       setPage("home");
       showToast("File loaded", "Load succeeded. Start and Export are now available.", "success");
     } catch (error) {
+      setWorkflowStep("loaded", "failed");
       logAction("LOAD_FAILED", {
         fileName: importedPlan?.fileName,
         error: error instanceof Error ? error.message : String(error),
@@ -1495,22 +1496,17 @@ export default function App() {
     setMissionActionBusy(true);
     try {
       showToast(missionRunning ? "Stop" : "Start", missionRunning ? "Stopping mission..." : "Starting mission...", "info");
-      const res = await fetch(`${apiBaseUrl}/api/mission/start`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          path_name: importedPlan.fileName,
-          mission_file: "",
-          auto_origin: autoOrigin,
-        }),
+      const res = await missionApi.startMission(apiBaseUrl, {
+        path_name: importedPlan.fileName,
+        mission_file: "",
+        auto_origin: autoOrigin,
       });
       if (!res.ok) {
         const errMsg = await parseFetchError(res, "Start failed");
         throw new Error(errMsg);
       }
       setMissionRunning(true);
+      setWorkflowStep("started", "verified");
       if (autoOrigin && telemetrySnapshot?.pos_n != null && telemetrySnapshot?.pos_e != null) {
         setOriginShift({ offsetN: telemetrySnapshot.pos_n, offsetE: telemetrySnapshot.pos_e });
         // Frame check: backend anchors the mission's FIRST waypoint at this
@@ -1529,6 +1525,7 @@ export default function App() {
       Alert.alert("Started", `${importedPlan.fileName} started on the rover.`);
       showToast("Mission running", `${importedPlan.fileName} is now active.`, "success");
     } catch (error) {
+      setWorkflowStep("started", "failed");
       logAction("START_FAILED", {
         fileName: importedPlan.fileName,
         error: error instanceof Error ? error.message : String(error),
@@ -1672,9 +1669,7 @@ export default function App() {
     setMissionActionBusy(true);
     try {
       showToast("Stop", "Stopping mission...", "warning");
-      const res = await fetch(`${apiBaseUrl}/api/mission/stop`, {
-        method: "POST",
-      });
+      const res = await missionApi.stopMission(apiBaseUrl);
 
       if (!res.ok) {
         const errMsg = await parseFetchError(res, "Stop failed");
@@ -1702,9 +1697,7 @@ export default function App() {
     setMissionActionBusy(true);
     try {
       showToast("Pause", "Pausing mission...", "info");
-      const res = await fetch(`${apiBaseUrl}/api/mission/abort`, {
-        method: "POST",
-      });
+      const res = await missionApi.abortMission(apiBaseUrl);
       if (!res.ok) {
         const errMsg = await parseFetchError(res, "Pause failed");
         throw new Error(errMsg);
@@ -1834,15 +1827,9 @@ export default function App() {
     setMissionActionBusy(true);
     try {
       showToast("Load", `Loading template ${fileName}...`, "info");
-      const res = await fetch(`${apiBaseUrl}/api/mission/load`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          path_name: fileName,
-          mission_file: "",
-        }),
+      const res = await missionApi.loadMission(apiBaseUrl, {
+        path_name: fileName,
+        mission_file: "",
       });
 
       if (!res.ok) {
@@ -2165,6 +2152,7 @@ export default function App() {
                   setDelayA={setDelayA}
                   setDelayB={setDelayB}
                   onParsePlan={parseDxfPlan}
+                  onWorkflowStep={setWorkflowStep}
                 />
               )}
 
@@ -2455,11 +2443,7 @@ function HomeView({
         is_mark
       }));
 
-      const res = await fetch(`${apiBaseUrl}/api/path/${encodeURIComponent(targetPath)}/entities`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ overrides }),
-      });
+      const res = await pathApi.saveEntityOverrides(apiBaseUrl, targetPath, overrides);
       if (res.ok) {
         Alert.alert("Success", "Spray overrides saved.");
       } else {
@@ -4606,6 +4590,7 @@ function SectionScreen(props: {
   apiBaseUrl: string;
   onRefreshPaths: () => void;
   onParsePlan?: () => Promise<void>;
+  onWorkflowStep?: (step: StagedWorkflowStep, status: StagedWorkflowStatus) => void;
   onNav: (page: Page) => void;
 }) {
   const { title, page, onBack } = props;
@@ -5050,6 +5035,13 @@ const connectionStyles = {
   },
 };
 
+type AlignmentResultState = {
+  alignment_metadata: Record<string, unknown> | null;
+  rmse_m: number | null;
+  sample_coords: unknown;
+  residuals: unknown;
+};
+
 function FieldsPage({
   importedPlan,
   setImportedPlan,
@@ -5069,6 +5061,7 @@ function FieldsPage({
   apiBaseUrl,
   onRefreshPaths,
   onParsePlan,
+  onWorkflowStep,
 }: {
   importedPlan: ImportedPlan | null;
   setImportedPlan: React.Dispatch<React.SetStateAction<ImportedPlan | null>>;
@@ -5088,6 +5081,7 @@ function FieldsPage({
   apiBaseUrl: string;
   onRefreshPaths: () => void;
   onParsePlan?: () => Promise<void>;
+  onWorkflowStep?: (step: StagedWorkflowStep, status: StagedWorkflowStatus) => void;
 }) {
   const [pickedFile, setPickedFile] = useState<DocumentPicker.DocumentPickerAsset | null>(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -5096,6 +5090,7 @@ function FieldsPage({
   const [rotationDeg, setRotationDeg] = useState<string>("");
   const [isFixing, setIsFixing] = useState(false);
   const [missionSummary, setMissionSummary] = useState<any | null>(null);
+  const [alignmentResult, setAlignmentResult] = useState<AlignmentResultState | null>(null);
 
   const [extModalOpen, setExtModalOpen] = useState(false);
   const [extPre, setExtPre] = useState("0.5");
@@ -5123,14 +5118,10 @@ function FieldsPage({
     }
     setIsExtSetting(true);
     try {
-      const res = await fetch(`${apiBaseUrl}/api/path/${encodeURIComponent(targetPathForExtensions)}/extensions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          enabled: true,
-          pre_extension_m: parseFloat(extPre) || 0,
-          aft_extension_m: parseFloat(extAft) || 0,
-        }),
+      const res = await pathApi.saveExtensions(apiBaseUrl, targetPathForExtensions, {
+        enabled: true,
+        pre_extension_m: parseFloat(extPre) || 0,
+        aft_extension_m: parseFloat(extAft) || 0,
       });
       if (res.ok) {
         Alert.alert("Success", "Extensions saved successfully.");
@@ -5153,14 +5144,10 @@ function FieldsPage({
       return;
     }
     try {
-      const res = await fetch(`${apiBaseUrl}/api/path/${encodeURIComponent(targetPathForExtensions)}/extensions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          enabled: false,
-          pre_extension_m: 0.5,
-          aft_extension_m: 0.5,
-        }),
+      const res = await pathApi.saveExtensions(apiBaseUrl, targetPathForExtensions, {
+        enabled: false,
+        pre_extension_m: 0.5,
+        aft_extension_m: 0.5,
       });
       if (res.ok) {
         Alert.alert("Success", "Extensions disabled.");
@@ -5194,11 +5181,7 @@ function FieldsPage({
         is_mark
       }));
 
-      const res = await fetch(`${apiBaseUrl}/api/path/${encodeURIComponent(targetPath)}/entities`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ overrides })
-      });
+      const res = await pathApi.saveEntityOverrides(apiBaseUrl, targetPath, overrides);
 
       if (res.ok) {
         Alert.alert("Success", "Spray settings saved successfully.");
@@ -5226,11 +5209,7 @@ function FieldsPage({
         .filter(l => l.entity && l.entity.entity_id)
         .map(l => l.entity!.entity_id);
 
-      const res = await fetch(`${apiBaseUrl}/api/path/${encodeURIComponent(targetPath)}/entities/order`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ entity_order })
-      });
+      const res = await pathApi.saveEntityOrder(apiBaseUrl, targetPath, entity_order);
 
       if (res.ok) {
         setIsReordering(false);
@@ -5266,9 +5245,7 @@ function FieldsPage({
           style: "destructive",
           onPress: async () => {
             try {
-              const res = await fetch(`${apiBaseUrl}/api/path/${encodeURIComponent(filename)}`, {
-                method: "DELETE",
-              });
+              const res = await pathApi.deletePath(apiBaseUrl, filename);
               if (res.ok) {
                 if (selectedPathName === filename) {
                   onSelectPath("");
@@ -5289,6 +5266,7 @@ function FieldsPage({
 
   const handleSelectPoint = (pt: { x: number; y: number }) => {
     setMissionSummary(null);
+    setAlignmentResult(null);
     setRefPoints(prev => {
       // Toggle if clicked near existing point
       const existingIdx = prev.findIndex(p => Math.abs(p.dxf_y - pt.x) < 0.001 && Math.abs(p.dxf_x - pt.y) < 0.001);
@@ -5336,7 +5314,7 @@ function FieldsPage({
         return;
       }
 
-      let payload: any = {
+      const payload: pathApi.AlignPathRequest = {
         source: selectedPathName,
         ref_points: validPoints,
       };
@@ -5351,56 +5329,33 @@ function FieldsPage({
         payload.rotation_deg = rot;
       }
 
-      const res = await fetch(`${apiBaseUrl}/api/path/plan`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
+      if (telemetrySnapshot?.lat != null && telemetrySnapshot?.lon != null) {
+        payload.origin_gps = [telemetrySnapshot.lat, telemetrySnapshot.lon];
+      }
+
+      const res = await pathApi.alignPath(apiBaseUrl, selectedPathName, payload);
 
       if (res.ok) {
         const data = await res.json();
-        if (data.mission_summary) {
-          setMissionSummary(data.mission_summary);
-
-          // Update canvas lines
-          if (data.merged_waypoints) {
-            const alignedLines: PlanLine[] = [];
-            const pts = Array.isArray(data.merged_waypoints) ? data.merged_waypoints : [];
-            const sprayFlags = Array.isArray(data.spray_flags) ? data.spray_flags : [];
-            for (let i = 0; i < pts.length - 1; i++) {
-              const sprayFlag = sprayFlags[i] ?? true;
-              const fromNorth = coerceFiniteNumber(pts[i]?.[0]);
-              const fromEast = coerceFiniteNumber(pts[i]?.[1]);
-              const toNorth = coerceFiniteNumber(pts[i + 1]?.[0]);
-              const toEast = coerceFiniteNumber(pts[i + 1]?.[1]);
-
-              if (fromNorth == null || fromEast == null || toNorth == null || toEast == null) {
-                continue;
-              }
-
-              alignedLines.push({
-                id: `aligned-line-${i}`,
-                label: `Segment ${i + 1}`,
-                layer: sprayFlag ? "marking" : "center",
-                from: { id: i * 2 + 1, x: fromNorth, y: fromEast },
-                to: { id: i * 2 + 2, x: toNorth, y: toEast },
-                width: 0.1,
-              });
-            }
-            setLines(sanitizePlanLines(alignedLines));
-          }
-
-          Alert.alert("Success", "Alignment applied. Mission is ready to be loaded!");
-        } else {
-          Alert.alert("Success", "Alignment applied, but no mission was staged.");
-        }
+        const alignmentMetadata = data.alignment_metadata ?? null;
+        const rmseM = coerceFiniteNumber(data.rmse_m ?? alignmentMetadata?.rmse);
+        setMissionSummary(null);
+        setAlignmentResult({
+          alignment_metadata: alignmentMetadata,
+          rmse_m: rmseM,
+          sample_coords: data.sample_coords ?? null,
+          residuals: data.residuals ?? null,
+        });
+        onWorkflowStep?.("alignment", "verified");
+        Alert.alert("Success", "Alignment verified.");
         setRefPoints([]);
-        onRefreshPaths(); // Fetch the new aligned plan
       } else {
+        onWorkflowStep?.("alignment", "failed");
         const errText = await res.text();
         Alert.alert("Alignment Failed", errText || "Unknown error occurred.");
       }
     } catch (err) {
+      onWorkflowStep?.("alignment", "failed");
       console.log("Error aligning path:", err);
       Alert.alert("Error", "Could not connect to the rover to apply alignment.");
     } finally {
@@ -5433,7 +5388,6 @@ function FieldsPage({
     setIsUploading(true);
     try {
       const ext = pickedFile.name.split('.').pop()?.toLowerCase();
-      const endpoint = ext === 'dxf' ? '/api/path/parse-dxf' : '/api/path/upload';
       
       const formData = new FormData();
       if (Platform.OS === "web") {
@@ -5450,10 +5404,9 @@ function FieldsPage({
         } as any);
       }
 
-      const res = await fetch(`${apiBaseUrl}${endpoint}`, {
-        method: "POST",
-        body: formData,
-      });
+      const res = ext === "dxf"
+        ? await pathApi.parseDxf(apiBaseUrl, formData)
+        : await pathApi.uploadPath(apiBaseUrl, formData);
 
       if (res.ok) {
         Alert.alert("Success", `${pickedFile.name} imported successfully.`);
@@ -5907,13 +5860,13 @@ function FieldsPage({
           {/* Toggle Method */}
           <View style={{ flexDirection: "row", backgroundColor: "#f1f5f9", borderRadius: 8, padding: 4, marginBottom: 12 }}>
             <Pressable
-              onPress={() => { setAlignmentMethod("least_squares"); setRefPoints([]); }}
+              onPress={() => { setAlignmentMethod("least_squares"); setRefPoints([]); setAlignmentResult(null); }}
               style={{ flex: 1, paddingVertical: 8, alignItems: "center", borderRadius: 6, backgroundColor: alignmentMethod === "least_squares" ? "#ffffff" : "transparent", shadowColor: alignmentMethod === "least_squares" ? "#000" : "transparent", shadowOpacity: 0.05, shadowRadius: 2, shadowOffset: { width: 0, height: 1 } }}
             >
               <Text style={{ color: alignmentMethod === "least_squares" ? "#0f172a" : "#64748b", fontSize: 12, fontWeight: "700" }}>2-Point Fit</Text>
             </Pressable>
             <Pressable
-              onPress={() => { setAlignmentMethod("single_point"); setRefPoints([]); }}
+              onPress={() => { setAlignmentMethod("single_point"); setRefPoints([]); setAlignmentResult(null); }}
               style={{ flex: 1, paddingVertical: 8, alignItems: "center", borderRadius: 6, backgroundColor: alignmentMethod === "single_point" ? "#ffffff" : "transparent", shadowColor: alignmentMethod === "single_point" ? "#000" : "transparent", shadowOpacity: 0.05, shadowRadius: 2, shadowOffset: { width: 0, height: 1 } }}
             >
               <Text style={{ color: alignmentMethod === "single_point" ? "#0f172a" : "#64748b", fontSize: 12, fontWeight: "700" }}>1-Point + Angle</Text>
@@ -5991,30 +5944,21 @@ function FieldsPage({
                 </Text>
               </Pressable>
 
-              {missionSummary && (
+              {alignmentResult && (
                 <View style={{ marginTop: 12, padding: 12, backgroundColor: "#f0fdf4", borderRadius: 8, borderWidth: 1, borderColor: "#bbf7d0" }}>
-                  <Text style={{ color: "#166534", fontWeight: "800", marginBottom: 8, fontSize: 13 }}>Mission Staged Successfully</Text>
-                  <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
-                    <Text style={{ color: "#166534", fontSize: 12, fontWeight: "600" }}>Est. Time:</Text>
-                    <Text style={{ color: "#166534", fontSize: 12 }}>{formatFinite(missionSummary.estimated_runtime_s, 0)}s</Text>
-                  </View>
-                  <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
-                    <Text style={{ color: "#166534", fontSize: 12, fontWeight: "600" }}>Distance:</Text>
-                    <Text style={{ color: "#166534", fontSize: 12 }}>{formatFinite(missionSummary.total_length_m)}m</Text>
-                  </View>
-                  <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 12 }}>
-                    <Text style={{ color: "#166534", fontSize: 12, fontWeight: "600" }}>Paint:</Text>
-                    <Text style={{ color: "#166534", fontSize: 12 }}>{formatFinite(missionSummary.estimated_paint_l)}L</Text>
-                  </View>
-                  <Pressable
-                    onPress={() => onLoadSelectedPath(missionSummary.mission_id)}
-                    disabled={missionActionBusy}
-                    style={{ height: 40, backgroundColor: missionActionBusy ? "#86efac" : "#16a34a", borderRadius: 8, alignItems: "center", justifyContent: "center" }}
-                  >
-                    <Text style={{ color: "#fff", fontWeight: "800", fontSize: 13 }}>
-                      {missionActionBusy ? "Loading..." : "Load Staged Mission to Rover"}
-                    </Text>
-                  </Pressable>
+                  <Text style={{ color: "#166534", fontWeight: "800", marginBottom: 8, fontSize: 13 }}>Alignment Verified</Text>
+                  <Text style={{ color: "#166534", fontSize: 12, marginBottom: 4 }}>
+                    RMSE: {formatFinite(alignmentResult.rmse_m, 3)}
+                  </Text>
+                  <Text style={{ color: "#166534", fontSize: 11, marginBottom: 4 }} numberOfLines={4}>
+                    Metadata: {alignmentResult.alignment_metadata ? JSON.stringify(alignmentResult.alignment_metadata) : "n/a"}
+                  </Text>
+                  <Text style={{ color: "#166534", fontSize: 11, marginBottom: 4 }} numberOfLines={4}>
+                    Samples: {alignmentResult.sample_coords ? JSON.stringify(alignmentResult.sample_coords) : "n/a"}
+                  </Text>
+                  <Text style={{ color: "#166534", fontSize: 11 }} numberOfLines={4}>
+                    Residuals: {alignmentResult.residuals ? JSON.stringify(alignmentResult.residuals) : "n/a"}
+                  </Text>
                 </View>
               )}
             </View>
@@ -6039,6 +5983,7 @@ function FieldsPage({
                     key={path.name}
                     onPress={() => {
                       setMissionSummary(null);
+                      setAlignmentResult(null);
                       onSelectPath(path.name);
                     }}
                     style={{
@@ -6168,10 +6113,7 @@ function TemplatesPage(props: {
         } as any);
       }
 
-      const res = await fetch(`${props.apiBaseUrl}/api/path/parse-dxf`, {
-        method: "POST",
-        body: formData,
-      });
+      const res = await pathApi.parseDxf(props.apiBaseUrl, formData);
 
       if (res.ok) {
         Alert.alert("Success", `Template sent and parsed successfully.`);
