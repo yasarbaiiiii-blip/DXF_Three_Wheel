@@ -6385,6 +6385,15 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
 
+function normalizeDegrees(value: number) {
+  const next = value % 360;
+  return next < 0 ? next + 360 : next;
+}
+
+function shortestAngleDelta(fromDeg: number, toDeg: number) {
+  return ((toDeg - fromDeg + 540) % 360) - 180;
+}
+
 function computePlanBounds(lines: PlanLine[]) {
   let minX = Number.POSITIVE_INFINITY;
   let minY = Number.POSITIVE_INFINITY;
@@ -6690,6 +6699,12 @@ function PlanPreview({
   const roverN = roverPosN ?? 0;   // North → SVG Y (inverted)
   const roverE = roverPosE ?? 0;   // East → SVG X
   const roverDeg = roverHeadingDeg ?? 0;
+  const [displayRoverPose, setDisplayRoverPose] = useState<{
+    north: number;
+    east: number;
+    headingDeg: number;
+  } | null>(null);
+  const displayRoverPoseRef = React.useRef<typeof displayRoverPose>(null);
 
   const viewportRef = React.useRef<PreviewViewport>({ panX: 0, panY: 0, zoom: 1 });
   const linesRef = React.useRef(filtered);
@@ -6739,6 +6754,42 @@ function PlanPreview({
   useEffect(() => {
     onSelectPointRef.current = onSelectPoint;
   }, [onSelectPoint]);
+
+  useEffect(() => {
+    if (!hasRover) {
+      displayRoverPoseRef.current = null;
+      setDisplayRoverPose(null);
+      return;
+    }
+
+    const nextPose = { north: roverN, east: roverE, headingDeg: normalizeDegrees(roverDeg) };
+    const prevPose = displayRoverPoseRef.current;
+
+    if (!prevPose) {
+      displayRoverPoseRef.current = nextPose;
+      setDisplayRoverPose(nextPose);
+      return;
+    }
+
+    const positionDelta = Math.hypot(nextPose.north - prevPose.north, nextPose.east - prevPose.east);
+    const headingDelta = Math.abs(shortestAngleDelta(prevPose.headingDeg, nextPose.headingDeg));
+
+    if (positionDelta > 1.5 || headingDelta > 25) {
+      displayRoverPoseRef.current = nextPose;
+      setDisplayRoverPose(nextPose);
+      return;
+    }
+
+    const alpha = missionRunning ? 0.18 : 0.32;
+    const smoothedPose = {
+      north: prevPose.north + (nextPose.north - prevPose.north) * alpha,
+      east: prevPose.east + (nextPose.east - prevPose.east) * alpha,
+      headingDeg: normalizeDegrees(prevPose.headingDeg + shortestAngleDelta(prevPose.headingDeg, nextPose.headingDeg) * alpha),
+    };
+
+    displayRoverPoseRef.current = smoothedPose;
+    setDisplayRoverPose(smoothedPose);
+  }, [hasRover, missionRunning, roverDeg, roverE, roverN]);
 
   useEffect(() => {
     viewportRef.current = viewport;
@@ -6806,7 +6857,7 @@ function PlanPreview({
     }
 
     focusRover();
-  }, [clearRoverAutoFocusTimer, focusRover, hasRover, missionRunning, roverE, roverN, roverDeg]);
+  }, [clearRoverAutoFocusTimer, focusRover, hasRover, missionRunning]);
 
   useEffect(() => {
     return () => {
@@ -6983,10 +7034,16 @@ function PlanPreview({
     return "#475569";
   };
 
-  const handleFocusRover = focusRover;
+  const handleFocusRover = () => {
+    clearRoverAutoFocusTimer();
+    roverAutoFocusPausedRef.current = false;
+    focusRover();
+  };
 
   const handleFocusPlan = () => {
     if (layoutSize.width <= 0 || layoutSize.height <= 0) return;
+    clearRoverAutoFocusTimer();
+    roverAutoFocusPausedRef.current = true;
     userPannedRef.current = true;
     if (filtered.length === 0) {
       const next: PreviewViewport = {
@@ -7003,11 +7060,17 @@ function PlanPreview({
     setViewport(fitted);
   };
 
+  const roverDisplayPose = displayRoverPose ?? {
+    north: roverN,
+    east: roverE,
+    headingDeg: normalizeDegrees(roverDeg),
+  };
+
   // Compute rover screen coordinates for icon rendering
   // World North (roverPosN) maps to Screen Y (Up)
   // World East (roverPosE) maps to Screen X (Right)
-  const rawRoverScreenX = roverE * viewport.zoom + viewport.panX;
-  const rawRoverScreenY = -roverN * viewport.zoom + viewport.panY;
+  const rawRoverScreenX = roverDisplayPose.east * viewport.zoom + viewport.panX;
+  const rawRoverScreenY = -roverDisplayPose.north * viewport.zoom + viewport.panY;
 
   let roverScreenX = rawRoverScreenX;
   let roverScreenY = rawRoverScreenY;
@@ -7138,7 +7201,7 @@ function PlanPreview({
             // heading_ned_deg: 0=North(up), 90=East(right), clockwise
             // SVG rotation: 0=up, positive=clockwise, matches NED heading directly.
             // We also add map rotation.
-            const headingRot = roverDeg + rotation;
+            const headingRot = roverDisplayPose.headingDeg + rotation;
             return (
               <G transform={`translate(${cx}, ${cy}) rotate(${headingRot})`}>
                 {/* Glow shadow */}
@@ -7219,7 +7282,7 @@ function PlanPreview({
             );
           })}
           {/* Rotating needle — points to rover heading (defaults to 0 / static North if no telemetry) */}
-          <G transform={`rotate(${hasRover ? roverDeg : 0} 31 31)`}>
+          <G transform={`rotate(${hasRover ? roverDisplayPose.headingDeg : 0} 31 31)`}>
             {/* North pointer (direction rover nose points) */}
             <Polygon points="31,17 34.5,31 27.5,31" fill="#38bdf8" />
             {/* South pointer */}
@@ -7231,8 +7294,8 @@ function PlanPreview({
         {/* Heading label below compass — only shown when telemetry is active */}
         {hasRover && (
           <View style={{ alignItems: "center", marginTop: 3 }}>
-            <Text style={{ color: "#0f172a", fontSize: 9.5, fontWeight: "800", backgroundColor: "rgba(255,255,255,0.85)", paddingHorizontal: 5, paddingVertical: 1, borderRadius: 6 }}>
-              {roverDeg.toFixed(1)}°
+              <Text style={{ color: "#0f172a", fontSize: 9.5, fontWeight: "800", backgroundColor: "rgba(255,255,255,0.85)", paddingHorizontal: 5, paddingVertical: 1, borderRadius: 6 }}>
+              {roverDisplayPose.headingDeg.toFixed(1)}°
             </Text>
           </View>
         )}
