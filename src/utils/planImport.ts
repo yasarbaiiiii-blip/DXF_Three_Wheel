@@ -176,7 +176,22 @@ function parseDxf(content: string): PlanLine[] {
     }
   }
 
-  return normalizePlanLines(refineLayerAssignments(lines));
+  return normalizePlanLines(refineLayerAssignments(dxfToAppAxes(lines)));
+}
+
+/**
+ * DXF/CAD coordinates are X = East, Y = North. The rest of this app uses the
+ * NED convention `PlanLine.x = North`, `.y = East` (see shapeTemplates.ts and
+ * toScreenPoint in App.tsx). Without this swap the imported plan renders
+ * transposed (reflected across the diagonal) — origin looks right but the
+ * overall profile is wrong. Display-only: the rover reads the DXF file itself.
+ */
+function dxfToAppAxes(lines: PlanLine[]): PlanLine[] {
+  return lines.map((line) => ({
+    ...line,
+    from: { ...line.from, x: line.from.y, y: line.from.x },
+    to: { ...line.to, x: line.to.y, y: line.to.x },
+  }));
 }
 
 function parseCsv(content: string): PlanLine[] {
