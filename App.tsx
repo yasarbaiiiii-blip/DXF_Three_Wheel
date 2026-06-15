@@ -6,6 +6,7 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
+  FlatList,
   Modal,
   PanResponder,
   Platform,
@@ -23,7 +24,6 @@ import * as FileSystem from "expo-file-system/legacy";
 import * as DocumentPicker from "expo-document-picker";
 import { SafeAreaInsetsContext, SafeAreaProvider } from "react-native-safe-area-context";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
-import type { RenderItemParams } from "react-native-draggable-flatlist";
 
 import Svg, { Circle, G, Line, Path, Polygon, Text as SvgText } from "react-native-svg";
 import { io, Socket } from "socket.io-client";
@@ -135,39 +135,70 @@ function ReorderableLineList({
   data: PlanLine[];
   onDragEnd: (next: PlanLine[]) => void;
 }) {
-  const { default: DraggableFlatList, ScaleDecorator } = require("react-native-draggable-flatlist") as typeof import("react-native-draggable-flatlist");
+  const moveItem = useCallback((fromIndex: number, toIndex: number) => {
+    if (toIndex < 0 || toIndex >= data.length || fromIndex === toIndex) return;
+    const next = [...data];
+    const [moved] = next.splice(fromIndex, 1);
+    next.splice(toIndex, 0, moved);
+    onDragEnd(next);
+  }, [data, onDragEnd]);
 
   return (
-    <DraggableFlatList
+    <FlatList
       data={data}
-      onDragEnd={({ data: nextData }: { data: PlanLine[] }) => onDragEnd(nextData)}
       keyExtractor={(item: PlanLine) => item.id}
-      containerStyle={{ flex: 1 }}
-      renderItem={({ item, drag, isActive }: RenderItemParams<PlanLine>) => (
-        <ScaleDecorator>
-          <Pressable
-            onLongPress={drag}
-            disabled={isActive}
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              padding: 14,
-              backgroundColor: isActive ? "#f8fafc" : "#fff",
-              borderBottomWidth: 1,
-              borderBottomColor: "#f1f5f9",
-              opacity: isActive ? 0.8 : 1,
-            }}
-          >
-            <View style={{ paddingRight: 12 }}>
-              <Text style={{ color: "#cbd5e1", fontSize: 20 }}>===</Text>
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={{ color: "#0f172a", fontSize: 14, fontWeight: "700" }}>
-                {item.label} <Text style={{ color: "#64748b", fontWeight: "500", fontSize: 12 }}>({item.entity?.entity_type})</Text>
-              </Text>
-            </View>
-          </Pressable>
-        </ScaleDecorator>
+      style={{ flex: 1 }}
+      renderItem={({ item, index }) => (
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            padding: 14,
+            backgroundColor: "#fff",
+            borderBottomWidth: 1,
+            borderBottomColor: "#f1f5f9",
+            gap: 10,
+          }}
+        >
+          <View style={{ width: 20, alignItems: "center" }}>
+            <Text style={{ color: "#94a3b8", fontSize: 20, fontWeight: "800" }}>≡</Text>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: "#0f172a", fontSize: 14, fontWeight: "700" }}>
+              {item.label} <Text style={{ color: "#64748b", fontWeight: "500", fontSize: 12 }}>({item.entity?.entity_type})</Text>
+            </Text>
+          </View>
+          <View style={{ flexDirection: "row", gap: 8 }}>
+            <Pressable
+              onPress={() => moveItem(index, index - 1)}
+              disabled={index === 0}
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: 10,
+                alignItems: "center",
+                justifyContent: "center",
+                backgroundColor: index === 0 ? "#e2e8f0" : "#0f172a",
+              }}
+            >
+              <Text style={{ color: "#fff", fontSize: 18, fontWeight: "900" }}>↑</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => moveItem(index, index + 1)}
+              disabled={index === data.length - 1}
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: 10,
+                alignItems: "center",
+                justifyContent: "center",
+                backgroundColor: index === data.length - 1 ? "#e2e8f0" : "#0f172a",
+              }}
+            >
+              <Text style={{ color: "#fff", fontSize: 18, fontWeight: "900" }}>↓</Text>
+            </Pressable>
+          </View>
+        </View>
       )}
     />
   );
