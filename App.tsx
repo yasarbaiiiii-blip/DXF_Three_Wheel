@@ -471,27 +471,73 @@ export default function App() {
   }, [autoOrigin, telemetrySnapshot?.pos_n, telemetrySnapshot?.pos_e, telemetrySnapshot?.mission_state, setOriginShift]);
 
   const displayedLines = useMemo(() => {
-    if (originShift) {
-      return sanitizePlanLines(lines).map((l) => {
-        const shiftedEntity = l.entity ? {
-          ...l.entity,
-          preview_points: l.entity.preview_points?.map(pt => ({
-            ...pt,
-            north: pt.north + originShift.offsetN,
-            east: pt.east + originShift.offsetE,
-          }))
-        } : undefined;
+    const base = sanitizePlanLines(lines);
+    if (!originShift) return base;
 
-        return {
-          ...l,
-          from: { ...l.from, x: l.from.x + originShift.offsetN, y: l.from.y + originShift.offsetE },
-          to: { ...l.to, x: l.to.x + originShift.offsetN, y: l.to.y + originShift.offsetE },
-          ...(shiftedEntity ? { entity: shiftedEntity } : {}),
-        };
-      });
-    }
-    return sanitizePlanLines(lines);
+    // Frame alignment with the backend's auto-origin.
+    //
+    // The backend anchors auto-origin missions with anchor="first_waypoint":
+    // it places the FIRST DRIVEN WAYPOINT (the mission start — e.g. the NW
+    // corner of a square, the start of entity 8D) exactly at the rover's pose.
+    // It does NOT place the DXF drawing origin (0,0) there.
+    //
+    // So translating every point by the raw rover pose (+originShift) is wrong:
+    // that pins drawing-origin (0,0) — the SW corner for square_2x2 — onto the
+    // rover, sliding the whole path so the live rover icon lands on the SW
+    // corner instead of the NW start. Anchor the path's first point at the
+    // rover instead, so the drawn path coincides with what the rover executes.
+    const first = getPlanStartPoint(base);
+    const dN = originShift.offsetN - (first?.north ?? 0);
+    const dE = originShift.offsetE - (first?.east ?? 0);
+
+    return base.map((l) => {
+      const shiftedEntity = l.entity ? {
+        ...l.entity,
+        preview_points: l.entity.preview_points?.map(pt => ({
+          ...pt,
+          north: pt.north + dN,
+          east: pt.east + dE,
+        }))
+      } : undefined;
+
+      return {
+        ...l,
+        from: { ...l.from, x: l.from.x + dN, y: l.from.y + dE },
+        to: { ...l.to, x: l.to.x + dN, y: l.to.y + dE },
+        ...(shiftedEntity ? { entity: shiftedEntity } : {}),
+      };
+    });
   }, [lines, originShift]);
+
+  // [CANVAS] frame-alignment debug. Logs the auto-origin transform whenever the
+  // captured origin, run-state, or rover pose changes, so a wrong rover-icon
+  // placement can be diagnosed against the drawn path's first point.
+  useEffect(() => {
+    if (!autoOrigin) return;
+    const first = getPlanStartPoint(sanitizePlanLines(lines));
+    const rover =
+      telemetrySnapshot?.pos_n != null && telemetrySnapshot?.pos_e != null
+        ? { n: telemetrySnapshot.pos_n, e: telemetrySnapshot.pos_e }
+        : null;
+    console.log("[CANVAS] frame", JSON.stringify({
+      missionRunning,
+      missionState: telemetrySnapshot?.mission_state ?? null,
+      originShift,
+      planFirstPoint: first,
+      roverTelemetry: rover,
+      delta: originShift && first
+        ? { dN: originShift.offsetN - first.north, dE: originShift.offsetE - first.east }
+        : null,
+    }));
+  }, [
+    autoOrigin,
+    missionRunning,
+    originShift,
+    telemetrySnapshot?.mission_state,
+    telemetrySnapshot?.pos_n,
+    telemetrySnapshot?.pos_e,
+    lines,
+  ]);
 
   const previewRoverPoint = useMemo(() => {
     const telemetryPoint =
@@ -1457,6 +1503,16 @@ export default function App() {
       setMissionRunning(true);
       if (autoOrigin && telemetrySnapshot?.pos_n != null && telemetrySnapshot?.pos_e != null) {
         setOriginShift({ offsetN: telemetrySnapshot.pos_n, offsetE: telemetrySnapshot.pos_e });
+        // Frame check: backend anchors the mission's FIRST waypoint at this
+        // rover pose. The drawn path's first point should land here too.
+        const planStart = getPlanStartPoint(sanitizePlanLines(lines));
+        console.log("[CANVAS] start-anchor", JSON.stringify({
+          capturedOrigin: { n: telemetrySnapshot.pos_n, e: telemetrySnapshot.pos_e },
+          planFirstPoint: planStart,
+          expectedDelta: planStart
+            ? { dN: telemetrySnapshot.pos_n - planStart.north, dE: telemetrySnapshot.pos_e - planStart.east }
+            : null,
+        }));
       }
       void refreshTelemetryPanel();
       logAction("START_SUCCESS", { fileName: importedPlan.fileName, autoOrigin });
