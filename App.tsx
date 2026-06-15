@@ -6751,7 +6751,6 @@ function PlanPreview({
   const [rotation, setRotation] = useState(0);
   // Track whether user has manually panned so auto-pan doesn't fight them
   const userPannedRef = React.useRef(false);
-  const [trackRoverEnabled, setTrackRoverEnabled] = useState(false);
 
   const rotationRef = React.useRef(rotation);
   useEffect(() => {
@@ -6872,20 +6871,6 @@ function PlanPreview({
     userPannedRef.current = false;
   }, [hasRover, layoutSize.height, layoutSize.width, roverE, roverN, viewport.zoom]);
 
-  useEffect(() => {
-    if (!missionRunning) {
-      setTrackRoverEnabled(false);
-    }
-  }, [missionRunning]);
-
-  useEffect(() => {
-    if (!missionRunning || !hasRover || !trackRoverEnabled) {
-      return;
-    }
-
-    focusRover();
-  }, [focusRover, hasRover, missionRunning, roverDeg, roverE, roverN, trackRoverEnabled]);
-
   const handleLayout = useCallback((event: any) => {
     const { width, height } = event.nativeEvent.layout ?? {};
     if (width && height) {
@@ -6900,8 +6885,8 @@ function PlanPreview({
   const panResponder = useMemo(
     () =>
       PanResponder.create({
-        onStartShouldSetPanResponder: () => !trackRoverEnabled,
-        onMoveShouldSetPanResponder: () => !trackRoverEnabled,
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: () => true,
 
         onPanResponderGrant: (evt) => {
           const touches = evt.nativeEvent.touches;
@@ -6989,7 +6974,7 @@ function PlanPreview({
             const tap = { x: evt.nativeEvent.locationX, y: evt.nativeEvent.locationY };
             
             if (onSelectPointRef.current) {
-              const ptHit = pickNearestPoint(linesRef.current, viewportRef.current, tap, 24, rotation, layoutSize);
+              const ptHit = pickNearestPoint(linesRef.current, viewportRef.current, tap, 28, rotation, layoutSize);
               if (ptHit) {
                 onSelectPointRef.current(ptHit);
                 gestureRef.current.lastTouch = null;
@@ -6999,7 +6984,7 @@ function PlanPreview({
               }
             }
 
-            const hit = pickNearestLineId(linesRef.current, viewportRef.current, tap, 24, rotation, layoutSize);
+            const hit = pickNearestLineId(linesRef.current, viewportRef.current, tap, 48, rotation, layoutSize);
             if (hit) {
               onSelectLineRef.current?.(hit);
             } else {
@@ -7022,7 +7007,7 @@ function PlanPreview({
           gestureRef.current.isTap = false;
         },
       }),
-    [focusRover, hasRover, layoutSize.height, layoutSize.width, rotation, trackRoverEnabled]
+    [focusRover, hasRover, layoutSize.height, layoutSize.width, rotation]
   );
 
   const strokeForLayer = (layer: string) => {
@@ -7036,14 +7021,12 @@ function PlanPreview({
   };
 
   const handleFocusRover = () => {
-    setTrackRoverEnabled(true);
     focusRover();
   };
 
   const handleFocusPlan = () => {
     if (layoutSize.width <= 0 || layoutSize.height <= 0) return;
     userPannedRef.current = true;
-    setTrackRoverEnabled(false);
     if (filtered.length === 0) {
       const next: PreviewViewport = {
         panX: layoutSize.width / 2,
@@ -7194,8 +7177,8 @@ function PlanPreview({
                 <Path
                   key={`hit-${line.id}`}
                   d={d}
-                  stroke="rgba(0,0,0,0)"
-                  strokeWidth={18 / viewport.zoom}
+                  stroke="rgba(0,0,0,0.01)"
+                  strokeWidth={26 / viewport.zoom}
                   strokeLinecap="round"
                   strokeLinejoin="round"
                   fill="none"
@@ -7271,41 +7254,6 @@ function PlanPreview({
           </Svg>
         )}
 
-        {missionRunning ? (
-          <Pressable
-            onPress={() => {
-              if (trackRoverEnabled) {
-                setTrackRoverEnabled(false);
-              } else {
-                setTrackRoverEnabled(true);
-                focusRover();
-              }
-            }}
-            style={({ pressed }) => ({
-              position: "absolute",
-              top: 14,
-              right: 14,
-              zIndex: 60,
-              elevation: 60,
-              paddingHorizontal: 14,
-              height: 40,
-              borderRadius: 20,
-              alignItems: "center",
-              justifyContent: "center",
-              backgroundColor: trackRoverEnabled ? (pressed ? "rgba(14,165,233,0.95)" : "rgba(14,165,233,0.88)") : (pressed ? "rgba(15,23,42,0.95)" : "rgba(15,23,42,0.82)"),
-              borderWidth: 1.2,
-              borderColor: trackRoverEnabled ? "#38bdf8" : "#94a3b8",
-              shadowColor: "#000",
-              shadowOffset: { width: 0, height: 2 },
-              shadowOpacity: 0.2,
-              shadowRadius: 3.5,
-            })}
-          >
-            <Text style={{ color: "#fff", fontSize: 12, fontWeight: "800", letterSpacing: 0.2 }}>
-              {trackRoverEnabled ? "Stop Track" : "Track Rover"}
-            </Text>
-          </Pressable>
-        ) : null}
       </View>
 
       {/* ── Single Heading Compass (always shown) ── */}
@@ -7381,19 +7329,14 @@ function PlanPreview({
       >
         {/* Focus Plan Button */}
         <Pressable
-          onPress={trackRoverEnabled ? undefined : handleFocusPlan}
-          disabled={trackRoverEnabled}
+          onPress={handleFocusPlan}
           style={({ pressed }) => ({
             width: 48,
             height: 48,
             borderRadius: 24,
-            backgroundColor: trackRoverEnabled
-              ? "rgba(15,23,42,0.35)"
-              : pressed
-                ? "rgba(15,23,42,0.95)"
-                : "rgba(15,23,42,0.85)",
+            backgroundColor: pressed ? "rgba(15,23,42,0.95)" : "rgba(15,23,42,0.85)",
             borderWidth: 1.2,
-            borderColor: trackRoverEnabled ? "rgba(16,185,129,0.35)" : "#10b981",
+            borderColor: "#10b981",
             alignItems: "center",
             justifyContent: "center",
             shadowColor: "#000",
@@ -7408,19 +7351,14 @@ function PlanPreview({
 
         {/* Focus Rover Button */}
         <Pressable
-          onPress={trackRoverEnabled ? undefined : handleFocusRover}
-          disabled={trackRoverEnabled}
+          onPress={handleFocusRover}
           style={({ pressed }) => ({
             width: 48,
             height: 48,
             borderRadius: 24,
-            backgroundColor: trackRoverEnabled
-              ? "rgba(15,23,42,0.35)"
-              : pressed
-                ? "rgba(15,23,42,0.95)"
-                : "rgba(15,23,42,0.85)",
+            backgroundColor: pressed ? "rgba(15,23,42,0.95)" : "rgba(15,23,42,0.85)",
             borderWidth: 1.2,
-            borderColor: trackRoverEnabled ? "rgba(14,165,233,0.35)" : "#0ea5e9",
+            borderColor: "#0ea5e9",
             alignItems: "center",
             justifyContent: "center",
             shadowColor: "#000",
