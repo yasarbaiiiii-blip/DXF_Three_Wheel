@@ -7100,7 +7100,7 @@ function PlanPreview({
             </Text>
           </View>
         ) : (
-          <Svg width="100%" height="100%">
+          <Svg pointerEvents="none" width="100%" height="100%">
           {/* ── Background grid (always visible) ── */}
           {layoutSize.width > 0 && layoutSize.height > 0 && (() => {
             const gridLines: React.ReactElement[] = [];
@@ -7200,7 +7200,6 @@ function PlanPreview({
                   strokeLinecap="round"
                   strokeLinejoin="round"
                   fill="none"
-                  onPress={() => onSelectLineRef.current?.(selectedLineId === line.id ? null : line.id)}
                 />
               );
             })}
