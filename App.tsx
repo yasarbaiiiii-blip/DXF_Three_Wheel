@@ -23,7 +23,8 @@ import Slider from "@react-native-community/slider";
 import * as FileSystem from "expo-file-system/legacy";
 import * as DocumentPicker from "expo-document-picker";
 import { SafeAreaInsetsContext, SafeAreaProvider } from "react-native-safe-area-context";
-import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { GestureHandlerRootView, TouchableOpacity as RNGHTouchableOpacity, GestureDetector, Gesture } from "react-native-gesture-handler";
+import AnimatedReanimated, { runOnJS, useSharedValue } from "react-native-reanimated";
 
 import Svg, { Circle, G, Line, Path, Polygon, Text as SvgText } from "react-native-svg";
 import { io, Socket } from "socket.io-client";
@@ -6829,33 +6830,41 @@ function PlanPreview({
     viewportRef.current = viewport;
   }, [viewport]);
 
-  // Auto-fit when plan lines change
+  // Reset manual pan state when plan changes so it auto-fits the new plan
+  useEffect(() => {
+    userPannedRef.current = false;
+  }, [filteredPlanSignature]);
+
+  // Auto-fit when plan lines change (only triggers when plan or layout changes)
   useEffect(() => {
     if (layoutSize.width <= 0 || layoutSize.height <= 0) return;
+    if (filtered.length === 0) return; // Handled by rover tracking
+    if (userPannedRef.current) return;
 
-    if (filtered.length === 0) {
-      // No plan: centre on rover if available, else use origin
-      userPannedRef.current = false;
-      const cx = roverE;
-      const cy = -roverN; // NED North is up, so invert Y
-      const defaultZoom = 40; // 40 px per metre looks reasonable at ~1m scale
-      const fitted: PreviewViewport = {
-        panX: layoutSize.width / 2 - cx * defaultZoom,
-        panY: layoutSize.height / 2 - cy * defaultZoom,
-        zoom: defaultZoom,
-      };
-      viewportRef.current = fitted;
-      setViewport(fitted);
-      setRotation(0);
-      return;
-    }
-
-    userPannedRef.current = false;
     const fitted = computeAutoFitViewport(filtered, layoutSize.width, layoutSize.height);
     viewportRef.current = fitted;
     setViewport(fitted);
     setRotation(0);
-  }, [filteredPlanSignature, layoutSize.width, layoutSize.height, roverE, roverN]);
+  }, [filteredPlanSignature, layoutSize.width, layoutSize.height]);
+
+  // Auto-follow rover if no plan and user hasn't panned
+  useEffect(() => {
+    if (layoutSize.width <= 0 || layoutSize.height <= 0) return;
+    if (filtered.length > 0) return; // Handled by plan autofit
+    if (userPannedRef.current) return;
+
+    const cx = roverE;
+    const cy = -roverN; // NED North is up, so invert Y
+    const defaultZoom = 40; // 40 px per metre looks reasonable at ~1m scale
+    const fitted: PreviewViewport = {
+      panX: layoutSize.width / 2 - cx * defaultZoom,
+      panY: layoutSize.height / 2 - cy * defaultZoom,
+      zoom: defaultZoom,
+    };
+    viewportRef.current = fitted;
+    setViewport(fitted);
+    setRotation(0);
+  }, [roverE, roverN, layoutSize.width, layoutSize.height, filtered.length]);
 
   const focusRover = useCallback(() => {
     if (layoutSize.width <= 0 || layoutSize.height <= 0) return;
@@ -6868,7 +6877,7 @@ function PlanPreview({
     };
     viewportRef.current = next;
     setViewport(next);
-    userPannedRef.current = false;
+    userPannedRef.current = true; // Mark as user panned so it stays here
   }, [hasRover, layoutSize.height, layoutSize.width, roverE, roverN, viewport.zoom]);
 
   const handleLayout = useCallback((event: any) => {
@@ -6882,133 +6891,93 @@ function PlanPreview({
     }
   }, []);
 
-  const panResponder = useMemo(
-    () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => true,
-        onMoveShouldSetPanResponder: () => true,
+  const layoutSizeRef = React.useRef(layoutSize);
+  useEffect(() => { layoutSizeRef.current = layoutSize; }, [layoutSize]);
 
-        onPanResponderGrant: (evt) => {
-          const touches = evt.nativeEvent.touches;
-          gestureRef.current.isTap = true;
-          gestureRef.current.startTouch = { x: evt.nativeEvent.locationX, y: evt.nativeEvent.locationY };
-          gestureRef.current.lastTouch = gestureRef.current.startTouch;
-          if (touches.length >= 2) {
-            gestureRef.current.pinchDistance = touchDistance(touches[0], touches[1]);
-            gestureRef.current.pinchAngle = touchAngle(touches[0], touches[1]);
-            gestureRef.current.pinchRotation = rotationRef.current;
-          } else {
-            gestureRef.current.pinchDistance = null;
-            gestureRef.current.pinchAngle = null;
-          }
-          gestureRef.current.pinchViewport = viewportRef.current;
-        },
+  const activePanX = useSharedValue(0);
+  const activePanY = useSharedValue(0);
 
-        onPanResponderMove: (evt) => {
-          const touches = evt.nativeEvent.touches;
+  const handlePanUpdate = (dx: number, dy: number) => {
+    userPannedRef.current = true;
+    setViewport(prev => {
+      const next = { ...prev, panX: prev.panX + dx, panY: prev.panY + dy };
+      viewportRef.current = next;
+      return next;
+    });
+  };
 
-          if (touches.length === 1) {
-            if (gestureRef.current.pinchDistance != null) {
-              // Transitioned from 2 fingers back to 1. Reset touch tracking to prevent jumping.
-              gestureRef.current.pinchDistance = null;
-              gestureRef.current.lastFocal = null;
-              gestureRef.current.lastTouch = { x: touches[0].locationX, y: touches[0].locationY };
-              return;
-            }
+  const handlePinchUpdate = (s: number, fx: number, fy: number, dx: number, dy: number) => {
+    userPannedRef.current = true;
+    setViewport(prev => {
+      const newZoom = Math.max(1, prev.zoom * s);
+      const zoomRatio = newZoom / prev.zoom;
+      const newPanX = fx - (fx - prev.panX) * zoomRatio + dx;
+      const newPanY = fy - (fy - prev.panY) * zoomRatio + dy;
+      const next = { panX: newPanX, panY: newPanY, zoom: newZoom };
+      viewportRef.current = next;
+      return next;
+    });
+  };
 
-            if (gestureRef.current.lastTouch) {
-              const current = { x: touches[0].locationX, y: touches[0].locationY };
-              if (gestureRef.current.startTouch && Math.hypot(current.x - gestureRef.current.startTouch.x, current.y - gestureRef.current.startTouch.y) > 4) {
-                gestureRef.current.isTap = false;
-              }
-              const dx = current.x - gestureRef.current.lastTouch.x;
-              const dy = current.y - gestureRef.current.lastTouch.y;
-              userPannedRef.current = true;
-              
-              setViewport(prev => {
-                const next = { ...prev, panX: prev.panX + dx, panY: prev.panY + dy };
-                viewportRef.current = next;
-                return next;
-              });
-              gestureRef.current.lastTouch = current;
-            }
-            return;
-          }
+  const handleTap = (x: number, y: number) => {
+    const tap = { x, y };
+    if (onSelectPointRef.current) {
+      const ptHit = pickNearestPoint(linesRef.current, viewportRef.current, tap, 28, rotationRef.current, layoutSizeRef.current);
+      if (ptHit) {
+        onSelectPointRef.current(ptHit);
+        return;
+      }
+    }
+    const hit = pickNearestLineId(linesRef.current, viewportRef.current, tap, 48, rotationRef.current, layoutSizeRef.current);
+    if (hit) {
+      onSelectLineRef.current?.(hit);
+    } else {
+      onSelectLineRef.current?.(null);
+    }
+  };
 
-          if (touches.length >= 2) {
-            gestureRef.current.isTap = false;
-            userPannedRef.current = true;
+  const lastScale = useSharedValue(1);
+  const lastFocalX = useSharedValue(0);
+  const lastFocalY = useSharedValue(0);
 
-            const currentDist = touchDistance(touches[0], touches[1]);
-            const currentFocalX = (touches[0].locationX + touches[1].locationX) / 2;
-            const currentFocalY = (touches[0].locationY + touches[1].locationY) / 2;
+  const pinchGesture = Gesture.Pinch()
+    .onStart((e) => {
+      lastScale.value = 1;
+      lastFocalX.value = e.focalX;
+      lastFocalY.value = e.focalY;
+    })
+    .onUpdate((e) => {
+      const s = e.scale / lastScale.value;
+      const dx = e.focalX - lastFocalX.value;
+      const dy = e.focalY - lastFocalY.value;
+      runOnJS(handlePinchUpdate)(s, e.focalX, e.focalY, dx, dy);
+      lastScale.value = e.scale;
+      lastFocalX.value = e.focalX;
+      lastFocalY.value = e.focalY;
+    });
 
-            if (gestureRef.current.pinchDistance == null || gestureRef.current.lastFocal == null) {
-              gestureRef.current.pinchDistance = currentDist;
-              gestureRef.current.lastFocal = { x: currentFocalX, y: currentFocalY };
-              return;
-            }
+  const panGesture = Gesture.Pan()
+    .maxPointers(1)
+    .onStart(() => {
+      activePanX.value = 0;
+      activePanY.value = 0;
+    })
+    .onUpdate((e) => {
+      const dx = e.translationX - activePanX.value;
+      const dy = e.translationY - activePanY.value;
+      runOnJS(handlePanUpdate)(dx, dy);
+      activePanX.value = e.translationX;
+      activePanY.value = e.translationY;
+    });
 
-            const scale = currentDist / gestureRef.current.pinchDistance;
-            const focalDx = currentFocalX - gestureRef.current.lastFocal.x;
-            const focalDy = currentFocalY - gestureRef.current.lastFocal.y;
+  const tapGesture = Gesture.Tap()
+    .onEnd((e, success) => {
+      if (success) {
+        runOnJS(handleTap)(e.x, e.y);
+      }
+    });
 
-            setViewport(prev => {
-              const newZoom = Math.max(1, prev.zoom * scale);
-              const zoomRatio = newZoom / prev.zoom;
-              const newPanX = gestureRef.current.lastFocal!.x - (gestureRef.current.lastFocal!.x - prev.panX) * zoomRatio + focalDx;
-              const newPanY = gestureRef.current.lastFocal!.y - (gestureRef.current.lastFocal!.y - prev.panY) * zoomRatio + focalDy;
-              
-              const next = { ...prev, zoom: newZoom, panX: newPanX, panY: newPanY };
-              viewportRef.current = next;
-              return next;
-            });
-
-            gestureRef.current.pinchDistance = currentDist;
-            gestureRef.current.lastFocal = { x: currentFocalX, y: currentFocalY };
-          }
-        },
-
-        onPanResponderRelease: (evt) => {
-          if (gestureRef.current.isTap && gestureRef.current.startTouch) {
-            const tap = { x: evt.nativeEvent.locationX, y: evt.nativeEvent.locationY };
-            
-            if (onSelectPointRef.current) {
-              const ptHit = pickNearestPoint(linesRef.current, viewportRef.current, tap, 28, rotation, layoutSize);
-              if (ptHit) {
-                onSelectPointRef.current(ptHit);
-                gestureRef.current.lastTouch = null;
-                gestureRef.current.startTouch = null;
-                gestureRef.current.isTap = false;
-                return;
-              }
-            }
-
-            const hit = pickNearestLineId(linesRef.current, viewportRef.current, tap, 48, rotation, layoutSize);
-            if (hit) {
-              onSelectLineRef.current?.(hit);
-            } else {
-              onSelectLineRef.current?.(null);
-            }
-          }
-
-          gestureRef.current.lastTouch = null;
-          gestureRef.current.startTouch = null;
-          gestureRef.current.pinchDistance = null;
-          gestureRef.current.pinchAngle = null;
-          gestureRef.current.isTap = false;
-        },
-
-        onPanResponderTerminate: () => {
-          gestureRef.current.lastTouch = null;
-          gestureRef.current.startTouch = null;
-          gestureRef.current.pinchDistance = null;
-          gestureRef.current.pinchAngle = null;
-          gestureRef.current.isTap = false;
-        },
-      }),
-    [focusRover, hasRover, layoutSize.height, layoutSize.width, rotation]
-  );
+  const composedGesture = Gesture.Simultaneous(pinchGesture, panGesture, tapGesture);
 
   const strokeForLayer = (layer: string) => {
     if (layer === "boundary") return "#0f172a";
@@ -7070,8 +7039,9 @@ function PlanPreview({
       onLayout={handleLayout}
       style={{ flex: 1, backgroundColor: "#f0f4f8" }}
     >
-      <View style={{ flex: 1, position: "relative" }} {...panResponder.panHandlers}>
-        {filtered.length === 0 && !hasRover ? (
+      <GestureDetector gesture={composedGesture}>
+        <View collapsable={false} style={{ flex: 1, position: "relative" }}>
+          {filtered.length === 0 && !hasRover ? (
           // No plan, no rover: show placeholder
           <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 18 }}>
             <Text style={{ color: "#475569", fontSize: 15, textAlign: "center", lineHeight: 22 }}>
@@ -7236,25 +7206,11 @@ function PlanPreview({
               </G>
             );
           })()}
-          {primarySequenceLines.map((line, index) => {
-            const anchor = getLineAnchorPoint(line);
-            const screenPoint = toScreenPoint(anchor, viewport);
-            const labelPoint = rotation !== 0 && layoutSize.width > 0 && layoutSize.height > 0
-              ? rotatePoint(screenPoint.x, screenPoint.y, layoutSize.width / 2, layoutSize.height / 2, rotation)
-              : screenPoint;
-            return (
-              <G key={`order-${line.id}`} transform={`translate(${labelPoint.x}, ${labelPoint.y})`}>
-                <Circle cx={0} cy={0} r={11} fill="rgba(15,23,42,0.85)" stroke="#38bdf8" strokeWidth={1.2} />
-                <SvgText x={0} y={4} fontSize={11} fill="#ffffff" fontWeight="900" textAnchor="middle">
-                  {index + 1}
-                </SvgText>
-              </G>
-            );
-          })}
+
           </Svg>
         )}
-
-      </View>
+        </View>
+      </GestureDetector>
 
       {/* ── Single Heading Compass (always shown) ── */}
       <View
