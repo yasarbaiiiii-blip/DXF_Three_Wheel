@@ -1251,13 +1251,23 @@ export default function App() {
       // Sending an empty file if the backend expects multipart/form-data for /parse-dxf
       // But passing the modified entities in some way if possible.
       const content = linesToDxf(lines, importedPlan.fileName);
-      const tempFileName = `${Date.now()}-${importedPlan.fileName.replace(/[\\/:*?"<>|]/g, "_")}`;
-      const tempFileUri = `${FileSystem.cacheDirectory ?? ""}${tempFileName}`;
-      await FileSystem.writeAsStringAsync(tempFileUri, content, {
-        encoding: FileSystem.EncodingType.UTF8,
-      });
-      const form = createUploadFormData(tempFileUri, importedPlan.fileName, "application/dxf");
-      
+      let form: FormData;
+      if (Platform.OS === "web") {
+        // Browsers require a real Blob/File in a multipart body. The native
+        // {uri,name,type} descriptor serialises to "[object Object]" in the
+        // browser, so the backend received garbage and returned 422 — which is
+        // why uploaded DXFs never appeared in the path list on web.
+        form = new FormData();
+        form.append("file", new Blob([content], { type: "application/dxf" }), importedPlan.fileName);
+      } else {
+        const tempFileName = `${Date.now()}-${importedPlan.fileName.replace(/[\\/:*?"<>|]/g, "_")}`;
+        const tempFileUri = `${FileSystem.cacheDirectory ?? ""}${tempFileName}`;
+        await FileSystem.writeAsStringAsync(tempFileUri, content, {
+          encoding: FileSystem.EncodingType.UTF8,
+        });
+        form = createUploadFormData(tempFileUri, importedPlan.fileName, "application/dxf");
+      }
+
       const res = await fetch(`${apiBaseUrl}/api/path/parse-dxf`, {
         method: "POST",
         body: form,
@@ -5426,11 +5436,19 @@ function FieldsPage({
       const endpoint = ext === 'dxf' ? '/api/path/parse-dxf' : '/api/path/upload';
       
       const formData = new FormData();
-      formData.append("file", {
-        uri: pickedFile.uri,
-        name: pickedFile.name,
-        type: pickedFile.mimeType || "application/octet-stream",
-      } as any);
+      if (Platform.OS === "web") {
+        // On web, DocumentPicker exposes the real browser File at `.file`;
+        // fall back to materialising a Blob from the blob: URL. The native
+        // {uri,name,type} descriptor is invalid in a browser multipart body.
+        const webFile = (pickedFile as any).file ?? await (await fetch(pickedFile.uri)).blob();
+        formData.append("file", webFile, pickedFile.name);
+      } else {
+        formData.append("file", {
+          uri: pickedFile.uri,
+          name: pickedFile.name,
+          type: pickedFile.mimeType || "application/octet-stream",
+        } as any);
+      }
 
       const res = await fetch(`${apiBaseUrl}${endpoint}`, {
         method: "POST",
@@ -6133,17 +6151,22 @@ function TemplatesPage(props: {
       const fileName = `${title.replace(/\s+/g, "_")}.dxf`;
       const fileContent = linesToDxf(previewLines, fileName);
 
-      const fileUri = `${FileSystem.cacheDirectory}${fileName}`;
-      await FileSystem.writeAsStringAsync(fileUri, fileContent, {
-        encoding: FileSystem.EncodingType.UTF8,
-      });
-
       const formData = new FormData();
-      formData.append("file", {
-        uri: fileUri,
-        name: fileName,
-        type: "application/dxf",
-      } as any);
+      if (Platform.OS === "web") {
+        // Web needs a real Blob; the native {uri,name,type} descriptor would
+        // serialise to "[object Object]" and the backend would 422.
+        formData.append("file", new Blob([fileContent], { type: "application/dxf" }), fileName);
+      } else {
+        const fileUri = `${FileSystem.cacheDirectory}${fileName}`;
+        await FileSystem.writeAsStringAsync(fileUri, fileContent, {
+          encoding: FileSystem.EncodingType.UTF8,
+        });
+        formData.append("file", {
+          uri: fileUri,
+          name: fileName,
+          type: "application/dxf",
+        } as any);
+      }
 
       const res = await fetch(`${props.apiBaseUrl}/api/path/parse-dxf`, {
         method: "POST",
