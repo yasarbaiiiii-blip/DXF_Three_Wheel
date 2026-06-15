@@ -4965,6 +4965,8 @@ function FieldsPage({
   const [pickedFile, setPickedFile] = useState<DocumentPicker.DocumentPickerAsset | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [refPoints, setRefPoints] = useState<{ dxf_x: number; dxf_y: number; lat: string; lon: string }[]>([]);
+  const [alignmentMethod, setAlignmentMethod] = useState<"least_squares" | "single_point">("least_squares");
+  const [rotationDeg, setRotationDeg] = useState<string>("");
   const [isFixing, setIsFixing] = useState(false);
   const [missionSummary, setMissionSummary] = useState<any | null>(null);
 
@@ -5166,8 +5168,14 @@ function FieldsPage({
       if (existingIdx >= 0) {
         return prev.filter((_, i) => i !== existingIdx);
       }
-      if (prev.length >= 2) return prev; // Limit to 2 points max
-      return [...prev, { dxf_x: pt.y, dxf_y: pt.x, lat: "", lon: "" }];
+      
+      if (alignmentMethod === "single_point") {
+        if (prev.length >= 1) return [{ dxf_x: pt.y, dxf_y: pt.x, lat: prev[0].lat, lon: prev[0].lon }];
+        return [{ dxf_x: pt.y, dxf_y: pt.x, lat: "", lon: "" }];
+      } else {
+        if (prev.length >= 2) return prev; // Limit to 2 points max
+        return [...prev, { dxf_x: pt.y, dxf_y: pt.x, lat: "", lon: "" }];
+      }
     });
   };
 
@@ -5190,19 +5198,36 @@ function FieldsPage({
           lon: parseFloat(p.lon),
         }));
 
-      if (validPoints.length === 0) {
-        Alert.alert("Validation", "Please enter valid Latitude and Longitude for at least one point.");
+      if (alignmentMethod === "least_squares" && validPoints.length < 2) {
+        Alert.alert("Validation", "Please select 2 points and enter their WGS84 coordinates.");
         setIsFixing(false);
         return;
+      }
+      if (alignmentMethod === "single_point" && validPoints.length === 0) {
+        Alert.alert("Validation", "Please select a point and enter its coordinates.");
+        setIsFixing(false);
+        return;
+      }
+
+      let payload: any = {
+        source: selectedPathName,
+        ref_points: validPoints,
+      };
+
+      if (alignmentMethod === "single_point") {
+        const rot = parseFloat(rotationDeg);
+        if (isNaN(rot)) {
+          Alert.alert("Validation", "Please enter a valid Heading (Degrees).");
+          setIsFixing(false);
+          return;
+        }
+        payload.rotation_deg = rot;
       }
 
       const res = await fetch(`${apiBaseUrl}/api/path/plan`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          source: selectedPathName,
-          ref_points: validPoints,
-        }),
+        body: JSON.stringify(payload),
       });
 
       if (res.ok) {
@@ -5676,7 +5701,7 @@ function FieldsPage({
           </View>
         </Modal>
 
-        
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 12, paddingBottom: 20 }} style={{ flex: 1 }}>
 
         {/* --- IMPORT SECTION --- */}
         <View style={{ borderRadius: 14, padding: 14, backgroundColor: "#ffffff", borderWidth: 1, borderColor: "#d8e1eb" }}>
@@ -5733,7 +5758,7 @@ function FieldsPage({
 
         {/* --- ALIGNMENT SECTION --- */}
         <View style={{ borderRadius: 14, padding: 14, backgroundColor: "#ffffff", borderWidth: 1, borderColor: "#d8e1eb" }}>
-          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
             <Text style={{ color: "#64748b", fontSize: 11, fontWeight: "800", letterSpacing: 1, textTransform: "uppercase" }}>
               Align DXF
             </Text>
@@ -5744,9 +5769,25 @@ function FieldsPage({
             )}
           </View>
 
+          {/* Toggle Method */}
+          <View style={{ flexDirection: "row", backgroundColor: "#f1f5f9", borderRadius: 8, padding: 4, marginBottom: 12 }}>
+            <Pressable
+              onPress={() => { setAlignmentMethod("least_squares"); setRefPoints([]); }}
+              style={{ flex: 1, paddingVertical: 8, alignItems: "center", borderRadius: 6, backgroundColor: alignmentMethod === "least_squares" ? "#ffffff" : "transparent", shadowColor: alignmentMethod === "least_squares" ? "#000" : "transparent", shadowOpacity: 0.05, shadowRadius: 2, shadowOffset: { width: 0, height: 1 } }}
+            >
+              <Text style={{ color: alignmentMethod === "least_squares" ? "#0f172a" : "#64748b", fontSize: 12, fontWeight: "700" }}>2-Point Fit</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => { setAlignmentMethod("single_point"); setRefPoints([]); }}
+              style={{ flex: 1, paddingVertical: 8, alignItems: "center", borderRadius: 6, backgroundColor: alignmentMethod === "single_point" ? "#ffffff" : "transparent", shadowColor: alignmentMethod === "single_point" ? "#000" : "transparent", shadowOpacity: 0.05, shadowRadius: 2, shadowOffset: { width: 0, height: 1 } }}
+            >
+              <Text style={{ color: alignmentMethod === "single_point" ? "#0f172a" : "#64748b", fontSize: 12, fontWeight: "700" }}>1-Point + Angle</Text>
+            </Pressable>
+          </View>
+
           {refPoints.length === 0 ? (
             <Text style={{ color: "#94a3b8", fontSize: 12, fontStyle: "italic", textAlign: "center", marginVertical: 8 }}>
-              Tap up to 2 endpoints on the canvas to set alignment references.
+              {alignmentMethod === "least_squares" ? "Tap 2 points on the canvas to set alignment." : "Tap 1 point on the canvas to set anchor."}
             </Text>
           ) : (
             <View style={{ gap: 8 }}>
@@ -5776,7 +5817,21 @@ function FieldsPage({
                 </View>
               ))}
 
-              {refPoints.length === 2 && (
+              {alignmentMethod === "single_point" && refPoints.length === 1 && (
+                <View style={{ backgroundColor: "#f8fafc", padding: 10, borderRadius: 8, borderWidth: 1, borderColor: "#e2e8f0" }}>
+                  <Text style={{ color: "#0f172a", fontSize: 12, fontWeight: "700", marginBottom: 6 }}>Heading Angle</Text>
+                  <TextInput
+                    style={{ height: 36, backgroundColor: "#fff", borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 6, paddingHorizontal: 10, fontSize: 13 }}
+                    placeholder="Degrees (e.g. 45)"
+                    placeholderTextColor="#94a3b8"
+                    value={rotationDeg}
+                    onChangeText={setRotationDeg}
+                    keyboardType="numeric"
+                  />
+                </View>
+              )}
+
+              {alignmentMethod === "least_squares" && refPoints.length === 2 && (
                 <View style={{ backgroundColor: "#e2e8f0", padding: 10, borderRadius: 8, alignItems: "center" }}>
                   <Text style={{ color: "#0f172a", fontSize: 13, fontWeight: "700" }}>
                     Distance: {Math.hypot(refPoints[1].dxf_x - refPoints[0].dxf_x, refPoints[1].dxf_y - refPoints[0].dxf_y).toFixed(2)} meters
@@ -5902,6 +5957,7 @@ function FieldsPage({
             </Pressable>
           ) : null}
         </View>
+        </ScrollView>
       </View>
       )}
     </View>
@@ -6894,90 +6950,83 @@ function PlanPreview({
   const layoutSizeRef = React.useRef(layoutSize);
   useEffect(() => { layoutSizeRef.current = layoutSize; }, [layoutSize]);
 
-  const activePanX = useSharedValue(0);
-  const activePanY = useSharedValue(0);
+  const panResponder = useMemo(() => {
+    let initialZoom = 1;
+    let initialDistance = 0;
+    let initialPanX = 0;
+    let initialPanY = 0;
 
-  const handlePanUpdate = (dx: number, dy: number) => {
-    userPannedRef.current = true;
-    setViewport(prev => {
-      const next = { ...prev, panX: prev.panX + dx, panY: prev.panY + dy };
-      viewportRef.current = next;
-      return next;
+    return PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: (evt) => {
+        initialPanX = viewportRef.current.panX;
+        initialPanY = viewportRef.current.panY;
+        initialZoom = viewportRef.current.zoom;
+
+        const touches = evt.nativeEvent.touches;
+        if (touches.length === 2) {
+          const dx = touches[0].pageX - touches[1].pageX;
+          const dy = touches[0].pageY - touches[1].pageY;
+          initialDistance = Math.hypot(dx, dy);
+        }
+      },
+      onPanResponderMove: (evt, gestureState) => {
+        userPannedRef.current = true;
+        const touches = evt.nativeEvent.touches;
+
+        if (touches.length === 2 && initialDistance > 0) {
+          // Pinch Zoom
+          const dx = touches[0].pageX - touches[1].pageX;
+          const dy = touches[0].pageY - touches[1].pageY;
+          const distance = Math.hypot(dx, dy);
+          
+          const scale = distance / initialDistance;
+          const newZoom = Math.max(1, initialZoom * scale);
+          
+          const centerX = (touches[0].locationX + touches[1].locationX) / 2;
+          const centerY = (touches[0].locationY + touches[1].locationY) / 2;
+
+          const zoomRatio = newZoom / initialZoom;
+          
+          setViewport({
+            panX: centerX - (centerX - initialPanX) * zoomRatio,
+            panY: centerY - (centerY - initialPanY) * zoomRatio,
+            zoom: newZoom,
+          });
+        } else if (touches.length === 1) {
+          // Pan
+          setViewport({
+            panX: initialPanX + gestureState.dx,
+            panY: initialPanY + gestureState.dy,
+            zoom: viewportRef.current.zoom,
+          });
+        }
+      },
+      onPanResponderRelease: (evt, gestureState) => {
+        // Tap detection
+        if (Math.abs(gestureState.dx) < 5 && Math.abs(gestureState.dy) < 5 && evt.nativeEvent.touches.length === 0) {
+          const tapX = evt.nativeEvent.locationX;
+          const tapY = evt.nativeEvent.locationY;
+          
+          const tap = { x: tapX, y: tapY };
+          if (onSelectPointRef.current) {
+            const ptHit = pickNearestPoint(linesRef.current, viewportRef.current, tap, 28, rotationRef.current, layoutSizeRef.current);
+            if (ptHit) {
+              onSelectPointRef.current(ptHit);
+              return;
+            }
+          }
+          const hit = pickNearestLineId(linesRef.current, viewportRef.current, tap, 48, rotationRef.current, layoutSizeRef.current);
+          if (hit) {
+            onSelectLineRef.current?.(hit);
+          } else {
+            onSelectLineRef.current?.(null);
+          }
+        }
+      },
     });
-  };
-
-  const handlePinchUpdate = (s: number, fx: number, fy: number, dx: number, dy: number) => {
-    userPannedRef.current = true;
-    setViewport(prev => {
-      const newZoom = Math.max(1, prev.zoom * s);
-      const zoomRatio = newZoom / prev.zoom;
-      const newPanX = fx - (fx - prev.panX) * zoomRatio + dx;
-      const newPanY = fy - (fy - prev.panY) * zoomRatio + dy;
-      const next = { panX: newPanX, panY: newPanY, zoom: newZoom };
-      viewportRef.current = next;
-      return next;
-    });
-  };
-
-  const handleTap = (x: number, y: number) => {
-    const tap = { x, y };
-    if (onSelectPointRef.current) {
-      const ptHit = pickNearestPoint(linesRef.current, viewportRef.current, tap, 28, rotationRef.current, layoutSizeRef.current);
-      if (ptHit) {
-        onSelectPointRef.current(ptHit);
-        return;
-      }
-    }
-    const hit = pickNearestLineId(linesRef.current, viewportRef.current, tap, 48, rotationRef.current, layoutSizeRef.current);
-    if (hit) {
-      onSelectLineRef.current?.(hit);
-    } else {
-      onSelectLineRef.current?.(null);
-    }
-  };
-
-  const lastScale = useSharedValue(1);
-  const lastFocalX = useSharedValue(0);
-  const lastFocalY = useSharedValue(0);
-
-  const pinchGesture = Gesture.Pinch()
-    .onStart((e) => {
-      lastScale.value = 1;
-      lastFocalX.value = e.focalX;
-      lastFocalY.value = e.focalY;
-    })
-    .onUpdate((e) => {
-      const s = e.scale / lastScale.value;
-      const dx = e.focalX - lastFocalX.value;
-      const dy = e.focalY - lastFocalY.value;
-      runOnJS(handlePinchUpdate)(s, e.focalX, e.focalY, dx, dy);
-      lastScale.value = e.scale;
-      lastFocalX.value = e.focalX;
-      lastFocalY.value = e.focalY;
-    });
-
-  const panGesture = Gesture.Pan()
-    .maxPointers(1)
-    .onStart(() => {
-      activePanX.value = 0;
-      activePanY.value = 0;
-    })
-    .onUpdate((e) => {
-      const dx = e.translationX - activePanX.value;
-      const dy = e.translationY - activePanY.value;
-      runOnJS(handlePanUpdate)(dx, dy);
-      activePanX.value = e.translationX;
-      activePanY.value = e.translationY;
-    });
-
-  const tapGesture = Gesture.Tap()
-    .onEnd((e, success) => {
-      if (success) {
-        runOnJS(handleTap)(e.x, e.y);
-      }
-    });
-
-  const composedGesture = Gesture.Simultaneous(pinchGesture, panGesture, tapGesture);
+  }, []);
 
   const strokeForLayer = (layer: string) => {
     if (layer === "boundary") return "#0f172a";
@@ -7037,11 +7086,10 @@ function PlanPreview({
   return (
     <View
       onLayout={handleLayout}
-      style={{ flex: 1, backgroundColor: "#f0f4f8" }}
+      style={{ flex: 1 }}
     >
-      <GestureDetector gesture={composedGesture}>
-        <View collapsable={false} style={{ flex: 1, position: "relative" }}>
-          {filtered.length === 0 && !hasRover ? (
+      <View {...panResponder.panHandlers} collapsable={false} style={{ flex: 1, position: "relative", backgroundColor: "#f0f4f8", overflow: "hidden" }}>
+        {filtered.length === 0 && !hasRover ? (
           // No plan, no rover: show placeholder
           <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 18 }}>
             <Text style={{ color: "#475569", fontSize: 15, textAlign: "center", lineHeight: 22 }}>
@@ -7210,7 +7258,6 @@ function PlanPreview({
           </Svg>
         )}
         </View>
-      </GestureDetector>
 
       {/* ── Single Heading Compass (always shown) ── */}
       <View
