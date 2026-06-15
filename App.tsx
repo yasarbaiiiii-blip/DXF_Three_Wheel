@@ -972,7 +972,11 @@ export default function App() {
             const body = await res.json();
             console.log(`[API GET] /api/path/${pathName}/entities - Success, loaded ${body.num_entities} entities`);
             const entities = body.entities || [];
-            
+            // Per-entity extension run-ups are only drawn in the fallback path.
+            // When /plan succeeds, extensions arrive as non-spray runs in the
+            // authoritative merged waypoints, so we must not draw them twice.
+            const fallbackExtLines: PlanLine[] = [];
+
             entities.forEach((ent: any, i: number) => {
               const layerUpper = String(ent.layer || "").toUpperCase();
               let layerName: PlanLine["layer"] = "marking"; // default to marking
@@ -996,11 +1000,11 @@ export default function App() {
                 entity: ent,
               });
 
-              // Add extensions if enabled
+              // Add extensions if enabled (buffered — only drawn in fallback)
               if (ent.extension_preview && ent.extension_preview.enabled) {
                 if (ent.extension_preview.pre_points && ent.extension_preview.pre_points.length >= 2) {
                   const pre = ent.extension_preview.pre_points;
-                  generatedLines.push({
+                  fallbackExtLines.push({
                     id: `ext-pre-${ent.entity_id || i}`,
                     label: `Pre-extension ${ent.entity_id || i}`,
                     layer: "extension",
@@ -1012,7 +1016,7 @@ export default function App() {
                 }
                 if (ent.extension_preview.aft_points && ent.extension_preview.aft_points.length >= 2) {
                   const aft = ent.extension_preview.aft_points;
-                  generatedLines.push({
+                  fallbackExtLines.push({
                     id: `ext-aft-${ent.entity_id || i}`,
                     label: `Aft-extension ${ent.entity_id || i}`,
                     layer: "extension",
@@ -1025,21 +1029,78 @@ export default function App() {
               }
             });
 
-            // Add transits
-            if (body.transit_preview && Array.isArray(body.transit_preview)) {
-              body.transit_preview.forEach((transit: any, i: number) => {
-                const pts = transit.points || [];
-                if (pts.length < 2) return;
-                generatedLines.push({
-                  id: `transit-${i}`,
-                  label: `Transit ${transit.from_entity_id || "?"} to ${transit.to_entity_id || "?"}`,
-                  layer: "transit",
-                  from: { id: i * 1000 + 1, x: pts[0].north, y: pts[0].east },
-                  to: { id: i * 1000 + 2, x: pts[pts.length - 1].north, y: pts[pts.length - 1].east },
-                  width: 0.1,
-                  entity: { entity_id: `transit-${i}`, entity_type: "TRANSIT", layer: "TRANSIT", color: 0, is_mark: false, length_m: transit.length_m || 0, geometry: {}, preview_points: pts }
-                });
+            // Authoritative runtime path overlay.
+            //
+            // The /entities `transit_preview` connects MARK entities in *saved
+            // order* with straight crossings — it never runs the shape grouper /
+            // optimizer the mission uses. For connected loops (e.g. a square,
+            // where all 4 sides chain into one run) and multi-shape DXFs it
+            // therefore draws phantom transits the rover never drives, so the
+            // preview disagrees with the executed mission.
+            //
+            // Instead, overlay the exact merged waypoints /plan publishes — the
+            // single source of truth for what the rover does. MARK waypoints are
+            // already shown as editable entity lines above, so we draw only the
+            // non-spray runs here (real inter-shape transits + extension
+            // run-ups). Result: preview == mission for any DXF. Falls back to the
+            // legacy per-entity extensions + straight transit_preview when /plan
+            // is unavailable (offline / older backend), so the operator always
+            // gets a usable picture.
+            let runtimePathApplied = false;
+            try {
+              const planRes = await fetch(`${apiBaseUrl}/api/path/plan`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ source: pathName, include_waypoints: true }),
               });
+              if (planRes.ok) {
+                const planData = await planRes.json();
+                const wps = Array.isArray(planData.merged_waypoints) ? planData.merged_waypoints : [];
+                const sprayFlags = Array.isArray(planData.spray_flags) ? planData.spray_flags : [];
+                if (wps.length >= 2) {
+                  for (let i = 0; i < wps.length - 1; i++) {
+                    const isMark = sprayFlags[i] ?? true;
+                    if (isMark) continue; // marks already drawn as editable entity lines
+                    const fromNorth = coerceFiniteNumber(wps[i]?.[0]);
+                    const fromEast = coerceFiniteNumber(wps[i]?.[1]);
+                    const toNorth = coerceFiniteNumber(wps[i + 1]?.[0]);
+                    const toEast = coerceFiniteNumber(wps[i + 1]?.[1]);
+                    if (fromNorth == null || fromEast == null || toNorth == null || toEast == null) continue;
+                    generatedLines.push({
+                      id: `runtime-transit-${i}`,
+                      label: "Transit",
+                      layer: "transit",
+                      from: { id: 900000 + i * 2 + 1, x: fromNorth, y: fromEast },
+                      to: { id: 900000 + i * 2 + 2, x: toNorth, y: toEast },
+                      width: 0.1,
+                    });
+                  }
+                  runtimePathApplied = true;
+                }
+              } else {
+                console.log(`[API POST] /api/path/plan - overlay status ${planRes.status}, using legacy preview`);
+              }
+            } catch (planErr) {
+              console.log("[API POST] /api/path/plan - overlay failed, using legacy preview:", planErr);
+            }
+
+            if (!runtimePathApplied) {
+              generatedLines.push(...fallbackExtLines);
+              if (body.transit_preview && Array.isArray(body.transit_preview)) {
+                body.transit_preview.forEach((transit: any, i: number) => {
+                  const pts = transit.points || [];
+                  if (pts.length < 2) return;
+                  generatedLines.push({
+                    id: `transit-${i}`,
+                    label: `Transit ${transit.from_entity_id || "?"} to ${transit.to_entity_id || "?"}`,
+                    layer: "transit",
+                    from: { id: i * 1000 + 1, x: pts[0].north, y: pts[0].east },
+                    to: { id: i * 1000 + 2, x: pts[pts.length - 1].north, y: pts[pts.length - 1].east },
+                    width: 0.1,
+                    entity: { entity_id: `transit-${i}`, entity_type: "TRANSIT", layer: "TRANSIT", color: 0, is_mark: false, length_m: transit.length_m || 0, geometry: {}, preview_points: pts }
+                  });
+                });
+              }
             }
             if (generatedLines.length === 0) {
               throw new Error("Preview entities did not contain valid geometries");
