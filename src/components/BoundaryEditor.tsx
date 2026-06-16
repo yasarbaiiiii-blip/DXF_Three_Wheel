@@ -1,15 +1,15 @@
 import React, { useState, useMemo, useRef, useEffect, memo } from "react";
-import { View, Text, Pressable, PanResponder, Switch } from "react-native";
+import { View, Text, Pressable, PanResponder, Switch, LayoutChangeEvent } from "react-native";
 import Svg, { Path, G, Line, Rect } from "react-native-svg";
 import type { PlanLine } from "../types/plan";
 
 export interface PlacedItem {
   id: string;
   lines: PlanLine[];
-  x: number; // offset center X
-  y: number; // offset center Y
+  x: number;
+  y: number;
   rotation: number;
-  groupId?: string; // Group ID for words
+  groupId?: string;
   width: number;
   height: number;
 }
@@ -17,8 +17,8 @@ export interface PlacedItem {
 export interface BoundaryEditorProps {
   boundaryWidth: number;
   boundaryHeight: number;
-  indentSpacing: number; // Space from boundary edges
-  letterSpacing: number; // Space between items
+  indentSpacing: number;
+  letterSpacing: number;
   items: PlacedItem[];
   setItems: React.Dispatch<React.SetStateAction<PlacedItem[]>>;
   selectedItemIds: string[];
@@ -37,25 +37,11 @@ export const BoundaryEditor = memo(function BoundaryEditor({
   setSelectedItemIds,
   snapSettings,
 }: BoundaryEditorProps) {
-  // A simple grid scale: let's map meters to pixels
-  // e.g. 1 meter = 100 pixels
   const METER_TO_PX = 100;
 
   const [snapLines, setSnapLines] = useState<{ x1: number; y1: number; x2: number; y2: number }[]>([]);
+  const [svgSize, setSvgSize] = useState({ width: 0, height: 0 });
 
-  // Calculate bounding box of an item in local space
-  const getItemBounds = (item: PlacedItem) => {
-    return {
-      left: item.x - item.width / 2,
-      right: item.x + item.width / 2,
-      top: item.y - item.height / 2,
-      bottom: item.y + item.height / 2,
-    };
-  };
-
-  // We will build a pan responder for dragging items
-  const activeDragRef = useRef<{ ids: string[]; startPositions: { id: string; x: number; y: number; width: number; height: number }[] } | null>(null);
-  
   const itemsRef = useRef(items);
   useEffect(() => { itemsRef.current = items; }, [items]);
 
@@ -86,10 +72,15 @@ export const BoundaryEditor = memo(function BoundaryEditor({
   const setSnapLinesRef = useRef(setSnapLines);
   useEffect(() => { setSnapLinesRef.current = setSnapLines; }, [setSnapLines]);
 
+  const svgSizeRef = useRef({ width: 0, height: 0 });
+  useEffect(() => { svgSizeRef.current = svgSize; }, [svgSize]);
+
+  const activeDragRef = useRef<{ ids: string[]; startPositions: { id: string; x: number; y: number; width: number; height: number }[] } | null>(null);
+
   const panResponder = useMemo(() =>
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
-      onPanResponderGrant: (evt, gestureState) => {
+      onPanResponderGrant: () => {
         if (selectedItemIdsRef.current.length > 0) {
           const starts = selectedItemIdsRef.current.map(id => {
             const it = itemsRef.current.find(i => i.id === id);
@@ -103,7 +94,7 @@ export const BoundaryEditor = memo(function BoundaryEditor({
         if (!dragData) return;
         
         const dx = gestureState.dx / METER_TO_PX;
-        const dy = gestureState.dy / METER_TO_PX;
+        const dy = -gestureState.dy / METER_TO_PX; // NEGATED for world Y = North up
 
         const bw = boundaryWidthRef.current;
         const bh = boundaryHeightRef.current;
@@ -128,8 +119,8 @@ export const BoundaryEditor = memo(function BoundaryEditor({
 
             if (Math.abs(newX - halfW - leftIndent) < 0.1) { newX = leftIndent + halfW; newSnapLines.push({x1: leftIndent, y1: -bh, x2: leftIndent, y2: bh}); }
             if (Math.abs(newX + halfW - rightIndent) < 0.1) { newX = rightIndent - halfW; newSnapLines.push({x1: rightIndent, y1: -bh, x2: rightIndent, y2: bh}); }
-            if (Math.abs(newY - halfH - topIndent) < 0.1) { newY = topIndent + halfH; newSnapLines.push({x1: -bw, y1: topIndent, x2: bw, y2: topIndent}); }
-            if (Math.abs(newY + halfH - bottomIndent) < 0.1) { newY = bottomIndent - halfH; newSnapLines.push({x1: -bw, y1: bottomIndent, x2: bw, y2: bottomIndent}); }
+            if (Math.abs(newY - halfH - (-bh/2 + indent)) < 0.1) { newY = -bh/2 + indent + halfH; newSnapLines.push({x1: -bw, y1: -bh/2 + indent, x2: bw, y2: -bh/2 + indent}); }
+            if (Math.abs(newY + halfH - (bh/2 - indent)) < 0.1) { newY = bh/2 - indent - halfH; newSnapLines.push({x1: -bw, y1: bh/2 - indent, x2: bw, y2: bh/2 - indent}); }
           }
           updates[start.id] = {x: newX, y: newY};
         });
@@ -148,9 +139,18 @@ export const BoundaryEditor = memo(function BoundaryEditor({
         setSnapLinesRef.current([]);
         
         if (Math.abs(gestureState.dx) < 3 && Math.abs(gestureState.dy) < 3) {
+          // TAP DETECTION - FIXED coordinate math
           const touch = evt.nativeEvent;
-          const tapX = (touch.locationX / METER_TO_PX) - (boundaryWidthRef.current / 2);
-          const tapY = (touch.locationY / METER_TO_PX) - (boundaryHeightRef.current / 2);
+          const bw = boundaryWidthRef.current;
+          const bh = boundaryHeightRef.current;
+          const sz = svgSizeRef.current;
+          
+          if (sz.width <= 0 || sz.height <= 0) return;
+          
+          const scaleX = (bw * METER_TO_PX) / sz.width;
+          const scaleY = (bh * METER_TO_PX) / sz.height;
+          const tapX = (touch.locationX * scaleX - (bw * METER_TO_PX / 2)) / METER_TO_PX;
+          const tapY = -(touch.locationY * scaleY - (bh * METER_TO_PX / 2)) / METER_TO_PX;
           
           let nearestId: string | null = null;
           let nearestDist = 0.3; 
@@ -203,7 +203,14 @@ export const BoundaryEditor = memo(function BoundaryEditor({
   );
 
   return (
-    <View style={{ flex: 1, backgroundColor: "#f8fafc", overflow: "hidden", position: "relative" }} {...panResponder.panHandlers}>
+    <View 
+      style={{ flex: 1, backgroundColor: "#f8fafc", overflow: "hidden", position: "relative" }} 
+      {...panResponder.panHandlers}
+      onLayout={(e) => {
+        const { width, height } = e.nativeEvent.layout;
+        if (width > 0 && height > 0) setSvgSize({ width, height });
+      }}
+    >
       <Svg style={{ width: "100%", height: "100%" }} viewBox={`-${boundaryWidth * METER_TO_PX / 2} -${boundaryHeight * METER_TO_PX / 2} ${boundaryWidth * METER_TO_PX} ${boundaryHeight * METER_TO_PX}`}>
         {/* Draw Boundary Box */}
         <Rect
@@ -251,7 +258,7 @@ export const BoundaryEditor = memo(function BoundaryEditor({
           return (
             <G 
               key={item.id} 
-              transform={`translate(${item.x * METER_TO_PX}, ${item.y * METER_TO_PX}) rotate(${item.rotation})`}
+              transform={`translate(${item.x * METER_TO_PX}, ${-item.y * METER_TO_PX}) rotate(${item.rotation})`}
             >
                {/* Selection Box */}
                {isSelected && (
@@ -265,14 +272,14 @@ export const BoundaryEditor = memo(function BoundaryEditor({
                    strokeWidth="2"
                  />
                )}
-               {/* Item SVG Lines */}
+               {/* Item SVG Lines - Y NEGATED for world coords */}
                {item.lines.map((l, i) => (
                   <Line
                     key={`${item.id}-l-${i}`}
-                    x1={l.from.y * METER_TO_PX} // East
-                    y1={l.from.x * METER_TO_PX} // North
+                    x1={l.from.y * METER_TO_PX}
+                    y1={-l.from.x * METER_TO_PX}
                     x2={l.to.y * METER_TO_PX}
-                    y2={l.to.x * METER_TO_PX}
+                    y2={-l.to.x * METER_TO_PX}
                     stroke={isSelected ? "#0b6b68" : "#0f172a"}
                     strokeWidth="2"
                   />

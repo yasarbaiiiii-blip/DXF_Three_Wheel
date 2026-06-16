@@ -107,7 +107,8 @@ export function TemplatesPage(props: TemplatesPageProps) {
       height: bounds.height * parsedSize,
     };
     setPlacedItems(prev => [...prev, newItem]);
-    setSelectedItemIds([newItem.id]);
+    // Don't auto-select - user taps to select
+    setSelectedItemIds([]);
   }, [previewLines, parsedSize, computeBoundingBox]);
 
   const handleDeleteItem = useCallback(() => {
@@ -136,12 +137,16 @@ export function TemplatesPage(props: TemplatesPageProps) {
     }
     const startX = -(totalItemsWidth / 2) - (totalGaps / 2) + indent;
     let cursorX = startX;
+    // Vertical center within indent area
+    const usableHeight = bh - 2 * indent;
+    const centerY = indent + (usableHeight / 2);
+    
     setPlacedItems(prev => prev.map(item => {
       const newX = cursorX + item.width / 2;
       cursorX += item.width + lSpacing;
-      return { ...item, x: newX, y: 0 };
+      return { ...item, x: newX, y: centerY };
     }));
-  }, [placedItems, bw, indent, lSpacing]);
+  }, [placedItems, bw, bh, indent, lSpacing]);
 
   const handleApplyScale = useCallback(() => {
     if (selectedItemIds.length === 0) return;
@@ -409,7 +414,7 @@ export function TemplatesPage(props: TemplatesPageProps) {
                   Font Style
                 </Text>
                 <View style={{ flexDirection: "row", gap: 10 }}>
-                  {(["smooth", "stencil"] as FontStyle[]).map((f) => (
+                  {(["smooth"] as FontStyle[]).map((f) => (
                     <Pressable
                       key={f}
                       onPress={() => setFontStyle(f)}
