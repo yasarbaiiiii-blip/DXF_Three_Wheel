@@ -40,7 +40,7 @@ export const BoundaryEditor = memo(function BoundaryEditor({
   const METER_TO_PX = 100;
 
   const [snapLines, setSnapLines] = useState<{ x1: number; y1: number; x2: number; y2: number }[]>([]);
-  const [svgSize, setSvgSize] = useState({ width: 0, height: 0 });
+  const [svgSize, setSvgSize] = useState({ width: 400, height: 400 }); // fallback for initial taps
 
   const itemsRef = useRef(items);
   useEffect(() => { itemsRef.current = items; }, [items]);

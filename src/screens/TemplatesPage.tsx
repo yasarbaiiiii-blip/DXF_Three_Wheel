@@ -44,7 +44,7 @@ export function TemplatesPage(props: TemplatesPageProps) {
   const [boundaryWidthStr, setBoundaryWidthStr] = useState("4.0");
   const [boundaryHeightStr, setBoundaryHeightStr] = useState("3.0");
   const [indentSpacingStr, setIndentSpacingStr] = useState("0.25");
-  const [letterSpacingStr, setLetterSpacingStr] = useState("0.1");
+  const [letterSpacingStr, setLetterSpacingStr] = useState("10");
   const [snapCenter, setSnapCenter] = useState(true);
   const [snapCorners, setSnapCorners] = useState(true);
   const [snapAngles, setSnapAngles] = useState(true);
@@ -66,11 +66,32 @@ export function TemplatesPage(props: TemplatesPageProps) {
   const [sizeInput, setSizeInput] = useState("1.0");
   const [isParsing, setIsParsing] = useState(false);
 
+  // Active boundary dimensions (applied to canvas)
+  const [activeBoundaryWidth, setActiveBoundaryWidth] = useState(4.0);
+  const [activeBoundaryHeight, setActiveBoundaryHeight] = useState(3.0);
+  const [activeIndentSpacing, setActiveIndentSpacing] = useState(0.25);
+  const [activeLetterSpacingCm, setActiveLetterSpacingCm] = useState(10);
+
   const parsedSize = Math.max(0.5, Math.min(3.0, parseFloat(sizeInput) || 1.0));
-  const bw = parseFloat(boundaryWidthStr) || 4.0;
-  const bh = parseFloat(boundaryHeightStr) || 3.0;
-  const indent = parseFloat(indentSpacingStr) || 0.25;
-  const lSpacing = parseFloat(letterSpacingStr) || 0.1;
+
+  // PENDING values from text inputs
+  const pendingWidth = parseFloat(boundaryWidthStr) || 4.0;
+  const pendingHeight = parseFloat(boundaryHeightStr) || 3.0;
+  const pendingIndent = parseFloat(indentSpacingStr) || 0.25;
+  const pendingLetterSpacingCm = parseFloat(letterSpacingStr) || 10;
+
+  // ACTIVE values (applied to canvas)
+  const bw = activeBoundaryWidth;
+  const bh = activeBoundaryHeight;
+  const indent = activeIndentSpacing;
+  const lSpacing = activeLetterSpacingCm / 100; // cm → meters
+
+  // Check if pending values differ from active
+  const hasBoundaryChanges =
+    pendingWidth !== activeBoundaryWidth ||
+    pendingHeight !== activeBoundaryHeight ||
+    pendingIndent !== activeIndentSpacing ||
+    pendingLetterSpacingCm !== activeLetterSpacingCm;
 
   const previewLines = useMemo(() => {
     if (category === "shapes") return generateTemplateLines(shape, parsedSize, arcType);
@@ -131,7 +152,7 @@ export function TemplatesPage(props: TemplatesPageProps) {
     const spaceNeeded = totalItemsWidth + totalGaps;
     if (spaceNeeded > usableWidth) {
       Alert.alert("Too Wide", 
-        `Items need ${spaceNeeded.toFixed(2)}m but boundary provides ${usableWidth.toFixed(2)}m. Reduce scale or increase boundary width.`
+        `Items need ${(spaceNeeded * 100).toFixed(0)}cm but boundary provides ${(usableWidth * 100).toFixed(0)}cm. Reduce scale or increase boundary width.`
       );
       return;
     }
@@ -281,6 +302,13 @@ export function TemplatesPage(props: TemplatesPageProps) {
     }
   };
 
+  const handleApplyBoundary = useCallback(() => {
+    setActiveBoundaryWidth(pendingWidth);
+    setActiveBoundaryHeight(pendingHeight);
+    setActiveIndentSpacing(pendingIndent);
+    setActiveLetterSpacingCm(pendingLetterSpacingCm);
+  }, [pendingWidth, pendingHeight, pendingIndent, pendingLetterSpacingCm]);
+
   const memoizedSnapSettings = useMemo(() => ({
     center: snapCenter,
     corners: snapCorners,
@@ -358,7 +386,7 @@ export function TemplatesPage(props: TemplatesPageProps) {
                     <TextInput style={{ borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, padding: 8, color: "#0f172a" }} value={indentSpacingStr} onChangeText={setIndentSpacingStr} keyboardType="numeric" />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={{ color: "#475569", fontSize: 12, marginBottom: 4 }}>Letter Spacing</Text>
+                    <Text style={{ color: "#475569", fontSize: 12, marginBottom: 4 }}>Letter Spacing (cm)</Text>
                     <TextInput style={{ borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, padding: 8, color: "#0f172a" }} value={letterSpacingStr} onChangeText={setLetterSpacingStr} keyboardType="numeric" />
                   </View>
                 </View>
@@ -369,6 +397,24 @@ export function TemplatesPage(props: TemplatesPageProps) {
                   <Pressable onPress={() => setSnapCorners(!snapCorners)} style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, backgroundColor: snapCorners ? "#0b6b68" : "#f1f5f9" }}><Text style={{ color: snapCorners ? "#fff" : "#475569", fontSize: 12, fontWeight: "700" }}>Corners</Text></Pressable>
                   <Pressable onPress={() => setSnapAngles(!snapAngles)} style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, backgroundColor: snapAngles ? "#0b6b68" : "#f1f5f9" }}><Text style={{ color: snapAngles ? "#fff" : "#475569", fontSize: 12, fontWeight: "700" }}>Angles</Text></Pressable>
                 </View>
+                
+                {hasBoundaryChanges && (
+                  <Pressable
+                    onPress={handleApplyBoundary}
+                    style={{
+                      height: 44,
+                      borderRadius: 10,
+                      backgroundColor: "#0f988f",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      marginTop: 6,
+                    }}
+                  >
+                    <Text style={{ color: "#fff", fontSize: 14, fontWeight: "800" }}>
+                      Apply Boundary Changes
+                    </Text>
+                  </Pressable>
+                )}
               </View>
             )}
 
