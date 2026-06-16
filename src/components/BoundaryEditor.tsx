@@ -432,8 +432,9 @@ export const BoundaryEditor = memo(function BoundaryEditor({
           width={boundaryWidth * METER_TO_PX}
           height={boundaryHeight * METER_TO_PX}
           fill="#f1f5f9"
-          stroke={selectedItemIds.includes("boundary") ? "#ef4444" : "#94a3b8"}
-          strokeWidth="4"
+          stroke={selectedItemIds.includes("boundary") ? "#ef4444" : "#0f172a"}
+          strokeWidth={selectedItemIds.includes("boundary") ? "4" : "3"}
+          strokeLinejoin="round"
         />
 
         {/* Draw Indent Spacing Bounds (Inner canvas filled with white) */}
