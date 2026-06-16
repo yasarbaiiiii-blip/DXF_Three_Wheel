@@ -239,6 +239,62 @@ export function TemplatesPage(props: TemplatesPageProps) {
     ));
   }, [selectedItemIds, itemRotationStr]);
 
+  const handleScaleGroupToBoundary = useCallback((mode: "fit" | "fill") => {
+    if (selectedItemIds.length === 0) return;
+    const firstItem = placedItems.find(p => selectedItemIds.includes(p.id));
+    if (!firstItem || !firstItem.groupId) return;
+    
+    const groupItems = placedItems.filter(p => p.groupId === firstItem.groupId);
+    if (groupItems.length === 0) return;
+
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    groupItems.forEach(p => {
+      minX = Math.min(minX, p.x - p.width / 2);
+      maxX = Math.max(maxX, p.x + p.width / 2);
+      minY = Math.min(minY, p.y - p.height / 2);
+      maxY = Math.max(maxY, p.y + p.height / 2);
+    });
+
+    const gw = maxX - minX;
+    const gh = maxY - minY;
+    if (gw <= 0 || gh <= 0) return;
+
+    const safeW = bw - 2 * indent;
+    const safeH = bh - 2 * indent;
+
+    const scaleX = safeW / gw;
+    const scaleY = safeH / gh;
+
+    const scaleMultiplier = mode === "fit" ? Math.min(scaleX, scaleY) : Math.max(scaleX, scaleY);
+    
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+
+    setPlacedItems(prev => prev.map(p => {
+      if (p.groupId !== firstItem.groupId) return p;
+      
+      const dx = p.x - cx;
+      const dy = p.y - cy;
+      
+      const newX = dx * scaleMultiplier;
+      const newY = dy * scaleMultiplier;
+      
+      return {
+        ...p,
+        x: newX,
+        y: newY,
+        scale: p.scale * scaleMultiplier,
+        width: p.width * scaleMultiplier,
+        height: p.height * scaleMultiplier,
+        lines: p.lines.map(l => ({
+          ...l,
+          from: { ...l.from, x: l.from.x * scaleMultiplier, y: l.from.y * scaleMultiplier },
+          to: { ...l.to, x: l.to.x * scaleMultiplier, y: l.to.y * scaleMultiplier },
+        })),
+      };
+    }));
+  }, [placedItems, selectedItemIds, bw, bh, indent]);
+
   const handleGroupItems = useCallback(() => {
      if (selectedItemIds.length < 2) return;
      const groupId = "grp-" + Date.now();
@@ -676,7 +732,7 @@ export function TemplatesPage(props: TemplatesPageProps) {
             </View>
 
             {boundaryMode && selectedItemIds.length > 0 && placedItems.find(p => selectedItemIds.includes(p.id))?.groupId && (
-              <View style={{ flexDirection: "row", gap: 8, marginVertical: 8, justifyContent: "center" }}>
+              <View style={{ flexDirection: "row", gap: 8, marginVertical: 8, justifyContent: "center", flexWrap: "wrap" }}>
                 <Pressable
                   onPress={() => setMultiTouchMode(multiTouchMode === "scale" ? "both" : "scale")}
                   style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, backgroundColor: multiTouchMode === "scale" ? "#0ea5e9" : "#f1f5f9", borderWidth: 1, borderColor: "#cbd5e1" }}
@@ -688,6 +744,18 @@ export function TemplatesPage(props: TemplatesPageProps) {
                   style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, backgroundColor: multiTouchMode === "rotate" ? "#0ea5e9" : "#f1f5f9", borderWidth: 1, borderColor: "#cbd5e1" }}
                 >
                   <Text style={{ color: multiTouchMode === "rotate" ? "#fff" : "#475569", fontWeight: "700", fontSize: 12 }}>Rotate Only</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => handleScaleGroupToBoundary("fit")}
+                  style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, backgroundColor: "#0b6b68" }}
+                >
+                  <Text style={{ color: "#fff", fontWeight: "700", fontSize: 12 }}>Fit</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => handleScaleGroupToBoundary("fill")}
+                  style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, backgroundColor: "#0f988f" }}
+                >
+                  <Text style={{ color: "#fff", fontWeight: "700", fontSize: 12 }}>Fill</Text>
                 </Pressable>
               </View>
             )}
