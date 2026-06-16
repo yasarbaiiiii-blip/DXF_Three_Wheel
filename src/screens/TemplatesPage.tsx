@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState, useEffect } from "react";
 import { Alert, Modal, Pressable, ScrollView, Switch, Text, TextInput, View } from "react-native";
 import * as FileSystem from "expo-file-system/legacy";
 import { X } from "lucide-react-native";
@@ -53,6 +53,21 @@ export function TemplatesPage(props: TemplatesPageProps) {
   
   const [wordGroups, setWordGroups] = useState<WordGroup[]>([]);
   const [arrangeMode, setArrangeMode] = useState<"none" | "horizontal" | "vertical">("none");
+  const [multiTouchMode, setMultiTouchMode] = useState<"both" | "scale" | "rotate">("both");
+  const [itemScaleStr, setItemScaleStr] = useState("1.0");
+  const [itemRotationStr, setItemRotationStr] = useState("0");
+
+  useEffect(() => {
+    if (selectedItemIds.length > 0) {
+      const firstItem = placedItems.find(p => p.id === selectedItemIds[0]);
+      if (firstItem) {
+        setItemScaleStr(firstItem.scale.toFixed(2));
+        setItemRotationStr(Math.round(firstItem.rotation).toString());
+      }
+    } else {
+      setMultiTouchMode("both");
+    }
+  }, [selectedItemIds, placedItems]);
 
   const [category, setCategory] = useState<"shapes" | "alphabets" | "numbers" | "road_signs" | "sports_fields">("shapes");
   const [fontStyle, setFontStyle] = useState<FontStyle>("smooth");
@@ -144,6 +159,7 @@ export function TemplatesPage(props: TemplatesPageProps) {
       x: newX,
       y: newY,
       rotation: 0,
+      scale: 1.0,
       width: newWidth,
       height: newHeight,
     };
@@ -191,7 +207,37 @@ export function TemplatesPage(props: TemplatesPageProps) {
     }));
   }, [placedItems, bw, indent, lSpacing]);
 
+  const handleApplyScale = useCallback(() => {
+    if (selectedItemIds.length === 0) return;
+    const val = parseFloat(itemScaleStr);
+    const targetScale = Math.max(0.1, isNaN(val) ? 1.0 : val);
+    setPlacedItems(prev => prev.map(p => {
+      if (!selectedItemIds.includes(p.id)) return p;
+      const scaleMultiplier = targetScale / p.scale;
+      return {
+        ...p,
+        scale: targetScale,
+        width: p.width * scaleMultiplier,
+        height: p.height * scaleMultiplier,
+        lines: p.lines.map(l => ({
+          ...l,
+          from: { ...l.from, x: l.from.x * scaleMultiplier, y: l.from.y * scaleMultiplier },
+          to: { ...l.to, x: l.to.x * scaleMultiplier, y: l.to.y * scaleMultiplier },
+        })),
+      };
+    }));
+  }, [selectedItemIds, itemScaleStr]);
 
+  const handleApplyRotation = useCallback(() => {
+    if (selectedItemIds.length === 0) return;
+    const val = parseFloat(itemRotationStr);
+    const targetRot = isNaN(val) ? 0 : (val % 360);
+    setPlacedItems(prev => prev.map(p => 
+      selectedItemIds.includes(p.id) 
+        ? { ...p, rotation: targetRot }
+        : p
+    ));
+  }, [selectedItemIds, itemRotationStr]);
 
   const handleGroupItems = useCallback(() => {
      if (selectedItemIds.length < 2) return;
@@ -328,6 +374,7 @@ export function TemplatesPage(props: TemplatesPageProps) {
               selectedItemIds={selectedItemIds}
               setSelectedItemIds={memoSetSelectedItemIds}
               snapSettings={memoizedSnapSettings}
+              multiTouchMode={multiTouchMode}
             />
           ) : (
             <View style={{ flex: 1, position: "relative" }}>
@@ -628,7 +675,60 @@ export function TemplatesPage(props: TemplatesPageProps) {
               </View>
             </View>
 
+            {boundaryMode && selectedItemIds.length > 0 && placedItems.find(p => selectedItemIds.includes(p.id))?.groupId && (
+              <View style={{ flexDirection: "row", gap: 8, marginVertical: 8, justifyContent: "center" }}>
+                <Pressable
+                  onPress={() => setMultiTouchMode(multiTouchMode === "scale" ? "both" : "scale")}
+                  style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, backgroundColor: multiTouchMode === "scale" ? "#0ea5e9" : "#f1f5f9", borderWidth: 1, borderColor: "#cbd5e1" }}
+                >
+                  <Text style={{ color: multiTouchMode === "scale" ? "#fff" : "#475569", fontWeight: "700", fontSize: 12 }}>Scale Only</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => setMultiTouchMode(multiTouchMode === "rotate" ? "both" : "rotate")}
+                  style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, backgroundColor: multiTouchMode === "rotate" ? "#0ea5e9" : "#f1f5f9", borderWidth: 1, borderColor: "#cbd5e1" }}
+                >
+                  <Text style={{ color: multiTouchMode === "rotate" ? "#fff" : "#475569", fontWeight: "700", fontSize: 12 }}>Rotate Only</Text>
+                </Pressable>
+              </View>
+            )}
 
+            {boundaryMode && selectedItemIds.length > 0 && selectedItemIds.filter(id => id !== "boundary").length > 0 && (
+              <View style={{ borderRadius: 14, padding: 14, backgroundColor: "#ffffff", borderWidth: 1, borderColor: "#d8e1eb", gap: 8 }}>
+                <Text style={{ color: "#64748b", fontSize: 11, fontWeight: "800", letterSpacing: 1, textTransform: "uppercase" }}>
+                  Transform Selected
+                </Text>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                  <Text style={{ color: "#475569", fontSize: 12, fontWeight: "600", width: 50 }}>Scale:</Text>
+                  <TextInput
+                    style={{ flex: 1, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, padding: 6, color: "#0f172a" }}
+                    value={itemScaleStr}
+                    onChangeText={setItemScaleStr}
+                    keyboardType="numeric"
+                  />
+                  <Pressable
+                    onPress={handleApplyScale}
+                    style={{ paddingHorizontal: 14, paddingVertical: 6, borderRadius: 8, backgroundColor: "#0b6b68" }}
+                  >
+                    <Text style={{ color: "#fff", fontSize: 12, fontWeight: "700" }}>Apply</Text>
+                  </Pressable>
+                </View>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                  <Text style={{ color: "#475569", fontSize: 12, fontWeight: "600", width: 50 }}>Angle:</Text>
+                  <TextInput
+                    style={{ flex: 1, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, padding: 6, color: "#0f172a" }}
+                    value={itemRotationStr}
+                    onChangeText={setItemRotationStr}
+                    keyboardType="numeric"
+                  />
+                  <Pressable
+                    onPress={handleApplyRotation}
+                    style={{ paddingHorizontal: 14, paddingVertical: 6, borderRadius: 8, backgroundColor: "#6366f1" }}
+                  >
+                    <Text style={{ color: "#fff", fontSize: 12, fontWeight: "700" }}>Apply</Text>
+                  </Pressable>
+                </View>
+              </View>
+            )}
 
             {boundaryMode && (
               <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
