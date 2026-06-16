@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useEffect } from "react";
+import React, { useState, useMemo, useRef, useEffect, memo } from "react";
 import { View, Text, Pressable, PanResponder, Switch } from "react-native";
 import Svg, { Path, G, Line, Rect } from "react-native-svg";
 import type { PlanLine } from "../types/plan";
@@ -26,7 +26,7 @@ export interface BoundaryEditorProps {
   snapSettings: { center: boolean; corners: boolean; angles: boolean };
 }
 
-export function BoundaryEditor({
+export const BoundaryEditor = memo(function BoundaryEditor({
   boundaryWidth,
   boundaryHeight,
   indentSpacing,
@@ -54,73 +54,152 @@ export function BoundaryEditor({
   };
 
   // We will build a pan responder for dragging items
-  const activeDragRef = useRef<{ ids: string[]; startPositions: { id: string; x: number; y: number }[] } | null>(null);
+  const activeDragRef = useRef<{ ids: string[]; startPositions: { id: string; x: number; y: number; width: number; height: number }[] } | null>(null);
+  
+  const itemsRef = useRef(items);
+  useEffect(() => { itemsRef.current = items; }, [items]);
+
+  const selectedItemIdsRef = useRef(selectedItemIds);
+  useEffect(() => { selectedItemIdsRef.current = selectedItemIds; }, [selectedItemIds]);
+
+  const boundaryWidthRef = useRef(boundaryWidth);
+  useEffect(() => { boundaryWidthRef.current = boundaryWidth; }, [boundaryWidth]);
+
+  const boundaryHeightRef = useRef(boundaryHeight);
+  useEffect(() => { boundaryHeightRef.current = boundaryHeight; }, [boundaryHeight]);
+
+  const indentSpacingRef = useRef(indentSpacing);
+  useEffect(() => { indentSpacingRef.current = indentSpacing; }, [indentSpacing]);
+
+  const letterSpacingRef = useRef(letterSpacing);
+  useEffect(() => { letterSpacingRef.current = letterSpacing; }, [letterSpacing]);
+
+  const snapSettingsRef = useRef(snapSettings);
+  useEffect(() => { snapSettingsRef.current = snapSettings; }, [snapSettings]);
+
+  const setItemsRef = useRef(setItems);
+  useEffect(() => { setItemsRef.current = setItems; }, [setItems]);
+
+  const setSelectedItemIdsRef = useRef(setSelectedItemIds);
+  useEffect(() => { setSelectedItemIdsRef.current = setSelectedItemIds; }, [setSelectedItemIds]);
+
+  const setSnapLinesRef = useRef(setSnapLines);
+  useEffect(() => { setSnapLinesRef.current = setSnapLines; }, [setSnapLines]);
 
   const panResponder = useMemo(() =>
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onPanResponderGrant: (evt, gestureState) => {
-        // If we drag, record starting positions of selected items
-        if (selectedItemIds.length > 0) {
-          const starts = selectedItemIds.map(id => {
-            const it = items.find(i => i.id === id);
-            return { id, x: it?.x || 0, y: it?.y || 0 };
+        if (selectedItemIdsRef.current.length > 0) {
+          const starts = selectedItemIdsRef.current.map(id => {
+            const it = itemsRef.current.find(i => i.id === id);
+            return { id, x: it?.x || 0, y: it?.y || 0, width: it?.width || 0, height: it?.height || 0 };
           });
-          activeDragRef.current = { ids: selectedItemIds, startPositions: starts };
+          activeDragRef.current = { ids: selectedItemIdsRef.current, startPositions: starts };
         }
       },
       onPanResponderMove: (evt, gestureState) => {
-        if (!activeDragRef.current) return;
+        const dragData = activeDragRef.current;
+        if (!dragData) return;
         
         const dx = gestureState.dx / METER_TO_PX;
         const dy = gestureState.dy / METER_TO_PX;
 
-        setItems(prev => {
-          const next = [...prev];
+        const bw = boundaryWidthRef.current;
+        const bh = boundaryHeightRef.current;
+        const indent = indentSpacingRef.current;
+        const snaps = snapSettingsRef.current;
+
+        let newSnapLines: { x1: number; y1: number; x2: number; y2: number }[] = [];
+        const updates: Record<string, {x: number, y: number}> = {};
+
+        dragData.startPositions.forEach(start => {
+          let newX = start.x + dx;
+          let newY = start.y + dy;
+
+          if (snaps.corners) {
+            const leftIndent = -bw / 2 + indent;
+            const rightIndent = bw / 2 - indent;
+            const topIndent = -bh / 2 + indent;
+            const bottomIndent = bh / 2 - indent;
+            
+            const halfW = start.width / 2;
+            const halfH = start.height / 2;
+
+            if (Math.abs(newX - halfW - leftIndent) < 0.1) { newX = leftIndent + halfW; newSnapLines.push({x1: leftIndent, y1: -bh, x2: leftIndent, y2: bh}); }
+            if (Math.abs(newX + halfW - rightIndent) < 0.1) { newX = rightIndent - halfW; newSnapLines.push({x1: rightIndent, y1: -bh, x2: rightIndent, y2: bh}); }
+            if (Math.abs(newY - halfH - topIndent) < 0.1) { newY = topIndent + halfH; newSnapLines.push({x1: -bw, y1: topIndent, x2: bw, y2: topIndent}); }
+            if (Math.abs(newY + halfH - bottomIndent) < 0.1) { newY = bottomIndent - halfH; newSnapLines.push({x1: -bw, y1: bottomIndent, x2: bw, y2: bottomIndent}); }
+          }
+          updates[start.id] = {x: newX, y: newY};
+        });
+
+        setSnapLinesRef.current(newSnapLines);
+        
+        setItemsRef.current(prev => prev.map(item => {
+           if (updates[item.id]) {
+             return { ...item, x: updates[item.id].x, y: updates[item.id].y };
+           }
+           return item;
+        }));
+      },
+      onPanResponderRelease: (evt, gestureState) => {
+        activeDragRef.current = null;
+        setSnapLinesRef.current([]);
+        
+        if (Math.abs(gestureState.dx) < 3 && Math.abs(gestureState.dy) < 3) {
+          const touch = evt.nativeEvent;
+          const tapX = (touch.locationX / METER_TO_PX) - (boundaryWidthRef.current / 2);
+          const tapY = (touch.locationY / METER_TO_PX) - (boundaryHeightRef.current / 2);
           
-          let newSnapLines: { x1: number; y1: number; x2: number; y2: number }[] = [];
-
-          activeDragRef.current!.startPositions.forEach(start => {
-            const idx = next.findIndex(i => i.id === start.id);
-            if (idx >= 0) {
-              let newX = start.x + dx;
-              let newY = start.y + dy;
-
-              // Simplified Object Snapping logic
-              if (snapSettings.corners) {
-                // Snap to boundary indents
-                const leftIndent = -boundaryWidth / 2 + indentSpacing;
-                const rightIndent = boundaryWidth / 2 - indentSpacing;
-                const topIndent = -boundaryHeight / 2 + indentSpacing;
-                const bottomIndent = boundaryHeight / 2 - indentSpacing;
-                
-                const halfW = next[idx].width / 2;
-                const halfH = next[idx].height / 2;
-
-                if (Math.abs(newX - halfW - leftIndent) < 0.1) { newX = leftIndent + halfW; newSnapLines.push({x1: leftIndent, y1: -boundaryHeight, x2: leftIndent, y2: boundaryHeight}); }
-                if (Math.abs(newX + halfW - rightIndent) < 0.1) { newX = rightIndent - halfW; newSnapLines.push({x1: rightIndent, y1: -boundaryHeight, x2: rightIndent, y2: boundaryHeight}); }
-                if (Math.abs(newY - halfH - topIndent) < 0.1) { newY = topIndent + halfH; newSnapLines.push({x1: -boundaryWidth, y1: topIndent, x2: boundaryWidth, y2: topIndent}); }
-                if (Math.abs(newY + halfH - bottomIndent) < 0.1) { newY = bottomIndent - halfH; newSnapLines.push({x1: -boundaryWidth, y1: bottomIndent, x2: boundaryWidth, y2: bottomIndent}); }
+          let nearestId: string | null = null;
+          let nearestDist = 0.3; 
+          
+          itemsRef.current.forEach(item => {
+            const halfW = item.width / 2;
+            const halfH = item.height / 2;
+            if (tapX >= item.x - halfW && tapX <= item.x + halfW && 
+                tapY >= item.y - halfH && tapY <= item.y + halfH) {
+              const dist = Math.hypot(tapX - item.x, tapY - item.y);
+              if (dist < nearestDist) {
+                nearestDist = dist;
+                nearestId = item.id;
               }
-
-              next[idx] = { ...next[idx], x: newX, y: newY };
             }
           });
-
-          setSnapLines(newSnapLines);
-          return next;
-        });
-      },
-      onPanResponderRelease: () => {
-        activeDragRef.current = null;
-        setSnapLines([]); // clear snap lines
+          
+          if (nearestId) {
+            const currentSelected = selectedItemIdsRef.current;
+            const tappedItem = itemsRef.current.find(i => i.id === nearestId);
+            
+            if (tappedItem?.groupId) {
+              const groupItemIds = itemsRef.current
+                .filter(i => i.groupId === tappedItem.groupId)
+                .map(i => i.id);
+              
+              if (currentSelected.length > 0 && currentSelected.every(id => groupItemIds.includes(id))) {
+                setSelectedItemIdsRef.current([]);
+              } else {
+                setSelectedItemIdsRef.current(groupItemIds);
+              }
+            } else {
+              if (currentSelected.includes(nearestId)) {
+                setSelectedItemIdsRef.current(currentSelected.filter(id => id !== nearestId));
+              } else {
+                setSelectedItemIdsRef.current([...currentSelected, nearestId]);
+              }
+            }
+          } else {
+            setSelectedItemIdsRef.current([]);
+          }
+        }
       },
       onPanResponderTerminate: () => {
         activeDragRef.current = null;
-        setSnapLines([]);
+        setSnapLinesRef.current([]);
       }
     }),
-    [items, selectedItemIds, boundaryWidth, boundaryHeight, indentSpacing, letterSpacing, snapSettings, setItems]
+    []
   );
 
   return (
@@ -204,4 +283,4 @@ export function BoundaryEditor({
       </Svg>
     </View>
   );
-}
+});
