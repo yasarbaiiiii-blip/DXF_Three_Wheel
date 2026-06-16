@@ -118,19 +118,29 @@ export function TemplatesPage(props: TemplatesPageProps) {
   const handleAddToBoundary = useCallback(() => {
     if (previewLines.length === 0) return;
     const bounds = computeBoundingBox(previewLines);
+    
+    // Place new item to the RIGHT of the last placed item
+    let newX = 0;
+    let newY = 0;
+    if (placedItems.length > 0) {
+      const lastItem = placedItems[placedItems.length - 1];
+      newX = lastItem.x + lastItem.width / 2 + (bounds.width * parsedSize) / 2 + lSpacing;
+      newY = lastItem.y;
+    }
+    
     const newItem: PlacedItem = {
       id: "item-" + Date.now(),
       lines: previewLines,
-      x: 0,
-      y: 0,
+      x: newX,
+      y: newY,
       rotation: 0,
       width: bounds.width * parsedSize,
       height: bounds.height * parsedSize,
     };
     setPlacedItems(prev => [...prev, newItem]);
-    // Don't auto-select - user taps to select
-    setSelectedItemIds([]);
-  }, [previewLines, parsedSize, computeBoundingBox]);
+    // Auto-select so user can immediately scale/rotate/drag
+    setSelectedItemIds([newItem.id]);
+  }, [previewLines, parsedSize, computeBoundingBox, placedItems, lSpacing]);
 
   const handleDeleteItem = useCallback(() => {
     const deletedGroupIds = new Set(
@@ -156,18 +166,20 @@ export function TemplatesPage(props: TemplatesPageProps) {
       );
       return;
     }
-    const startX = -(totalItemsWidth / 2) - (totalGaps / 2) + indent;
-    let cursorX = startX;
-    // Vertical center within indent area
-    const usableHeight = bh - 2 * indent;
-    const centerY = indent + (usableHeight / 2);
+    
+    // Start from the LEFT edge of the indent area
+    const leftIndentEdge = -bw / 2 + indent;
+    let cursorX = leftIndentEdge;
+    
+    // Center vertically in boundary (Y=0 is boundary center)
+    const centerY = 0;
     
     setPlacedItems(prev => prev.map(item => {
-      const newX = cursorX + item.width / 2;
+      const centerX = cursorX + item.width / 2;
       cursorX += item.width + lSpacing;
-      return { ...item, x: newX, y: centerY };
+      return { ...item, x: centerX, y: centerY };
     }));
-  }, [placedItems, bw, bh, indent, lSpacing]);
+  }, [placedItems, bw, indent, lSpacing]);
 
   const handleApplyScale = useCallback(() => {
     if (selectedItemIds.length === 0) return;
