@@ -53,8 +53,8 @@ export function TemplatesPage(props: TemplatesPageProps) {
   
   const [wordGroups, setWordGroups] = useState<WordGroup[]>([]);
   const [arrangeMode, setArrangeMode] = useState<"none" | "horizontal" | "vertical">("none");
-  const [itemScale, setItemScale] = useState(1.0);
-  const [itemRotation, setItemRotation] = useState(0);
+  const [itemScaleStr, setItemScaleStr] = useState("1.0");
+  const [itemRotationStr, setItemRotationStr] = useState("0");
 
   const [category, setCategory] = useState<"shapes" | "alphabets" | "numbers" | "road_signs" | "sports_fields">("shapes");
   const [fontStyle, setFontStyle] = useState<FontStyle>("smooth");
@@ -183,7 +183,8 @@ export function TemplatesPage(props: TemplatesPageProps) {
 
   const handleApplyScale = useCallback(() => {
     if (selectedItemIds.length === 0) return;
-    const safeScale = Math.max(0.1, isNaN(itemScale) ? 1.0 : itemScale);
+    const val = parseFloat(itemScaleStr);
+    const safeScale = Math.max(0.1, isNaN(val) ? 1.0 : val);
     setPlacedItems(prev => prev.map(p => {
       if (!selectedItemIds.includes(p.id)) return p;
       return {
@@ -197,19 +198,20 @@ export function TemplatesPage(props: TemplatesPageProps) {
         })),
       };
     }));
-    setItemScale(1.0);
-  }, [selectedItemIds, itemScale]);
+    setItemScaleStr("1.0");
+  }, [selectedItemIds, itemScaleStr]);
 
   const handleApplyRotation = useCallback(() => {
     if (selectedItemIds.length === 0) return;
-    const safeRot = isNaN(itemRotation) ? 0 : (itemRotation % 360);
+    const val = parseFloat(itemRotationStr);
+    const safeRot = isNaN(val) ? 0 : (val % 360);
     setPlacedItems(prev => prev.map(p => 
       selectedItemIds.includes(p.id) 
         ? { ...p, rotation: (p.rotation + safeRot) % 360 }
         : p
     ));
-    setItemRotation(0);
-  }, [selectedItemIds, itemRotation]);
+    setItemRotationStr("0");
+  }, [selectedItemIds, itemRotationStr]);
 
   const handleGroupItems = useCallback(() => {
      if (selectedItemIds.length < 2) return;
@@ -655,8 +657,8 @@ export function TemplatesPage(props: TemplatesPageProps) {
                   <Text style={{ color: "#475569", fontSize: 12, fontWeight: "600", width: 50 }}>Scale:</Text>
                   <TextInput
                     style={{ flex: 1, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, padding: 6, color: "#0f172a" }}
-                    value={itemScale.toFixed(2)}
-                    onChangeText={v => setItemScale(v === "" ? 0 : parseFloat(v) || 1.0)}
+                    value={itemScaleStr}
+                    onChangeText={setItemScaleStr}
                     keyboardType="numeric"
                   />
                   <Pressable
@@ -670,8 +672,8 @@ export function TemplatesPage(props: TemplatesPageProps) {
                   <Text style={{ color: "#475569", fontSize: 12, fontWeight: "600", width: 50 }}>Angle:</Text>
                   <TextInput
                     style={{ flex: 1, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, padding: 6, color: "#0f172a" }}
-                    value={String(itemRotation)}
-                    onChangeText={v => setItemRotation(v === "" ? 0 : parseFloat(v) || 0)}
+                    value={itemRotationStr}
+                    onChangeText={setItemRotationStr}
                     keyboardType="numeric"
                   />
                   <Pressable

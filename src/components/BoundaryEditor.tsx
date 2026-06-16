@@ -153,11 +153,13 @@ export const BoundaryEditor = memo(function BoundaryEditor({
           const tapY = -(touch.locationY * scaleY - (bh * METER_TO_PX / 2)) / METER_TO_PX;
           
           let nearestId: string | null = null;
-          let nearestDist = 0.3; 
+          let nearestDist = Infinity; 
           
           itemsRef.current.forEach(item => {
-            const halfW = item.width / 2;
-            const halfH = item.height / 2;
+            const touchPadding = 0.2; // 20cm padding for easier tap
+            const halfW = item.width / 2 + touchPadding;
+            const halfH = item.height / 2 + touchPadding;
+            
             if (tapX >= item.x - halfW && tapX <= item.x + halfW && 
                 tapY >= item.y - halfH && tapY <= item.y + halfH) {
               const dist = Math.hypot(tapX - item.x, tapY - item.y);
