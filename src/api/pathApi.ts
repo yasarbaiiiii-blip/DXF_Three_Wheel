@@ -65,6 +65,7 @@ export type MissionSummary = {
 
 export type PathPlanResponse = {
   source?: string;
+  mission_id?: string;
   num_waypoints?: number;
   num_segments?: number;
   segments?: unknown[];
@@ -207,6 +208,19 @@ export function getPathSegments(apiBaseUrl: string, pathName: string): Promise<R
     headers: { Accept: "application/json" },
   });
 }
+
+export type StagedMissionResponse = {
+  mission_id: string;
+  created_at?: number | null;
+  anchor?: Record<string, unknown> | null;
+  num_waypoints: number;
+  waypoints: number[][];
+  spray_flags: boolean[];
+  segment_runs: Record<string, unknown>[];
+  alignment_metadata?: Record<string, unknown> | null;
+  metadata?: Record<string, unknown> | null;
+  [key: string]: unknown;
+};
 
 export function planAndStage(apiBaseUrl: string, pathName: string, payload: PlanAndStageRequest): Promise<Response> {
   return postJson(apiBaseUrl, `/api/path/${encodeURIComponent(pathName)}/plan-and-stage`, payload);

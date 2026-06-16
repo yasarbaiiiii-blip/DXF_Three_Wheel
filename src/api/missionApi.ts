@@ -25,6 +25,21 @@ export type MissionStatus = {
   [key: string]: unknown;
 };
 
+export type LoadedPathResponse = {
+  loaded: boolean;
+  name?: string | null;
+  mission_id?: string | null;
+  state: string;
+  num_waypoints: number;
+  num_mark: number;
+  num_transit: number;
+  has_spray_flags: boolean;
+  sample_coords: number[][];
+  sample_truncated: boolean;
+  anchor?: Record<string, unknown> | null;
+  [key: string]: unknown;
+};
+
 function apiUrl(apiBaseUrl: string, path: string) {
   return `${apiBaseUrl.replace(/\/$/, "")}${path}`;
 }
