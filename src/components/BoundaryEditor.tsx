@@ -75,7 +75,12 @@ export const BoundaryEditor = memo(function BoundaryEditor({
   const svgSizeRef = useRef({ width: 0, height: 0 });
   useEffect(() => { svgSizeRef.current = svgSize; }, [svgSize]);
 
-  const activeDragRef = useRef<{ ids: string[]; startPositions: { id: string; x: number; y: number; width: number; height: number }[] } | null>(null);
+  type StartPosition = { id: string; x: number; y: number; width: number; height: number; rotation: number; lines: PlanLine[] };
+  const activeDragRef = useRef<{ 
+    ids: string[]; 
+    startPositions: StartPosition[];
+    pinchState?: { initialDist: number; initialAngle: number; startPos: StartPosition[] };
+  } | null>(null);
 
   const panResponder = useMemo(() =>
     PanResponder.create({
@@ -84,7 +89,7 @@ export const BoundaryEditor = memo(function BoundaryEditor({
         if (selectedItemIdsRef.current.length > 0) {
           const starts = selectedItemIdsRef.current.map(id => {
             const it = itemsRef.current.find(i => i.id === id);
-            return { id, x: it?.x || 0, y: it?.y || 0, width: it?.width || 0, height: it?.height || 0 };
+            return { id, x: it?.x || 0, y: it?.y || 0, width: it?.width || 0, height: it?.height || 0, rotation: it?.rotation || 0, lines: it?.lines || [] };
           });
           activeDragRef.current = { ids: selectedItemIdsRef.current, startPositions: starts };
         }
@@ -93,6 +98,52 @@ export const BoundaryEditor = memo(function BoundaryEditor({
         const dragData = activeDragRef.current;
         if (!dragData) return;
         
+        const touches = evt.nativeEvent.touches;
+        if (touches.length >= 2) {
+           const t1 = touches[0];
+           const t2 = touches[1];
+           const currentDist = Math.hypot(t2.pageX - t1.pageX, t2.pageY - t1.pageY);
+           const currentAngle = Math.atan2(t2.pageY - t1.pageY, t2.pageX - t1.pageX) * (180 / Math.PI);
+           
+           if (!dragData.pinchState) {
+               const starts = dragData.ids.map(id => {
+                 const it = itemsRef.current.find(i => i.id === id);
+                 return { id, x: it?.x || 0, y: it?.y || 0, width: it?.width || 0, height: it?.height || 0, rotation: it?.rotation || 0, lines: it?.lines || [] };
+               });
+               dragData.pinchState = { initialDist: currentDist, initialAngle: currentAngle, startPos: starts };
+           }
+           
+           const initialDist = dragData.pinchState.initialDist;
+           const initialAngle = dragData.pinchState.initialAngle;
+           
+           const scaleMultiplier = initialDist === 0 ? 1 : currentDist / initialDist;
+           const angleDelta = currentAngle - initialAngle;
+           const safeScale = Math.max(0.1, scaleMultiplier);
+           
+           setItemsRef.current(prev => prev.map(item => {
+              const startP = dragData.pinchState?.startPos.find(p => p.id === item.id);
+              if (startP) {
+                 return {
+                    ...item,
+                    rotation: (startP.rotation + angleDelta) % 360,
+                    width: startP.width * safeScale,
+                    height: startP.height * safeScale,
+                    lines: startP.lines.map(l => ({
+                        ...l,
+                        from: { ...l.from, x: l.from.x * safeScale, y: l.from.y * safeScale },
+                        to: { ...l.to, x: l.to.x * safeScale, y: l.to.y * safeScale },
+                    }))
+                 };
+              }
+              return item;
+           }));
+           return;
+        } else {
+           if (dragData.pinchState) {
+               dragData.pinchState = undefined;
+           }
+        }
+
         const dx = gestureState.dx / METER_TO_PX;
         const dy = -gestureState.dy / METER_TO_PX; // NEGATED for world Y = North up
 

@@ -53,8 +53,6 @@ export function TemplatesPage(props: TemplatesPageProps) {
   
   const [wordGroups, setWordGroups] = useState<WordGroup[]>([]);
   const [arrangeMode, setArrangeMode] = useState<"none" | "horizontal" | "vertical">("none");
-  const [itemScaleStr, setItemScaleStr] = useState("1.0");
-  const [itemRotationStr, setItemRotationStr] = useState("0");
 
   const [category, setCategory] = useState<"shapes" | "alphabets" | "numbers" | "road_signs" | "sports_fields">("shapes");
   const [fontStyle, setFontStyle] = useState<FontStyle>("smooth");
@@ -119,13 +117,25 @@ export function TemplatesPage(props: TemplatesPageProps) {
     if (previewLines.length === 0) return;
     const bounds = computeBoundingBox(previewLines);
     
-    // Place new item to the RIGHT of the last placed item
+    const newWidth = bounds.width * parsedSize;
+    const newHeight = bounds.height * parsedSize;
+    
     let newX = 0;
     let newY = 0;
-    if (placedItems.length > 0) {
+    
+    if (placedItems.length === 0) {
+      newX = -bw / 2 + indent + newWidth / 2;
+      newY = 0;
+    } else {
       const lastItem = placedItems[placedItems.length - 1];
-      newX = lastItem.x + lastItem.width / 2 + (bounds.width * parsedSize) / 2 + lSpacing;
+      newX = lastItem.x + lastItem.width / 2 + newWidth / 2 + lSpacing;
       newY = lastItem.y;
+      
+      const rightEdge = bw / 2 - indent;
+      if (newX + newWidth / 2 > rightEdge) {
+        newX = -bw / 2 + indent + newWidth / 2;
+        newY = lastItem.y - Math.max(lastItem.height, newHeight) - 0.2;
+      }
     }
     
     const newItem: PlacedItem = {
@@ -134,13 +144,13 @@ export function TemplatesPage(props: TemplatesPageProps) {
       x: newX,
       y: newY,
       rotation: 0,
-      width: bounds.width * parsedSize,
-      height: bounds.height * parsedSize,
+      width: newWidth,
+      height: newHeight,
     };
     setPlacedItems(prev => [...prev, newItem]);
     // Auto-select so user can immediately scale/rotate/drag
     setSelectedItemIds([newItem.id]);
-  }, [previewLines, parsedSize, computeBoundingBox, placedItems, lSpacing]);
+  }, [previewLines, parsedSize, computeBoundingBox, placedItems, lSpacing, bw, indent]);
 
   const handleDeleteItem = useCallback(() => {
     const deletedGroupIds = new Set(
@@ -181,37 +191,7 @@ export function TemplatesPage(props: TemplatesPageProps) {
     }));
   }, [placedItems, bw, indent, lSpacing]);
 
-  const handleApplyScale = useCallback(() => {
-    if (selectedItemIds.length === 0) return;
-    const val = parseFloat(itemScaleStr);
-    const safeScale = Math.max(0.1, isNaN(val) ? 1.0 : val);
-    setPlacedItems(prev => prev.map(p => {
-      if (!selectedItemIds.includes(p.id)) return p;
-      return {
-        ...p,
-        width: p.width * safeScale,
-        height: p.height * safeScale,
-        lines: p.lines.map(l => ({
-          ...l,
-          from: { ...l.from, x: l.from.x * safeScale, y: l.from.y * safeScale },
-          to: { ...l.to, x: l.to.x * safeScale, y: l.to.y * safeScale },
-        })),
-      };
-    }));
-    setItemScaleStr("1.0");
-  }, [selectedItemIds, itemScaleStr]);
 
-  const handleApplyRotation = useCallback(() => {
-    if (selectedItemIds.length === 0) return;
-    const val = parseFloat(itemRotationStr);
-    const safeRot = isNaN(val) ? 0 : (val % 360);
-    setPlacedItems(prev => prev.map(p => 
-      selectedItemIds.includes(p.id) 
-        ? { ...p, rotation: (p.rotation + safeRot) % 360 }
-        : p
-    ));
-    setItemRotationStr("0");
-  }, [selectedItemIds, itemRotationStr]);
 
   const handleGroupItems = useCallback(() => {
      if (selectedItemIds.length < 2) return;
@@ -648,43 +628,7 @@ export function TemplatesPage(props: TemplatesPageProps) {
               </View>
             </View>
 
-            {boundaryMode && selectedItemIds.length > 0 && (
-              <View style={{ borderRadius: 14, padding: 14, backgroundColor: "#ffffff", borderWidth: 1, borderColor: "#d8e1eb", gap: 8 }}>
-                <Text style={{ color: "#64748b", fontSize: 11, fontWeight: "800", letterSpacing: 1, textTransform: "uppercase" }}>
-                  Transform Selected
-                </Text>
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                  <Text style={{ color: "#475569", fontSize: 12, fontWeight: "600", width: 50 }}>Scale:</Text>
-                  <TextInput
-                    style={{ flex: 1, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, padding: 6, color: "#0f172a" }}
-                    value={itemScaleStr}
-                    onChangeText={setItemScaleStr}
-                    keyboardType="numeric"
-                  />
-                  <Pressable
-                    onPress={handleApplyScale}
-                    style={{ paddingHorizontal: 14, paddingVertical: 6, borderRadius: 8, backgroundColor: "#0b6b68" }}
-                  >
-                    <Text style={{ color: "#fff", fontSize: 12, fontWeight: "700" }}>Scale</Text>
-                  </Pressable>
-                </View>
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                  <Text style={{ color: "#475569", fontSize: 12, fontWeight: "600", width: 50 }}>Angle:</Text>
-                  <TextInput
-                    style={{ flex: 1, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, padding: 6, color: "#0f172a" }}
-                    value={itemRotationStr}
-                    onChangeText={setItemRotationStr}
-                    keyboardType="numeric"
-                  />
-                  <Pressable
-                    onPress={handleApplyRotation}
-                    style={{ paddingHorizontal: 14, paddingVertical: 6, borderRadius: 8, backgroundColor: "#6366f1" }}
-                  >
-                    <Text style={{ color: "#fff", fontSize: 12, fontWeight: "700" }}>Rotate</Text>
-                  </Pressable>
-                </View>
-              </View>
-            )}
+
 
             {boundaryMode && (
               <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
