@@ -23,7 +23,7 @@ import {
 import Svg, { Circle, G, Line, Path, Polygon, Text as SvgText } from "react-native-svg";
 
 import type { Palette } from "../theme/colors";
-import type { ImportedPlan, MarkingStyle, PlanLine } from "../types/plan";
+import type { ImportedPlan, MarkingStyle, PlanLine, PlanPoint } from "../types/plan";
 
 interface GeometryViewportProps {
   palette: Palette;
@@ -43,6 +43,16 @@ interface GeometryViewportProps {
 }
 
 const PATH_SEGMENT_CHUNK_SIZE = 650;
+const ARROWHEAD_LENGTH_PX = 14;
+const ARROWHEAD_HALF_WIDTH_PX = 5;
+const RENDERED_PLAN_LAYERS = ["boundary", "marking", "center"] as const;
+
+type RenderedPlanLayer = (typeof RENDERED_PLAN_LAYERS)[number];
+
+interface SvgPoint {
+  x: number;
+  y: number;
+}
 
 function isRenderableLine(line: PlanLine | null | undefined): line is PlanLine {
   return Boolean(
@@ -78,6 +88,70 @@ function buildSvgPathChunks(lines: PlanLine[]) {
   }
 
   return chunks;
+}
+
+function buildArrowheadPoints(from: SvgPoint, to: SvgPoint): string | null {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const length = Math.sqrt(dx * dx + dy * dy);
+
+  if (length < 8) return null;
+
+  const mx = (from.x + to.x) / 2;
+  const my = (from.y + to.y) / 2;
+
+  const ux = dx / length;
+  const uy = dy / length;
+
+  const px = -uy;
+  const py = ux;
+
+  const tipX = mx + ux * ARROWHEAD_LENGTH_PX * 0.45;
+  const tipY = my + uy * ARROWHEAD_LENGTH_PX * 0.45;
+
+  const baseCx = mx - ux * ARROWHEAD_LENGTH_PX * 0.55;
+  const baseCy = my - uy * ARROWHEAD_LENGTH_PX * 0.55;
+
+  const b1x = baseCx + px * ARROWHEAD_HALF_WIDTH_PX;
+  const b1y = baseCy + py * ARROWHEAD_HALF_WIDTH_PX;
+  const b2x = baseCx - px * ARROWHEAD_HALF_WIDTH_PX;
+  const b2y = baseCy - py * ARROWHEAD_HALF_WIDTH_PX;
+
+  return `${tipX},${tipY} ${b1x},${b1y} ${b2x},${b2y}`;
+}
+
+function rotateSvgPoint(point: SvgPoint, rotation: number, surfaceSize: { width: number; height: number }): SvgPoint {
+  const centerX = surfaceSize.width / 2;
+  const centerY = surfaceSize.height / 2;
+  const radians = (rotation * Math.PI) / 180;
+  const dx = point.x - centerX;
+  const dy = point.y - centerY;
+
+  return {
+    x: centerX + dx * Math.cos(radians) - dy * Math.sin(radians),
+    y: centerY + dx * Math.sin(radians) + dy * Math.cos(radians),
+  };
+}
+
+function mapPlanPointToSvg(
+  point: PlanPoint,
+  zoom: number,
+  rotation: number,
+  offset: { x: number; y: number },
+  surfaceSize: { width: number; height: number }
+): SvgPoint {
+  return rotateSvgPoint(
+    {
+      x: point.y * zoom + offset.x,
+      y: -point.x * zoom + offset.y,
+    },
+    rotation,
+    surfaceSize
+  );
+}
+
+function isRenderedPlanLayer(layer: PlanLine["layer"]): layer is RenderedPlanLayer {
+  return RENDERED_PLAN_LAYERS.includes(layer as RenderedPlanLayer);
 }
 
 export function GeometryViewport({
@@ -184,6 +258,25 @@ export function GeometryViewport({
       center: buildSvgPathChunks(safeLines.filter((line) => line.layer === "center" && line.id !== selectedLineId)),
     }),
     [safeLines, selectedLineId]
+  );
+
+  const arrowheadsByLayer = useMemo(
+    () => {
+      const result: Record<RenderedPlanLayer, string[]> = { boundary: [], marking: [], center: [] };
+
+      for (const line of safeLines) {
+        if (line.id === selectedLineId) continue;
+        if (!isRenderedPlanLayer(line.layer)) continue;
+        const pts = buildArrowheadPoints(
+          mapPlanPointToSvg(line.from, zoom, rotation, offset, surfaceSize),
+          mapPlanPointToSvg(line.to, zoom, rotation, offset, surfaceSize)
+        );
+        if (pts) result[line.layer].push(pts);
+      }
+
+      return result;
+    },
+    [offset, rotation, safeLines, selectedLineId, surfaceSize, zoom]
   );
 
   const planTransform = useMemo(
@@ -404,7 +497,7 @@ export function GeometryViewport({
                   preserveAspectRatio="xMidYMid meet"
                 >
                   <G transform={planTransform}>
-                    {(["boundary", "marking", "center"] as const).flatMap((layer) =>
+                    {RENDERED_PLAN_LAYERS.flatMap((layer) =>
                       pathChunksByLayer[layer].map((d, index) => (
                         <Path
                           key={`${layer}-${index}`}
@@ -450,6 +543,31 @@ export function GeometryViewport({
                       </>
                     ) : null}
                   </G>
+                  {RENDERED_PLAN_LAYERS.flatMap((layer) =>
+                    arrowheadsByLayer[layer].map((pts, index) => (
+                      <Polygon
+                        key={`arrow-${layer}-${index}`}
+                        points={pts}
+                        fill={
+                          layer === "center"
+                            ? palette.amber
+                            : layer === "boundary"
+                              ? palette.foreground
+                              : palette.mutedForeground
+                        }
+                        stroke="none"
+                      />
+                    ))
+                  )}
+                  {selectedLine ? (() => {
+                    const pts = buildArrowheadPoints(
+                      mapPlanPointToSvg(selectedLine.from, zoom, rotation, offset, surfaceSize),
+                      mapPlanPointToSvg(selectedLine.to, zoom, rotation, offset, surfaceSize)
+                    );
+                    return pts ? (
+                      <Polygon points={pts} fill={palette.emerald} stroke="none" />
+                    ) : null;
+                  })() : null}
                 </Svg>
               </View>
 

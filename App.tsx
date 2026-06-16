@@ -81,6 +81,11 @@ type Page =
 type LayerVisibility = { boundary: boolean; marking: boolean; center: boolean; transit: boolean; extension: boolean; };
 const MAX_PREVIEW_CORNERS = 450;
 const PATH_SEGMENT_CHUNK_SIZE = 650;
+const PREVIEW_ARROWHEAD_LENGTH_PX = 14;
+const PREVIEW_ARROWHEAD_HALF_WIDTH_PX = 5;
+const PREVIEW_RENDERED_LAYERS = ["boundary", "center", "transit", "extension", "marking_true", "marking_false"] as const;
+
+type PreviewRenderedLayer = (typeof PREVIEW_RENDERED_LAYERS)[number];
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
@@ -7536,6 +7541,101 @@ function rotatePoint(px: number, py: number, cx: number, cy: number, angleDegree
   };
 }
 
+function buildPreviewArrowheadPoints(from: LocalPoint, to: LocalPoint): string | null {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const length = Math.hypot(dx, dy);
+
+  if (length < 8) return null;
+
+  const midX = (from.x + to.x) / 2;
+  const midY = (from.y + to.y) / 2;
+  const ux = dx / length;
+  const uy = dy / length;
+  const px = -uy;
+  const py = ux;
+
+  const tipX = midX + ux * PREVIEW_ARROWHEAD_LENGTH_PX * 0.45;
+  const tipY = midY + uy * PREVIEW_ARROWHEAD_LENGTH_PX * 0.45;
+  const baseX = midX - ux * PREVIEW_ARROWHEAD_LENGTH_PX * 0.55;
+  const baseY = midY - uy * PREVIEW_ARROWHEAD_LENGTH_PX * 0.55;
+  const base1X = baseX + px * PREVIEW_ARROWHEAD_HALF_WIDTH_PX;
+  const base1Y = baseY + py * PREVIEW_ARROWHEAD_HALF_WIDTH_PX;
+  const base2X = baseX - px * PREVIEW_ARROWHEAD_HALF_WIDTH_PX;
+  const base2Y = baseY - py * PREVIEW_ARROWHEAD_HALF_WIDTH_PX;
+
+  return `${tipX},${tipY} ${base1X},${base1Y} ${base2X},${base2Y}`;
+}
+
+function mapPreviewPointToScreen(
+  point: { x: number; y: number },
+  viewport: PreviewViewport,
+  rotation: number,
+  layoutSize: { width: number; height: number }
+) {
+  const screenPoint = toScreenPoint(point, viewport);
+
+  if (rotation === 0 || layoutSize.width <= 0 || layoutSize.height <= 0) {
+    return screenPoint;
+  }
+
+  return rotatePoint(
+    screenPoint.x,
+    screenPoint.y,
+    layoutSize.width / 2,
+    layoutSize.height / 2,
+    rotation
+  );
+}
+
+function getPreviewArrowSegment(
+  line: PlanLine,
+  viewport: PreviewViewport,
+  rotation: number,
+  layoutSize: { width: number; height: number }
+) {
+  const previewPoints = line.entity?.preview_points;
+
+  if (previewPoints && previewPoints.length > 1) {
+    const segments = previewPoints.slice(0, -1).map((point, index) => ({
+      from: { x: point.north, y: point.east },
+      to: { x: previewPoints[index + 1].north, y: previewPoints[index + 1].east },
+    }));
+    const middle = Math.floor(segments.length / 2);
+    const ordered = [
+      ...segments.slice(middle),
+      ...segments.slice(0, middle).reverse(),
+    ];
+
+    for (const segment of ordered) {
+      const from = mapPreviewPointToScreen(segment.from, viewport, rotation, layoutSize);
+      const to = mapPreviewPointToScreen(segment.to, viewport, rotation, layoutSize);
+      if (Math.hypot(to.x - from.x, to.y - from.y) >= 8) {
+        return { from, to };
+      }
+    }
+
+    return null;
+  }
+
+  return {
+    from: mapPreviewPointToScreen(line.from, viewport, rotation, layoutSize),
+    to: mapPreviewPointToScreen(line.to, viewport, rotation, layoutSize),
+  };
+}
+
+function getPreviewRenderedLayer(line: PlanLine): PreviewRenderedLayer | null {
+  if (line.layer === "boundary" || line.layer === "center" || line.layer === "transit" || line.layer === "extension") {
+    return line.layer;
+  }
+
+  if (line.layer === "marking") {
+    return line.entity?.is_mark === false ? "marking_false" : "marking_true";
+  }
+
+  return null;
+}
+
 function distancePointToSegment(
   px: number,
   py: number,
@@ -7755,7 +7855,6 @@ function PlanPreview({
     }),
     [filtered, selectedLineId]
   );
-
   // Rover world-space position: pos_e = East, pos_n = North
   const hasRover = roverPosN != null && roverPosE != null;
   const roverN = roverPosN ?? 0;   // North → SVG Y (inverted)
@@ -7775,6 +7874,33 @@ function PlanPreview({
   const [layoutSize, setLayoutSize] = useState({ width: 0, height: 0 });
   const [viewport, setViewport] = useState<PreviewViewport>({ panX: 0, panY: 0, zoom: 1 });
   const [rotation, setRotation] = useState(0);
+  const arrowheadsByLayer = useMemo(() => {
+    const result: Record<PreviewRenderedLayer, string[]> = {
+      boundary: [],
+      center: [],
+      transit: [],
+      extension: [],
+      marking_true: [],
+      marking_false: [],
+    };
+
+    for (const line of filtered) {
+      if (line.id === selectedLineId) continue;
+
+      const layer = getPreviewRenderedLayer(line);
+      if (!layer) continue;
+
+      const segment = getPreviewArrowSegment(line, viewport, rotation, layoutSize);
+      if (!segment) continue;
+
+      const points = buildPreviewArrowheadPoints(segment.from, segment.to);
+      if (points) {
+        result[layer].push(points);
+      }
+    }
+
+    return result;
+  }, [filtered, layoutSize, rotation, selectedLineId, viewport]);
   // Track whether user has manually panned so auto-pan doesn't fight them
   const userPannedRef = React.useRef(false);
 
@@ -8115,7 +8241,7 @@ function PlanPreview({
 
           {/* ── Plan lines ── */}
           <G transform={`translate(${layoutSize.width / 2}, ${layoutSize.height / 2}) rotate(${rotation}) translate(${-layoutSize.width / 2}, ${-layoutSize.height / 2}) translate(${viewport.panX}, ${viewport.panY}) scale(${viewport.zoom}, ${-viewport.zoom})`}>
-            {(["boundary", "center", "transit", "extension", "marking_true", "marking_false"] as const).flatMap((layer) =>
+            {PREVIEW_RENDERED_LAYERS.flatMap((layer) =>
               pathChunksByLayer[layer].map((d, index) => (
                 <Path
                   key={`${layer}-${index}`}
@@ -8173,6 +8299,36 @@ function PlanPreview({
               );
             })}
           </G>
+
+          {/* ── Direction arrows ── */}
+          {PREVIEW_RENDERED_LAYERS.flatMap((layer) =>
+            arrowheadsByLayer[layer].map((points, index) => (
+              <Polygon
+                key={`arrow-${layer}-${index}`}
+                points={points}
+                fill={strokeForLayer(layer)}
+                stroke="#ffffff"
+                strokeWidth={0.8}
+                strokeLinejoin="round"
+                opacity={0.98}
+              />
+            ))
+          )}
+          {selectedLine ? (() => {
+            const segment = getPreviewArrowSegment(selectedLine, viewport, rotation, layoutSize);
+            if (!segment) return null;
+
+            const points = buildPreviewArrowheadPoints(segment.from, segment.to);
+            return points ? (
+              <Polygon
+                points={points}
+                fill="#ef4444"
+                stroke="#ffffff"
+                strokeWidth={0.9}
+                strokeLinejoin="round"
+              />
+            ) : null;
+          })() : null}
 
           {/* ── Rover icon (top-down car shape) ── */}
           {hasRover && layoutSize.width > 0 && (() => {
