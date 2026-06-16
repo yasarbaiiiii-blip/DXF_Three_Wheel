@@ -292,7 +292,15 @@ function isPrimaryEditableLine(line: PlanLine) {
 }
 
 function getPlanStartPoint(lines: PlanLine[]) {
-  const primaryLine = lines.find(isPrimaryEditableLine) ?? lines[0];
+  // Prefer the first executed non-spray leg when the backend plan overlay is
+  // present. With path extensions enabled, runtime-transit-0 is the PRE run-up
+  // before entity A, so auto-origin must anchor there instead of at A itself.
+  const runtimeStartLine = lines.find((line) => line.id === "runtime-transit-0");
+  const fallbackPreExtensionLine = lines.find(
+    (line) => line.layer === "extension" && line.id.startsWith("ext-pre-")
+  );
+  const primaryLine =
+    runtimeStartLine ?? fallbackPreExtensionLine ?? lines.find(isPrimaryEditableLine) ?? lines[0];
   if (!primaryLine) return null;
 
   const north = coerceFiniteNumber(primaryLine.from?.x);
