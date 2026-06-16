@@ -187,6 +187,97 @@ function formatExtensionRoleLabel(role: NormalizedExtensionRole) {
   return "none";
 }
 
+function formatWaypointPair(waypoints: unknown): string {
+  if (!Array.isArray(waypoints) || waypoints.length === 0) return "n/a";
+  const formatPoint = (point: unknown) => {
+    if (!Array.isArray(point) || point.length < 2) return "n/a";
+    return `[${formatFinite(point[0], 2)}, ${formatFinite(point[1], 2)}]`;
+  };
+  return `${formatPoint(waypoints[0])} → ${formatPoint(waypoints[waypoints.length - 1])}`;
+}
+
+function parsePlanAndStageResponse(data: unknown): { plan: pathApi.PathPlanResponse; missionId: string } | null {
+  if (!data || typeof data !== "object") return null;
+  const plan = data as pathApi.PathPlanResponse;
+  const missionId = plan.mission_summary?.mission_id ?? plan.mission_id;
+  if (typeof missionId !== "string" || missionId.trim() === "") return null;
+  return { plan, missionId: missionId.trim() };
+}
+
+function verifyLoadedPathInspection(
+  loaded: missionApi.LoadedPathResponse,
+  expectedMissionId: string
+): boolean {
+  if (!loaded.loaded || loaded.num_waypoints <= 0) return false;
+  const expected = expectedMissionId.trim();
+  if (!expected) return false;
+
+  const reportedMissionId = typeof loaded.mission_id === "string" ? loaded.mission_id.trim() : "";
+  const reportedName = typeof loaded.name === "string" ? loaded.name.trim() : "";
+  if (!reportedMissionId && !reportedName) return false;
+
+  return reportedMissionId === expected || reportedName === expected;
+}
+
+function formatSprayFlagSample(loaded: missionApi.LoadedPathResponse): string {
+  if (!loaded.has_spray_flags) return "n/a";
+  return `mark ${loaded.num_mark} / transit ${loaded.num_transit}`;
+}
+
+function getLoadedMissionId(loaded: missionApi.LoadedPathResponse | null): string | null {
+  if (!loaded?.loaded) return null;
+  if (typeof loaded.mission_id === "string" && loaded.mission_id.trim() !== "") {
+    return loaded.mission_id.trim();
+  }
+  if (typeof loaded.name === "string" && loaded.name.trim() !== "") {
+    return loaded.name.trim();
+  }
+  return null;
+}
+
+type StagedStartGate = {
+  isStagedWorkflow: boolean;
+  allowed: boolean;
+  message: string | null;
+};
+
+function evaluateStagedStartGate(
+  stagedWorkflow: StagedWorkflowState,
+  loadedPathInspection: missionApi.LoadedPathResponse | null
+): StagedStartGate {
+  const isStagedWorkflow = stagedWorkflow.staged === "verified";
+  if (!isStagedWorkflow) {
+    return { isStagedWorkflow: false, allowed: true, message: null };
+  }
+
+  if (stagedWorkflow.loaded !== "verified") {
+    return {
+      isStagedWorkflow: true,
+      allowed: false,
+      message: "Load and verify the staged mission on the controller before starting.",
+    };
+  }
+
+  const missionId = getLoadedMissionId(loadedPathInspection);
+  if (!missionId) {
+    return {
+      isStagedWorkflow: true,
+      allowed: false,
+      message: "Staged mission ID is missing from loaded-path verification.",
+    };
+  }
+
+  if (!loadedPathInspection?.loaded || !verifyLoadedPathInspection(loadedPathInspection, missionId)) {
+    return {
+      isStagedWorkflow: true,
+      allowed: false,
+      message: "Loaded controller path does not match the staged mission.",
+    };
+  }
+
+  return { isStagedWorkflow: true, allowed: true, message: null };
+}
+
 function isPrimaryEditableLine(line: PlanLine) {
   if (line.layer === "transit" || line.layer === "extension") {
     return false;
@@ -537,6 +628,13 @@ export default function App() {
   const [backendPaths, setBackendPaths] = useState<any[]>([]);
   const [selectedPathName, setSelectedPathName] = useState<string | null>(null);
   const [stagedWorkflow, setStagedWorkflow] = useState<StagedWorkflowState>(INITIAL_STAGED_WORKFLOW_STATE);
+  const [alignmentResult, setAlignmentResult] = useState<AlignmentResultState | null>(null);
+  const [verifiedAlignmentRequest, setVerifiedAlignmentRequest] = useState<pathApi.AlignPathRequest | null>(null);
+  const [segmentVerification, setSegmentVerification] = useState<pathApi.PathSegmentsResponse | null>(null);
+  const [stagedPlanResult, setStagedPlanResult] = useState<StagedPlanResultState | null>(null);
+  const [stagedMissionInspection, setStagedMissionInspection] = useState<pathApi.StagedMissionResponse | null>(null);
+  const [stagedMissionId, setStagedMissionId] = useState<string | null>(null);
+  const [loadedPathInspection, setLoadedPathInspection] = useState<missionApi.LoadedPathResponse | null>(null);
   const [isPaused, setIsPaused] = useState(false);
 
   const [prevMissionState, setPrevMissionState] = useState<string | null>(null);
@@ -712,6 +810,33 @@ export default function App() {
     setStagedWorkflow((prev) => (prev[step] === status ? prev : { ...prev, [step]: status }));
   }, []);
 
+  const invalidateStagedWorkflowFrom = useCallback((step: "alignment" | "spray" | "staged" | "loaded") => {
+    setStagedWorkflow((prev) => {
+      const next = { ...prev };
+      if (step === "alignment") next.alignment = "pending";
+      if (step === "alignment" || step === "spray") next.spray = "pending";
+      if (step === "alignment" || step === "spray" || step === "staged") next.staged = "pending";
+      next.loaded = "pending";
+      next.started = "pending";
+      return next;
+    });
+
+    if (step === "alignment") {
+      setAlignmentResult(null);
+      setVerifiedAlignmentRequest(null);
+    }
+    if (step === "alignment" || step === "spray") {
+      setSegmentVerification(null);
+    }
+    if (step === "alignment" || step === "spray" || step === "staged") {
+      setStagedPlanResult(null);
+      setStagedMissionInspection(null);
+      setStagedMissionId(null);
+    }
+    setLoadedPathInspection(null);
+    setMissionLoaded(false);
+  }, []);
+
   useEffect(() => {
     if (previousSelectedPathRef.current === selectedPathName) return;
     previousSelectedPathRef.current = selectedPathName;
@@ -723,6 +848,13 @@ export default function App() {
       loaded: "pending",
       started: "pending",
     }));
+    setAlignmentResult(null);
+    setVerifiedAlignmentRequest(null);
+    setSegmentVerification(null);
+    setStagedPlanResult(null);
+    setStagedMissionInspection(null);
+    setStagedMissionId(null);
+    setLoadedPathInspection(null);
   }, [selectedPathName]);
 
   useEffect(() => {
@@ -1119,6 +1251,7 @@ export default function App() {
 
   const previewSelectedPath = async (pathName: string) => {
     if (!apiBaseUrl) return;
+    setLoadedPathInspection(null);
     setMissionActionBusy(true);
     try {
       console.log(`[API GET] /api/path/${pathName}/preview - Fetching detailed preview...`);
@@ -1240,8 +1373,14 @@ export default function App() {
               console.log("[API POST] /api/path/plan - overlay failed, using legacy preview:", planErr);
             }
 
+            // Extension run-ups (layer:"extension") always belong in the list,
+            // even when the runtime /plan overlay is applied: that overlay draws
+            // every non-spray run as a generic layer:"transit" line, so without
+            // this the "extensions" filter is always empty online. fallbackExtLines
+            // carries the exact pre/aft geometry from the /entities preview.
+            generatedLines.push(...fallbackExtLines);
+
             if (!runtimePathApplied) {
-              generatedLines.push(...fallbackExtLines);
               if (body.transit_preview && Array.isArray(body.transit_preview)) {
                 body.transit_preview.forEach((transit: any, i: number) => {
                   const pts = transit.points || [];
@@ -1377,6 +1516,7 @@ export default function App() {
         const errMsg = await parseFetchError(res, "Parse failed");
         throw new Error(errMsg);
       }
+      invalidateStagedWorkflowFrom("alignment");
       setWorkflowStep("upload", "verified");
       
       // Choice A: Refresh preview immediately!
@@ -1541,31 +1681,81 @@ export default function App() {
     return `${fallbackPrefix} (status ${res.status})`;
   }
 
-  async function loadMissionOnBackend(stagedMissionId?: string) {
-    if (!apiBaseUrl || (!importedPlan && !stagedMissionId) || lines.length === 0) {
+  async function loadMissionOnBackend(requestedStagedMissionId?: string) {
+    const requestedMissionId = requestedStagedMissionId?.trim() || stagedMissionId?.trim() || "";
+    const isStagedLoad = requestedMissionId !== "";
+
+    if (stagedWorkflow.staged === "verified" && !requestedMissionId) {
+      setLoadedPathInspection(null);
+      setWorkflowStep("loaded", "failed");
+      Alert.alert("Load blocked", "Staged mission is verified but the mission ID is missing. Re-run Plan & Stage before loading.");
+      showToast("Load blocked", "Missing staged mission ID.", "error");
       return;
     }
 
-    logAction("LOAD_REQUEST", { apiBaseUrl, stagedMissionId, fileName: importedPlan?.fileName });
+    if (isStagedLoad) {
+      if (stagedWorkflow.staged !== "verified") {
+        setLoadedPathInspection(null);
+        setWorkflowStep("loaded", "failed");
+        Alert.alert("Prerequisites Required", "Plan and stage the mission before loading to the controller.");
+        return;
+      }
+      if (!apiBaseUrl) {
+        setLoadedPathInspection(null);
+        setWorkflowStep("loaded", "failed");
+        return;
+      }
+    } else if (!apiBaseUrl || !importedPlan || lines.length === 0) {
+      return;
+    }
+
+    logAction("LOAD_REQUEST", { apiBaseUrl, stagedMissionId: requestedMissionId || null, fileName: importedPlan?.fileName });
     setMissionActionBusy(true);
     try {
       showToast("Load", `Loading path...`, "info");
-      
-      let res;
-      if (stagedMissionId) {
-        res = await missionApi.loadMissionToController(apiBaseUrl, { mission_id: stagedMissionId });
-      } else {
-        res = await missionApi.loadMission(apiBaseUrl, {
-          path_name: importedPlan!.fileName,
-          mission_file: "",
-        });
+
+      if (isStagedLoad) {
+        const missionId = requestedMissionId;
+        const loadRes = await missionApi.loadMissionToController(apiBaseUrl, { mission_id: missionId });
+        if (!loadRes.ok) {
+          const errMsg = await parseFetchError(loadRes, "Load to controller failed");
+          throw new Error(errMsg);
+        }
+
+        const loadedRes = await missionApi.getLoadedPath(apiBaseUrl);
+        if (!loadedRes.ok) {
+          const errMsg = await parseFetchError(loadedRes, "Loaded path verification failed");
+          throw new Error(errMsg);
+        }
+
+        const loadedData = (await loadedRes.json()) as missionApi.LoadedPathResponse;
+        setLoadedPathInspection(loadedData);
+
+        if (!verifyLoadedPathInspection(loadedData, missionId)) {
+          throw new Error("Loaded path verification failed: controller path does not match staged mission.");
+        }
+
+        setMissionLoaded(true);
+        setWorkflowStep("loaded", "verified");
+        setMissionRunning(false);
+        void refreshTelemetryPanel();
+        logAction("LOAD_SUCCESS", { stagedMissionId: missionId, fileName: importedPlan?.fileName });
+        setPage("home");
+        showToast("Mission loaded", "Staged mission loaded to controller and verified.", "success");
+        return;
       }
+
+      const res = await missionApi.loadMission(apiBaseUrl, {
+        path_name: importedPlan!.fileName,
+        mission_file: "",
+      });
 
       if (!res.ok) {
         const errMsg = await parseFetchError(res, "Load failed");
         throw new Error(errMsg);
       }
 
+      setLoadedPathInspection(null);
       setMissionLoaded(true);
       setWorkflowStep("loaded", "verified");
       setMissionRunning(false);
@@ -1574,9 +1764,13 @@ export default function App() {
       setPage("home");
       showToast("File loaded", "Load succeeded. Start and Export are now available.", "success");
     } catch (error) {
+      if (isStagedLoad) {
+        setLoadedPathInspection(null);
+      }
       setWorkflowStep("loaded", "failed");
       logAction("LOAD_FAILED", {
         fileName: importedPlan?.fileName,
+        stagedMissionId: requestedMissionId || null,
         error: error instanceof Error ? error.message : String(error),
       });
       Alert.alert("Load failed", error instanceof Error ? error.message : "Could not load the mission.");
@@ -1591,15 +1785,37 @@ export default function App() {
       return;
     }
 
-    logAction("START_REQUEST", { apiBaseUrl, fileName: importedPlan.fileName, missionRunning, autoOrigin });
+    const startGate = evaluateStagedStartGate(stagedWorkflow, loadedPathInspection);
+    if (!startGate.allowed) {
+      setWorkflowStep("started", "failed");
+      Alert.alert("Cannot Start", startGate.message ?? "Staged mission is not ready to start.");
+      showToast("Start blocked", startGate.message ?? "Complete load verification first.", "error");
+      return;
+    }
+
+    const isStagedStart = startGate.isStagedWorkflow;
+
+    logAction("START_REQUEST", {
+      apiBaseUrl,
+      fileName: importedPlan.fileName,
+      missionRunning,
+      autoOrigin,
+      isStagedStart,
+      stagedMissionId: isStagedStart ? getLoadedMissionId(loadedPathInspection) : null,
+    });
     setMissionActionBusy(true);
     try {
       showToast(missionRunning ? "Stop" : "Start", missionRunning ? "Stopping mission..." : "Starting mission...", "info");
-      const res = await missionApi.startMission(apiBaseUrl, {
-        path_name: importedPlan.fileName,
-        mission_file: "",
-        auto_origin: autoOrigin,
-      });
+      const res = await missionApi.startMission(
+        apiBaseUrl,
+        isStagedStart
+          ? { auto_origin: autoOrigin }
+          : {
+              path_name: importedPlan.fileName,
+              mission_file: "",
+              auto_origin: autoOrigin,
+            }
+      );
       if (!res.ok) {
         const errMsg = await parseFetchError(res, "Start failed");
         throw new Error(errMsg);
@@ -2200,6 +2416,9 @@ export default function App() {
                     const target = selectedPathName || importedPlan?.fileName;
                     if (target) previewSelectedPath(target);
                   }}
+                  stagedWorkflow={stagedWorkflow}
+                  loadedPathInspection={loadedPathInspection}
+                  onInvalidateWorkflow={invalidateStagedWorkflowFrom}
                 />
               ) : (
                 <SectionScreen
@@ -2252,6 +2471,21 @@ export default function App() {
                   setDelayB={setDelayB}
                   onParsePlan={parseDxfPlan}
                   onWorkflowStep={setWorkflowStep}
+                  stagedWorkflow={stagedWorkflow}
+                  alignmentResult={alignmentResult}
+                  setAlignmentResult={setAlignmentResult}
+                  verifiedAlignmentRequest={verifiedAlignmentRequest}
+                  setVerifiedAlignmentRequest={setVerifiedAlignmentRequest}
+                  segmentVerification={segmentVerification}
+                  setSegmentVerification={setSegmentVerification}
+                  stagedPlanResult={stagedPlanResult}
+                  setStagedPlanResult={setStagedPlanResult}
+                  stagedMissionInspection={stagedMissionInspection}
+                  setStagedMissionInspection={setStagedMissionInspection}
+                  stagedMissionId={stagedMissionId}
+                  setStagedMissionId={setStagedMissionId}
+                  loadedPathInspection={loadedPathInspection}
+                  onInvalidateWorkflow={invalidateStagedWorkflowFrom}
                 />
               )}
 
@@ -2440,6 +2674,9 @@ function HomeView({
   apiBaseUrl,
   selectedPathName,
   onRefreshPaths,
+  stagedWorkflow,
+  loadedPathInspection,
+  onInvalidateWorkflow,
 }: {
   autoOrigin: boolean;
   setAutoOrigin: React.Dispatch<React.SetStateAction<boolean>>;
@@ -2497,7 +2734,15 @@ function HomeView({
   apiBaseUrl?: string;
   selectedPathName?: string | null;
   onRefreshPaths?: () => void;
+  stagedWorkflow: StagedWorkflowState;
+  loadedPathInspection: missionApi.LoadedPathResponse | null;
+  onInvalidateWorkflow?: (step: "alignment" | "spray" | "staged" | "loaded") => void;
 }) {
+  const stagedStartGate = useMemo(
+    () => evaluateStagedStartGate(stagedWorkflow, loadedPathInspection),
+    [stagedWorkflow, loadedPathInspection]
+  );
+  const startBlocked = stagedStartGate.isStagedWorkflow && !stagedStartGate.allowed;
   const selectedLine = lines.find((line) => line.id === selectedLineId) ?? null;
   const hasPlan = lines.length > 0;
   const hasSelectedLine = Boolean(selectedLine);
@@ -2544,6 +2789,7 @@ function HomeView({
 
       const res = await pathApi.saveEntityOverrides(apiBaseUrl, targetPath, overrides);
       if (res.ok) {
+        onInvalidateWorkflow?.("spray");
         Alert.alert("Success", "Spray overrides saved.");
       } else {
         const errText = await res.text();
@@ -3117,20 +3363,26 @@ function HomeView({
                       </Pressable>
                     </View>
 
+                    {startBlocked && stagedStartGate.message ? (
+                      <Text style={{ color: "#fbbf24", fontSize: 10, lineHeight: 14, marginBottom: 8 }}>
+                        {stagedStartGate.message}
+                      </Text>
+                    ) : null}
+
                     <View style={{ flexDirection: "row", gap: 8 }}>
                       <Pressable
                         onPress={() => onStartPlan()}
-                        disabled={missionActionBusy || lines.length === 0}
+                        disabled={missionActionBusy || lines.length === 0 || startBlocked}
                         style={{
                           flex: 1,
                           height: 38,
                           borderRadius: 8,
-                          backgroundColor: (missionActionBusy || lines.length === 0) ? "#1e293b" : "#0d9488",
+                          backgroundColor: (missionActionBusy || lines.length === 0 || startBlocked) ? "#1e293b" : "#0d9488",
                           alignItems: "center",
                           justifyContent: "center",
                         }}
                       >
-                        <Text style={{ color: (missionActionBusy || lines.length === 0) ? "#64748b" : "#ffffff", fontSize: 12, fontWeight: "800" }}>
+                        <Text style={{ color: (missionActionBusy || lines.length === 0 || startBlocked) ? "#64748b" : "#ffffff", fontSize: 12, fontWeight: "800" }}>
                           Start
                         </Text>
                       </Pressable>
@@ -3324,6 +3576,7 @@ function HomeView({
                             <Text style={{ color: "#fff", fontSize: 12, fontWeight: "600" }}>Total: {lines.filter(l => l.entity && l.entity.entity_id && l.layer !== "extension" && l.layer !== "transit").length}</Text>
                             <Pressable 
                               onPress={() => {
+                                onInvalidateWorkflow?.("spray");
                                 const entityLines = lines.filter(l => l.entity && l.entity.entity_id && l.layer !== "extension" && l.layer !== "transit");
                                 const anyUnmarked = entityLines.some(l => !l.entity!.is_mark);
                                 setLines(prev => prev.map((entry) => {
@@ -3349,6 +3602,7 @@ function HomeView({
                                 <Pressable
                                   onPress={() => {
                                     if (line.entity) {
+                                      onInvalidateWorkflow?.("spray");
                                       setLines(prev =>
                                         prev.map((entry) =>
                                           entry.id === line.id && entry.entity
@@ -4690,6 +4944,21 @@ function SectionScreen(props: {
   onRefreshPaths: () => void;
   onParsePlan?: () => Promise<void>;
   onWorkflowStep?: (step: StagedWorkflowStep, status: StagedWorkflowStatus) => void;
+  stagedWorkflow: StagedWorkflowState;
+  alignmentResult: AlignmentResultState | null;
+  setAlignmentResult: React.Dispatch<React.SetStateAction<AlignmentResultState | null>>;
+  verifiedAlignmentRequest: pathApi.AlignPathRequest | null;
+  setVerifiedAlignmentRequest: React.Dispatch<React.SetStateAction<pathApi.AlignPathRequest | null>>;
+  segmentVerification: pathApi.PathSegmentsResponse | null;
+  setSegmentVerification: React.Dispatch<React.SetStateAction<pathApi.PathSegmentsResponse | null>>;
+  stagedPlanResult: StagedPlanResultState | null;
+  setStagedPlanResult: React.Dispatch<React.SetStateAction<StagedPlanResultState | null>>;
+  stagedMissionInspection: pathApi.StagedMissionResponse | null;
+  setStagedMissionInspection: React.Dispatch<React.SetStateAction<pathApi.StagedMissionResponse | null>>;
+  stagedMissionId: string | null;
+  setStagedMissionId: React.Dispatch<React.SetStateAction<string | null>>;
+  loadedPathInspection: missionApi.LoadedPathResponse | null;
+  onInvalidateWorkflow: (step: "alignment" | "spray" | "staged" | "loaded") => void;
   onNav: (page: Page) => void;
 }) {
   const { title, page, onBack } = props;
@@ -5147,6 +5416,19 @@ type AlignmentResultState = {
   warnings: unknown;
 };
 
+type StagedPlanResultState = {
+  missionId: string;
+  numWaypoints: number | null;
+  numSegments: number | null;
+  totalLengthM: number | null;
+  markLengthM: number | null;
+  transitLengthM: number | null;
+  estimatedPaintL: number | null;
+  estimatedRuntimeS: number | null;
+  rmseM: number | null;
+  warnings: string[];
+};
+
 function FieldsPage({
   importedPlan,
   setImportedPlan,
@@ -5167,6 +5449,21 @@ function FieldsPage({
   onRefreshPaths,
   onParsePlan,
   onWorkflowStep,
+  stagedWorkflow,
+  alignmentResult,
+  setAlignmentResult,
+  verifiedAlignmentRequest,
+  setVerifiedAlignmentRequest,
+  segmentVerification,
+  setSegmentVerification,
+  stagedPlanResult,
+  setStagedPlanResult,
+  stagedMissionInspection,
+  setStagedMissionInspection,
+  stagedMissionId,
+  setStagedMissionId,
+  loadedPathInspection,
+  onInvalidateWorkflow,
 }: {
   importedPlan: ImportedPlan | null;
   setImportedPlan: React.Dispatch<React.SetStateAction<ImportedPlan | null>>;
@@ -5187,6 +5484,21 @@ function FieldsPage({
   onRefreshPaths: () => void;
   onParsePlan?: () => Promise<void>;
   onWorkflowStep?: (step: StagedWorkflowStep, status: StagedWorkflowStatus) => void;
+  stagedWorkflow: StagedWorkflowState;
+  alignmentResult: AlignmentResultState | null;
+  setAlignmentResult: React.Dispatch<React.SetStateAction<AlignmentResultState | null>>;
+  verifiedAlignmentRequest: pathApi.AlignPathRequest | null;
+  setVerifiedAlignmentRequest: React.Dispatch<React.SetStateAction<pathApi.AlignPathRequest | null>>;
+  segmentVerification: pathApi.PathSegmentsResponse | null;
+  setSegmentVerification: React.Dispatch<React.SetStateAction<pathApi.PathSegmentsResponse | null>>;
+  stagedPlanResult: StagedPlanResultState | null;
+  setStagedPlanResult: React.Dispatch<React.SetStateAction<StagedPlanResultState | null>>;
+  stagedMissionInspection: pathApi.StagedMissionResponse | null;
+  setStagedMissionInspection: React.Dispatch<React.SetStateAction<pathApi.StagedMissionResponse | null>>;
+  stagedMissionId: string | null;
+  setStagedMissionId: React.Dispatch<React.SetStateAction<string | null>>;
+  loadedPathInspection: missionApi.LoadedPathResponse | null;
+  onInvalidateWorkflow: (step: "alignment" | "spray" | "staged" | "loaded") => void;
 }) {
   const [pickedFile, setPickedFile] = useState<DocumentPicker.DocumentPickerAsset | null>(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -5195,7 +5507,6 @@ function FieldsPage({
   const [rotationDeg, setRotationDeg] = useState<string>("");
   const [isFixing, setIsFixing] = useState(false);
   const [missionSummary, setMissionSummary] = useState<any | null>(null);
-  const [alignmentResult, setAlignmentResult] = useState<AlignmentResultState | null>(null);
 
   const [extModalOpen, setExtModalOpen] = useState(false);
   const [extPre, setExtPre] = useState("0.5");
@@ -5209,8 +5520,15 @@ function FieldsPage({
   const [isSavingOrder, setIsSavingOrder] = useState(false);
   const [isSprayingSet, setIsSprayingSet] = useState(false);
   const [isVerifyingSegments, setIsVerifyingSegments] = useState(false);
-  const [segmentVerification, setSegmentVerification] = useState<pathApi.PathSegmentsResponse | null>(null);
+  const [isPlanningAndStaging, setIsPlanningAndStaging] = useState(false);
   const [reorderedLines, setReorderedLines] = useState<PlanLine[]>([]);
+  const canPlanAndStage =
+    !!selectedPathName &&
+    stagedWorkflow.alignment === "verified" &&
+    stagedWorkflow.spray === "verified";
+  const canLoadStagedMission =
+    !!stagedMissionId &&
+    stagedWorkflow.staged === "verified";
   const primaryReorderableLines = useMemo(
     () => lines.filter(isPrimaryEditableLine),
     [lines]
@@ -5246,6 +5564,7 @@ function FieldsPage({
         aft_extension_m: parseFloat(extAft) || 0,
       });
       if (res.ok) {
+        onInvalidateWorkflow("spray");
         Alert.alert("Success", "Extensions saved successfully.");
         setExtModalOpen(false);
         if (onSelectPath && targetPathForExtensions) onSelectPath(targetPathForExtensions);
@@ -5272,6 +5591,7 @@ function FieldsPage({
         aft_extension_m: 0.5,
       });
       if (res.ok) {
+        onInvalidateWorkflow("spray");
         Alert.alert("Success", "Extensions disabled.");
         if (onSelectPath && targetPathForExtensions) onSelectPath(targetPathForExtensions);
       } else {
@@ -5306,6 +5626,7 @@ function FieldsPage({
       const res = await pathApi.saveEntityOverrides(apiBaseUrl, targetPath, overrides);
 
       if (res.ok) {
+        onInvalidateWorkflow("spray");
         Alert.alert("Success", "Spray settings saved successfully.");
       } else {
         const errText = await res.text();
@@ -5334,6 +5655,7 @@ function FieldsPage({
     }
 
     setIsVerifyingSegments(true);
+    onInvalidateWorkflow("staged");
     try {
       const res = await pathApi.getPathSegments(apiBaseUrl, targetPath);
       if (res.ok) {
@@ -5364,6 +5686,109 @@ function FieldsPage({
     }
   };
 
+  const handlePlanAndStage = async () => {
+    if (!selectedPathName || !apiBaseUrl) {
+      setStagedPlanResult(null);
+      setStagedMissionInspection(null);
+      setStagedMissionId(null);
+      onWorkflowStep?.("staged", "failed");
+      Alert.alert("Error", "No path selected to plan and stage.");
+      return;
+    }
+    if (stagedWorkflow.alignment !== "verified" || stagedWorkflow.spray !== "verified") {
+      setStagedPlanResult(null);
+      setStagedMissionInspection(null);
+      setStagedMissionId(null);
+      onWorkflowStep?.("staged", "failed");
+      Alert.alert(
+        "Prerequisites Required",
+        "Complete alignment and spray segment verification before final planning."
+      );
+      return;
+    }
+
+    if (!verifiedAlignmentRequest) {
+      setStagedPlanResult(null);
+      setStagedMissionInspection(null);
+      setStagedMissionId(null);
+      onWorkflowStep?.("staged", "failed");
+      Alert.alert("Plan & Stage Failed", "Verified alignment inputs are missing. Re-run alignment before staging.");
+      return;
+    }
+
+    const body: pathApi.PlanAndStageRequest = {
+      source: selectedPathName,
+      ...verifiedAlignmentRequest,
+    };
+
+    setIsPlanningAndStaging(true);
+    onInvalidateWorkflow("staged");
+    try {
+      const planRes = await pathApi.planAndStage(apiBaseUrl, selectedPathName, body);
+      if (!planRes.ok) {
+        setStagedPlanResult(null);
+        setStagedMissionInspection(null);
+        setStagedMissionId(null);
+        onWorkflowStep?.("staged", "failed");
+        const errText = await planRes.text();
+        Alert.alert("Plan & Stage Failed", errText || "Could not plan and stage mission.");
+        return;
+      }
+
+      const planRaw = await planRes.json();
+      const parsed = parsePlanAndStageResponse(planRaw);
+      if (!parsed) {
+        setStagedPlanResult(null);
+        setStagedMissionInspection(null);
+        setStagedMissionId(null);
+        onWorkflowStep?.("staged", "failed");
+        Alert.alert("Plan & Stage Failed", "Response did not include a staged mission_id.");
+        return;
+      }
+
+      const { plan, missionId } = parsed;
+      const summary = plan.mission_summary;
+      setStagedMissionId(missionId);
+      setStagedPlanResult({
+        missionId,
+        numWaypoints: coerceFiniteNumber(plan.num_waypoints ?? summary?.num_waypoints),
+        numSegments: coerceFiniteNumber(plan.num_segments),
+        totalLengthM: coerceFiniteNumber(plan.total_length_m ?? summary?.total_length_m),
+        markLengthM: coerceFiniteNumber(plan.mark_length_m),
+        transitLengthM: coerceFiniteNumber(plan.transit_length_m),
+        estimatedPaintL: coerceFiniteNumber(summary?.estimated_paint_l),
+        estimatedRuntimeS: coerceFiniteNumber(summary?.estimated_runtime_s),
+        rmseM: coerceFiniteNumber(summary?.rmse_m),
+        warnings: Array.isArray(plan.warnings) ? plan.warnings.map(String) : [],
+      });
+
+      const stagedRes = await pathApi.getStagedMission(apiBaseUrl, missionId);
+      if (!stagedRes.ok) {
+        setStagedMissionInspection(null);
+        setStagedMissionId(null);
+        onWorkflowStep?.("staged", "failed");
+        const errText = await stagedRes.text();
+        Alert.alert("Staged Inspection Failed", errText || "Mission staged but inspection fetch failed.");
+        return;
+      }
+
+      const stagedData = (await stagedRes.json()) as pathApi.StagedMissionResponse;
+      setStagedMissionInspection(stagedData);
+      setStagedMissionId(missionId);
+      onWorkflowStep?.("staged", "verified");
+      Alert.alert("Success", "Mission planned and staged successfully.");
+    } catch (err) {
+      setStagedPlanResult(null);
+      setStagedMissionInspection(null);
+      setStagedMissionId(null);
+      onWorkflowStep?.("staged", "failed");
+      console.log("Error planning and staging mission:", err);
+      Alert.alert("Error", "Could not connect to the rover to plan and stage mission.");
+    } finally {
+      setIsPlanningAndStaging(false);
+    }
+  };
+
   const handleSetOrder = async () => {
     const targetPath = selectedPathName || importedPlan?.fileName;
     if (!apiBaseUrl || !targetPath) {
@@ -5380,6 +5805,7 @@ function FieldsPage({
       const res = await pathApi.saveEntityOrder(apiBaseUrl, targetPath, entity_order);
 
       if (res.ok) {
+        onInvalidateWorkflow("spray");
         setIsReordering(false);
         // Refresh paths list (if needed)
         onRefreshPaths();
@@ -5433,8 +5859,10 @@ function FieldsPage({
   };
 
   const handleSelectPoint = (pt: { x: number; y: number }) => {
+    onInvalidateWorkflow("alignment");
     setMissionSummary(null);
     setAlignmentResult(null);
+    setVerifiedAlignmentRequest(null);
     setRefPoints(prev => {
       // Toggle if clicked near existing point
       const existingIdx = prev.findIndex(p => Math.abs(p.dxf_y - pt.x) < 0.001 && Math.abs(p.dxf_x - pt.y) < 0.001);
@@ -5453,6 +5881,7 @@ function FieldsPage({
   };
 
   const handleUpdateRefPoint = (idx: number, field: "lat" | "lon", value: string) => {
+    onInvalidateWorkflow("alignment");
     const next = [...refPoints];
     next[idx] = { ...next[idx], [field]: value };
     setRefPoints(next);
@@ -5461,6 +5890,7 @@ function FieldsPage({
   const handleFixAlignment = async () => {
     if (!selectedPathName || !apiBaseUrl || refPoints.length === 0) {
       onWorkflowStep?.("alignment", "failed");
+      setVerifiedAlignmentRequest(null);
       return;
     }
     setIsFixing(true);
@@ -5476,12 +5906,14 @@ function FieldsPage({
 
       if (alignmentMethod === "least_squares" && validPoints.length < 2) {
         onWorkflowStep?.("alignment", "failed");
+        setVerifiedAlignmentRequest(null);
         Alert.alert("Validation", "Please select 2 points and enter their WGS84 coordinates.");
         setIsFixing(false);
         return;
       }
       if (alignmentMethod === "single_point" && validPoints.length === 0) {
         onWorkflowStep?.("alignment", "failed");
+        setVerifiedAlignmentRequest(null);
         Alert.alert("Validation", "Please select a point and enter its coordinates.");
         setIsFixing(false);
         return;
@@ -5495,6 +5927,7 @@ function FieldsPage({
         const rot = parseFloat(rotationDeg);
         if (isNaN(rot)) {
           onWorkflowStep?.("alignment", "failed");
+          setVerifiedAlignmentRequest(null);
           Alert.alert("Validation", "Please enter a valid Heading (Degrees).");
           setIsFixing(false);
           return;
@@ -5507,6 +5940,7 @@ function FieldsPage({
       if (res.ok) {
         const data = await res.json();
         setMissionSummary(null);
+        setVerifiedAlignmentRequest({ ...payload });
         setAlignmentResult({
           method: data.method ?? null,
           scale: coerceFiniteNumber(data.scale),
@@ -5524,11 +5958,13 @@ function FieldsPage({
         setRefPoints([]);
       } else {
         onWorkflowStep?.("alignment", "failed");
+        setVerifiedAlignmentRequest(null);
         const errText = await res.text();
         Alert.alert("Alignment Failed", errText || "Unknown error occurred.");
       }
     } catch (err) {
       onWorkflowStep?.("alignment", "failed");
+      setVerifiedAlignmentRequest(null);
       console.log("Error aligning path:", err);
       Alert.alert("Error", "Could not connect to the rover to apply alignment.");
     } finally {
@@ -5582,6 +6018,7 @@ function FieldsPage({
         : await pathApi.uploadPath(apiBaseUrl, formData);
 
       if (res.ok) {
+        onInvalidateWorkflow("alignment");
         Alert.alert("Success", `${pickedFile.name} imported successfully.`);
         if (ext === 'dxf') {
           setImportedPlan({ fileName: pickedFile.name, uri: pickedFile.uri, fileType: "dxf", source: "builtin" });
@@ -5719,7 +6156,13 @@ function FieldsPage({
           {/* List Content */}
           <View style={{ flex: 1, backgroundColor: "#fff", borderRadius: 12, borderWidth: 1, borderColor: "#e2e8f0", overflow: "hidden" }}>
             {isReordering ? (
-              <ReorderableLineList data={reorderedLines} onDragEnd={setReorderedLines} />
+              <ReorderableLineList
+                data={reorderedLines}
+                onDragEnd={(nextLines) => {
+                  onInvalidateWorkflow("spray");
+                  setReorderedLines(nextLines);
+                }}
+              />
             ) : (
               <ScrollView style={{ flex: 1 }}>
                 {lines
@@ -5756,6 +6199,7 @@ function FieldsPage({
                         {isPrimary && l.entity && (
                           <Pressable
                             onPress={() => {
+                              onInvalidateWorkflow("spray");
                               const newLines = [...lines];
                               const idx = newLines.findIndex(x => x.id === l.id);
                               if (idx !== -1 && newLines[idx].entity) {
@@ -5903,6 +6347,116 @@ function FieldsPage({
                   </View>
                 )}
               </View>
+
+              <View style={{ borderRadius: 12, padding: 12, backgroundColor: "#ffffff", borderWidth: 1, borderColor: "#d8e1eb", gap: 10 }}>
+                <Text style={{ color: "#64748b", fontSize: 11, fontWeight: "800", letterSpacing: 1, textTransform: "uppercase" }}>
+                  Plan & Stage
+                </Text>
+                <Text style={{ color: "#94a3b8", fontSize: 11, lineHeight: 16 }}>
+                  Run final planning after alignment and spray verification are complete.
+                </Text>
+                {!canPlanAndStage && (
+                  <Text style={{ color: "#b45309", fontSize: 10, lineHeight: 15 }}>
+                    Requires verified alignment and spray segments
+                    {selectedPathName ? "" : " plus a selected path"}.
+                  </Text>
+                )}
+                <Pressable
+                  onPress={handlePlanAndStage}
+                  disabled={isPlanningAndStaging || !canPlanAndStage}
+                  style={{
+                    height: 44,
+                    borderRadius: 10,
+                    alignItems: "center",
+                    justifyContent: "center",
+                    backgroundColor: isPlanningAndStaging || !canPlanAndStage ? "#94a3b8" : "#2563eb",
+                  }}
+                >
+                  <Text style={{ color: "#fff", fontSize: 14, fontWeight: "700" }}>
+                    {isPlanningAndStaging ? "Planning..." : "Plan & Stage Mission"}
+                  </Text>
+                </Pressable>
+
+                {stagedPlanResult && (
+                  <View style={{ marginTop: 4, padding: 12, backgroundColor: "#eff6ff", borderRadius: 8, borderWidth: 1, borderColor: "#bfdbfe", gap: 6 }}>
+                    <Text style={{ color: "#1e40af", fontWeight: "800", fontSize: 13 }}>Staged Mission Summary</Text>
+                    <Text style={{ color: "#1e3a8a", fontSize: 11 }} numberOfLines={2}>
+                      Mission ID: {stagedPlanResult.missionId}
+                    </Text>
+                    <Text style={{ color: "#1e3a8a", fontSize: 11 }}>
+                      Waypoints: {formatFinite(stagedPlanResult.numWaypoints, 0)} | Segments: {formatFinite(stagedPlanResult.numSegments, 0)}
+                    </Text>
+                    <Text style={{ color: "#1e3a8a", fontSize: 11 }}>
+                      Total: {formatFinite(stagedPlanResult.totalLengthM, 1)} m | Mark: {formatFinite(stagedPlanResult.markLengthM, 1)} m | Transit: {formatFinite(stagedPlanResult.transitLengthM, 1)} m
+                    </Text>
+                    {stagedMissionInspection && (
+                      <Text style={{ color: "#1e3a8a", fontSize: 11 }} numberOfLines={2}>
+                        Waypoints sample: {formatWaypointPair(stagedMissionInspection.waypoints)}
+                      </Text>
+                    )}
+                    {stagedPlanResult.warnings.length > 0 && (
+                      <Text style={{ color: "#b45309", fontSize: 10 }} numberOfLines={4}>
+                        Warnings: {stagedPlanResult.warnings.join("; ")}
+                      </Text>
+                    )}
+                    {stagedMissionInspection && (
+                      <Text style={{ color: "#1e3a8a", fontSize: 10 }}>
+                        Staged inspect: {formatFinite(stagedMissionInspection.num_waypoints, 0)} waypoints, {stagedMissionInspection.segment_runs?.length ?? 0} runs
+                      </Text>
+                    )}
+                  </View>
+                )}
+
+                {stagedPlanResult && (
+                  <>
+                    {!canLoadStagedMission && (
+                      <Text style={{ color: "#b45309", fontSize: 10, lineHeight: 15 }}>
+                        Requires a verified staged mission before controller load.
+                      </Text>
+                    )}
+                    <Pressable
+                      onPress={() => stagedMissionId && onLoadSelectedPath(stagedMissionId)}
+                      disabled={missionActionBusy || !canLoadStagedMission}
+                      style={{
+                        height: 44,
+                        borderRadius: 10,
+                        alignItems: "center",
+                        justifyContent: "center",
+                        backgroundColor: missionActionBusy || !canLoadStagedMission ? "#94a3b8" : "#7c3aed",
+                      }}
+                    >
+                      <Text style={{ color: "#fff", fontSize: 14, fontWeight: "700" }}>
+                        {missionActionBusy ? "Loading..." : "Load Staged Mission to Controller"}
+                      </Text>
+                    </Pressable>
+                  </>
+                )}
+
+                {loadedPathInspection?.loaded && stagedMissionId && (
+                  <View style={{ marginTop: 4, padding: 12, backgroundColor: "#f5f3ff", borderRadius: 8, borderWidth: 1, borderColor: "#ddd6fe", gap: 6 }}>
+                    <Text style={{ color: "#5b21b6", fontWeight: "800", fontSize: 13 }}>Controller Load Confirmed</Text>
+                    <Text style={{ color: "#6d28d9", fontSize: 11 }} numberOfLines={2}>
+                      Mission ID: {stagedMissionId}
+                    </Text>
+                    <Text style={{ color: "#6d28d9", fontSize: 11 }} numberOfLines={2}>
+                      Path: {selectedPathName || loadedPathInspection.name || "n/a"}
+                    </Text>
+                    <Text style={{ color: "#6d28d9", fontSize: 11 }} numberOfLines={3}>
+                      Anchor: {stagedMissionInspection?.anchor ? JSON.stringify(stagedMissionInspection.anchor) : "n/a"}
+                    </Text>
+                    <Text style={{ color: "#6d28d9", fontSize: 11 }}>
+                      Waypoints: {formatFinite(loadedPathInspection.num_waypoints, 0)}
+                    </Text>
+                    <Text style={{ color: "#6d28d9", fontSize: 11 }} numberOfLines={2}>
+                      Loaded sample: {formatWaypointPair(loadedPathInspection.sample_coords)}
+                      {loadedPathInspection.sample_truncated ? " (truncated)" : ""}
+                    </Text>
+                    <Text style={{ color: "#6d28d9", fontSize: 11 }}>
+                      Spray flags: {formatSprayFlagSample(loadedPathInspection)}
+                    </Text>
+                  </View>
+                )}
+              </View>
             </>
           )}
 
@@ -6039,7 +6593,10 @@ function FieldsPage({
                 <TextInput
                   style={{ backgroundColor: "#fff", borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, padding: 10, color: "#0f172a" }}
                   value={extPre}
-                  onChangeText={setExtPre}
+                  onChangeText={(value) => {
+                    onInvalidateWorkflow("spray");
+                    setExtPre(value);
+                  }}
                   keyboardType="numeric"
                 />
               </View>
@@ -6048,7 +6605,10 @@ function FieldsPage({
                 <TextInput
                   style={{ backgroundColor: "#fff", borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, padding: 10, color: "#0f172a" }}
                   value={extAft}
-                  onChangeText={setExtAft}
+                  onChangeText={(value) => {
+                    onInvalidateWorkflow("spray");
+                    setExtAft(value);
+                  }}
                   keyboardType="numeric"
                 />
               </View>
@@ -6133,7 +6693,15 @@ function FieldsPage({
               Align DXF
             </Text>
             {refPoints.length > 0 && (
-              <Pressable onPress={() => setRefPoints([])}>
+              <Pressable
+                onPress={() => {
+                  onInvalidateWorkflow("alignment");
+                  setMissionSummary(null);
+                  setAlignmentResult(null);
+                  setVerifiedAlignmentRequest(null);
+                  setRefPoints([]);
+                }}
+              >
                 <Text style={{ color: "#ef4444", fontSize: 11, fontWeight: "700" }}>Clear Points</Text>
               </Pressable>
             )}
@@ -6142,13 +6710,27 @@ function FieldsPage({
           {/* Toggle Method */}
           <View style={{ flexDirection: "row", backgroundColor: "#f1f5f9", borderRadius: 8, padding: 4, marginBottom: 12 }}>
             <Pressable
-              onPress={() => { setAlignmentMethod("least_squares"); setRefPoints([]); setAlignmentResult(null); }}
+              onPress={() => {
+                onInvalidateWorkflow("alignment");
+                setAlignmentMethod("least_squares");
+                setRefPoints([]);
+                setMissionSummary(null);
+                setAlignmentResult(null);
+                setVerifiedAlignmentRequest(null);
+              }}
               style={{ flex: 1, paddingVertical: 8, alignItems: "center", borderRadius: 6, backgroundColor: alignmentMethod === "least_squares" ? "#ffffff" : "transparent", shadowColor: alignmentMethod === "least_squares" ? "#000" : "transparent", shadowOpacity: 0.05, shadowRadius: 2, shadowOffset: { width: 0, height: 1 } }}
             >
               <Text style={{ color: alignmentMethod === "least_squares" ? "#0f172a" : "#64748b", fontSize: 12, fontWeight: "700" }}>2-Point Fit</Text>
             </Pressable>
             <Pressable
-              onPress={() => { setAlignmentMethod("single_point"); setRefPoints([]); setAlignmentResult(null); }}
+              onPress={() => {
+                onInvalidateWorkflow("alignment");
+                setAlignmentMethod("single_point");
+                setRefPoints([]);
+                setMissionSummary(null);
+                setAlignmentResult(null);
+                setVerifiedAlignmentRequest(null);
+              }}
               style={{ flex: 1, paddingVertical: 8, alignItems: "center", borderRadius: 6, backgroundColor: alignmentMethod === "single_point" ? "#ffffff" : "transparent", shadowColor: alignmentMethod === "single_point" ? "#000" : "transparent", shadowOpacity: 0.05, shadowRadius: 2, shadowOffset: { width: 0, height: 1 } }}
             >
               <Text style={{ color: alignmentMethod === "single_point" ? "#0f172a" : "#64748b", fontSize: 12, fontWeight: "700" }}>1-Point + Angle</Text>
@@ -6195,7 +6777,10 @@ function FieldsPage({
                     placeholder="Degrees (e.g. 45)"
                     placeholderTextColor="#94a3b8"
                     value={rotationDeg}
-                    onChangeText={setRotationDeg}
+                    onChangeText={(value) => {
+                      onInvalidateWorkflow("alignment");
+                      setRotationDeg(value);
+                    }}
                     keyboardType="numeric"
                   />
                 </View>
@@ -6281,7 +6866,11 @@ function FieldsPage({
                     onPress={() => {
                       setMissionSummary(null);
                       setAlignmentResult(null);
+                      setVerifiedAlignmentRequest(null);
                       setSegmentVerification(null);
+                      setStagedPlanResult(null);
+                      setStagedMissionInspection(null);
+                      setStagedMissionId(null);
                       onSelectPath(path.name);
                     }}
                     style={{
@@ -6318,7 +6907,7 @@ function FieldsPage({
           </ScrollView>
           {selectedPathName && !missionSummary ? (
             <Pressable
-              onPress={() => onLoadSelectedPath()}
+              onPress={() => onLoadSelectedPath(canLoadStagedMission ? stagedMissionId ?? undefined : undefined)}
               disabled={missionActionBusy}
               style={{
                 marginTop: 10,
