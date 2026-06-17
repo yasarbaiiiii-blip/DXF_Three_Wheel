@@ -122,9 +122,14 @@ export const BoundaryEditor = memo(function BoundaryEditor({
     const svgTapX = locationX * scaleX + viewBoxX;
     const svgTapY = locationY * scaleY + viewBoxY;
     
-    const itemScale = cam.zoom < 0.5 ? 50 : 30;
+    const screenToSvg = (scaleX + scaleY) / 2;
+    const itemScaleScreen = cam.zoom < 0.5 ? 50 : 30;
+    const toleranceLineSvgSq = (itemScaleScreen * screenToSvg) ** 2; 
+
+    // Keep track of candidates
     let bestLineId: string | null = null;
-    let bestLineDistSq = (itemScale / cam.zoom) ** 2; 
+    let bestLineArea = Infinity;
+    let bestLineDistSq = toleranceLineSvgSq;
 
     const distToSegmentSquared = (px: number, py: number, vx: number, vy: number, wx: number, wy: number) => {
       const l2 = (vx - wx) ** 2 + (vy - wy) ** 2;
@@ -134,6 +139,7 @@ export const BoundaryEditor = memo(function BoundaryEditor({
       return (px - (vx + t * (wx - vx))) ** 2 + (py - (vy + t * (wy - vy))) ** 2;
     };
 
+    // 1. Check boundary lines
     const bx1 = -bw * METER_TO_PX / 2;
     const by1 = -bh * METER_TO_PX / 2;
     const bx2 = bw * METER_TO_PX / 2;
@@ -143,9 +149,10 @@ export const BoundaryEditor = memo(function BoundaryEditor({
     const dLeft = distToSegmentSquared(svgTapX, svgTapY, bx1, by1, bx1, by2);
     const dRight = distToSegmentSquared(svgTapX, svgTapY, bx2, by1, bx2, by2);
     const minBoundaryDist = Math.min(dTop, dBot, dLeft, dRight);
-    if (minBoundaryDist < bestLineDistSq) {
-      bestLineDistSq = minBoundaryDist;
+    if (minBoundaryDist < toleranceLineSvgSq) {
       bestLineId = "boundary";
+      bestLineArea = 999999; // Huge area so that actual item line hits are preferred over boundary
+      bestLineDistSq = minBoundaryDist;
     }
     
     let bestBoxId: string | null = null;
@@ -158,27 +165,36 @@ export const BoundaryEditor = memo(function BoundaryEditor({
       const localTapX = dx * Math.cos(rad) - dy * Math.sin(rad);
       const localTapY = dx * Math.sin(rad) + dy * Math.cos(rad);
       
-      // 1. Check line hits (precise)
+      const itemArea = item.width * item.height;
+
+      // Check line hits (precise)
+      let minItemLineDistSq = Infinity;
       for (const l of item.lines) {
          const x1 = l.from.y * METER_TO_PX;
          const y1 = -l.from.x * METER_TO_PX;
          const x2 = l.to.y * METER_TO_PX;
          const y2 = -l.to.x * METER_TO_PX;
          const d2 = distToSegmentSquared(localTapX, localTapY, x1, y1, x2, y2);
-         if (d2 < bestLineDistSq) {
-           bestLineDistSq = d2;
-           bestLineId = item.id;
+         if (d2 < minItemLineDistSq) {
+            minItemLineDistSq = d2;
          }
       }
 
-      // 2. Bounding Box check (with tolerance)
-      const tolerance = 30 / cam.zoom;
-      const halfW = (item.height * METER_TO_PX) / 2 + tolerance;
-      const halfH = (item.width * METER_TO_PX) / 2 + tolerance;
+      if (minItemLineDistSq < toleranceLineSvgSq) {
+         if (itemArea < bestLineArea) {
+            bestLineArea = itemArea;
+            bestLineId = item.id;
+            bestLineDistSq = minItemLineDistSq;
+         }
+      }
+
+      // 2. Bounding Box check (with tolerance scaled to SVG)
+      const toleranceBoxSvg = 30 * screenToSvg;
+      const halfW = (item.height * METER_TO_PX) / 2 + toleranceBoxSvg;
+      const halfH = (item.width * METER_TO_PX) / 2 + toleranceBoxSvg;
       if (Math.abs(localTapX) <= halfW && Math.abs(localTapY) <= halfH) {
-         const area = item.width * item.height;
-         if (area < bestBoxArea) {
-            bestBoxArea = area;
+         if (itemArea < bestBoxArea) {
+            bestBoxArea = itemArea;
             bestBoxId = item.id;
          }
       }
