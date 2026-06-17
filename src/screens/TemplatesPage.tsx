@@ -5,7 +5,7 @@ import { X } from "lucide-react-native";
 import Slider from "@react-native-community/slider";
 
 import { BoundaryEditor, PlacedItem } from "../components/BoundaryEditor";
-import { generateAlphabetLines, FontStyle, AlphabetType, NumberType, generateNumberLines } from "../utils/characterTemplates";
+import { generateAlphabetLines, FontStyle, AlphabetType, NumberType, generateNumberLines, generateTextLines } from "../utils/characterTemplates";
 import { generateRoadSignLines, RoadSignType, ROAD_SIGN_LABELS } from "../utils/roadSignTemplates";
 import { generateTemplateLines, ShapeType, ArcType } from "../utils/shapeTemplates";
 import { generateSportsFieldLines, SportsFieldType, SPORTS_FIELD_LABELS, SPORTS_FIELD_BOUNDS } from "../utils/sportsFieldTemplates";
@@ -70,7 +70,7 @@ export function TemplatesPage(props: TemplatesPageProps) {
     }
   }, [selectedItemIds, placedItems]);
 
-  const [category, setCategory] = useState<"shapes" | "alphabets" | "numbers" | "road_signs" | "sports_fields">("shapes");
+  const [category, setCategory] = useState<"shapes" | "alphabets" | "numbers" | "road_signs" | "sports_fields" | "characters">("shapes");
   const [fontStyle, setFontStyle] = useState<FontStyle>("smooth");
   const [shape, setShape] = useState<ShapeType>("square");
   const [selectedLetter, setSelectedLetter] = useState<AlphabetType>("A");
@@ -80,6 +80,8 @@ export function TemplatesPage(props: TemplatesPageProps) {
   const [arcType, setArcType] = useState<ArcType>("full");
   const [sizeInput, setSizeInput] = useState("1.0");
   const [isParsing, setIsParsing] = useState(false);
+  const [inputText, setInputText] = useState("");
+  const [previewText, setPreviewText] = useState("");
 
   // Active boundary dimensions (applied to canvas)
   const [activeBoundaryWidth, setActiveBoundaryWidth] = useState(4.0);
@@ -87,7 +89,7 @@ export function TemplatesPage(props: TemplatesPageProps) {
   const [activeIndentSpacing, setActiveIndentSpacing] = useState(0.25);
   const [activeLetterSpacingCm, setActiveLetterSpacingCm] = useState(10);
 
-  const parsedSize = Math.max(0.5, Math.min(4.0, parseFloat(sizeInput) || 1.0));
+  const parsedSize = Math.max(0.5, Math.min(15.0, parseFloat(sizeInput) || 1.0));
 
   // PENDING values from text inputs
   const pendingWidth = parseFloat(boundaryWidthStr) || 4.0;
@@ -114,8 +116,9 @@ export function TemplatesPage(props: TemplatesPageProps) {
     if (category === "numbers") return generateNumberLines(selectedDigit, parsedSize, fontStyle);
     if (category === "road_signs") return generateRoadSignLines(selectedSign, parsedSize);
     if (category === "sports_fields") return generateSportsFieldLines(selectedField, parsedSize);
+    if (category === "characters") return generateTextLines(previewText, parsedSize, fontStyle, pendingLetterSpacingCm / 100);
     return [];
-  }, [category, shape, selectedLetter, selectedDigit, selectedSign, selectedField, parsedSize, arcType, fontStyle]);
+  }, [category, shape, selectedLetter, selectedDigit, selectedSign, selectedField, parsedSize, arcType, fontStyle, previewText, pendingLetterSpacingCm]);
 
   const computeBoundingBox = useCallback((lines: PlanLine[]): { width: number; height: number } => {
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
@@ -378,15 +381,22 @@ export function TemplatesPage(props: TemplatesPageProps) {
         Alert.alert("Empty Template", "No valid template to generate.");
         return;
       }
-      title = category === "shapes" 
-        ? `${shape.charAt(0).toUpperCase() + shape.slice(1)}_Template_${parsedSize}m`
-        : category === "alphabets"
-          ? `Letter_${selectedLetter}_${fontStyle}_${parsedSize}m`
-          : category === "numbers"
-            ? `Number_${selectedDigit}_${fontStyle}_${parsedSize}m`
-            : category === "sports_fields"
-              ? `Sports_Field_${selectedField}_${parsedSize}m`
-              : `Road_Sign_${parsedSize}m`;
+      const getSelectedTemplateName = () => {
+        if (category === "shapes") {
+          return `${shape.charAt(0).toUpperCase() + shape.slice(1)}_Template_${parsedSize}m`;
+        } else if (category === "alphabets") {
+          return `Letter_${selectedLetter}_${fontStyle}_${parsedSize}m`;
+        } else if (category === "numbers") {
+          return `Number_${selectedDigit}_${fontStyle}_${parsedSize}m`;
+        } else if (category === "sports_fields") {
+          return `Sports_Field_${selectedField}_${parsedSize}m`;
+        } else if (category === "characters") {
+          return `Text_${previewText || "Empty"}_${parsedSize}m`;
+        } else {
+          return `Road_Sign_${parsedSize}m`;
+        }
+      };
+      title = getSelectedTemplateName();
       finalLines = previewLines;
     }
 
@@ -540,12 +550,12 @@ export function TemplatesPage(props: TemplatesPageProps) {
                 Category
               </Text>
               <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}>
-                {(["shapes", "alphabets", "numbers", "road_signs", "sports_fields"] as const).map((c) => (
+                {(["shapes", "alphabets", "numbers", "road_signs", "sports_fields", "characters"] as const).map((c) => (
                   <Pressable
                     key={c}
                     onPress={() => setCategory(c)}
                     style={{
-                      flexBasis: c === "sports_fields" ? "100%" : "47%",
+                      flexBasis: "47%",
                       padding: 8,
                       borderRadius: 12,
                       backgroundColor: category === c ? "#0b6b68" : "#f8fafc",
@@ -594,7 +604,38 @@ export function TemplatesPage(props: TemplatesPageProps) {
               </View>
             )}
 
-            {(category === "alphabets" || category === "numbers") && (
+            {category === "characters" && (
+              <View style={{ borderRadius: 14, padding: 14, backgroundColor: "#ffffff", borderWidth: 1, borderColor: "#d8e1eb", gap: 12 }}>
+                <Text style={{ color: "#64748b", fontSize: 11, fontWeight: "800", letterSpacing: 1, textTransform: "uppercase" }}>
+                  Characters Input
+                </Text>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                  <TextInput
+                    style={{ flex: 1, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, padding: 8, color: "#0f172a", fontSize: 14, fontWeight: "700" }}
+                    value={inputText}
+                    onChangeText={setInputText}
+                    placeholder="Type characters..."
+                    placeholderTextColor="#94a3b8"
+                    autoCapitalize="characters"
+                  />
+                  {inputText.trim().length > 0 && (
+                    <Pressable
+                      onPress={() => setPreviewText(inputText)}
+                      style={{ paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8, backgroundColor: "#0b6b68", alignItems: "center" }}
+                    >
+                      <Text style={{ color: "#fff", fontSize: 13, fontWeight: "800" }}>OK</Text>
+                    </Pressable>
+                  )}
+                </View>
+                {previewText.length > 0 && (
+                  <Text style={{ color: "#475569", fontSize: 12, fontWeight: "600" }}>
+                    Active Text: <Text style={{ color: "#0b6b68", fontWeight: "800" }}>"{previewText}"</Text>
+                  </Text>
+                )}
+              </View>
+            )}
+
+            {(category === "alphabets" || category === "numbers" || category === "characters") && (
               <View style={{ borderRadius: 14, padding: 14, backgroundColor: "#ffffff", borderWidth: 1, borderColor: "#d8e1eb" }}>
                 <Text style={{ color: "#64748b", fontSize: 11, fontWeight: "800", letterSpacing: 1, textTransform: "uppercase", marginBottom: 12 }}>
                   Font Style
@@ -749,7 +790,7 @@ export function TemplatesPage(props: TemplatesPageProps) {
                     <Slider
                       style={{ width: "100%", height: 40 }}
                       minimumValue={0.5}
-                      maximumValue={4.0}
+                      maximumValue={15.0}
                       step={0.1}
                       value={parsedSize}
                       onValueChange={(val) => setSizeInput(val.toFixed(2))}

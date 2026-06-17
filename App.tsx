@@ -7087,6 +7087,29 @@ function SwoziPage({
   const [sprayStatus, setSprayStatus] = useState(false);
   const [isTestActive, setIsTestActive] = useState(false);
 
+  // --- Spray Params State ---
+  type SprayParam = {
+    name: string;
+    type: string;
+    default: any;
+    current: any;
+    group: string;
+    desc: string;
+    min?: number;
+    max?: number;
+  };
+  const [sprayParams, setSprayParams] = useState<SprayParam[]>([]);
+  const [paramEdits, setParamEdits] = useState<Record<string, string>>({});
+  const [paramsLoading, setParamsLoading] = useState(false);
+  const [paramsError, setParamsError] = useState<string | null>(null);
+  const [paramsSaving, setParamsSaving] = useState(false);
+  const [paramsSaveStatus, setParamsSaveStatus] = useState<'idle'|'ok'|'err'>('idle');
+
+  // --- Manual Hold State ---
+  const [manualHoldActive, setManualHoldActive] = useState(false);
+  const manualHeartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Status polling
   useEffect(() => {
     if (!apiBaseUrl) return;
     const interval = setInterval(async () => {
@@ -7102,6 +7125,111 @@ function SwoziPage({
     }, 2000);
     return () => clearInterval(interval);
   }, [apiBaseUrl]);
+
+  // Fetch spray params on mount
+  useEffect(() => {
+    if (!apiBaseUrl) return;
+    fetchSprayParams();
+  }, [apiBaseUrl]);
+
+  const fetchSprayParams = async () => {
+    if (!apiBaseUrl) return;
+    setParamsLoading(true);
+    setParamsError(null);
+    try {
+      const res = await fetch(`${apiBaseUrl}/api/spray/params`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      // data may be { parameters: { key: { type, default, current, group, desc, min, max } } }
+      const raw: Record<string, any> = data.parameters ?? data;
+      const parsed: SprayParam[] = Object.entries(raw).map(([name, meta]: [string, any]) => ({
+        name,
+        type: meta.type ?? 'string',
+        default: meta.default,
+        current: meta.current,
+        group: meta.group ?? '',
+        desc: meta.desc ?? meta.description ?? '',
+        min: meta.min,
+        max: meta.max,
+      }));
+      setSprayParams(parsed);
+      // Seed edits with current values
+      const seeds: Record<string, string> = {};
+      parsed.forEach(p => { seeds[p.name] = String(p.current ?? p.default ?? ''); });
+      setParamEdits(seeds);
+    } catch (err: any) {
+      setParamsError(err.message ?? 'Failed to fetch params');
+    } finally {
+      setParamsLoading(false);
+    }
+  };
+
+  const handleSaveParams = async () => {
+    if (!apiBaseUrl) return;
+    setParamsSaving(true);
+    setParamsSaveStatus('idle');
+    try {
+      // Cast values to correct types
+      const payload: Record<string, any> = {};
+      sprayParams.forEach(p => {
+        const raw = paramEdits[p.name] ?? String(p.current ?? p.default ?? '');
+        if (p.type === 'bool') payload[p.name] = raw === 'true' || raw === '1';
+        else if (p.type === 'int') payload[p.name] = parseInt(raw, 10);
+        else if (p.type === 'float') payload[p.name] = parseFloat(raw);
+        else payload[p.name] = raw;
+      });
+      const res = await fetch(`${apiBaseUrl}/api/spray/params`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ parameters: payload }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setParamsSaveStatus('ok');
+      // Refresh to get server-confirmed values
+      await fetchSprayParams();
+    } catch (err: any) {
+      setParamsSaveStatus('err');
+    } finally {
+      setParamsSaving(false);
+      setTimeout(() => setParamsSaveStatus('idle'), 3000);
+    }
+  };
+
+  // Manual spray hold helpers
+  const startManualHold = async () => {
+    if (!apiBaseUrl || manualHoldActive) return;
+    try {
+      await fetch(`${apiBaseUrl}/api/spray/on`, { method: 'POST' });
+      setManualHoldActive(true);
+      // Send a heartbeat every 7 s to keep the 8 s window alive
+      manualHeartbeatRef.current = setInterval(async () => {
+        try { await fetch(`${apiBaseUrl}/api/spray/on`, { method: 'POST' }); } catch (_) {}
+      }, 7000);
+    } catch (err) {
+      console.log('Spray ON failed', err);
+    }
+  };
+
+  const stopManualHold = async () => {
+    if (!apiBaseUrl) return;
+    if (manualHeartbeatRef.current) {
+      clearInterval(manualHeartbeatRef.current);
+      manualHeartbeatRef.current = null;
+    }
+    try {
+      await fetch(`${apiBaseUrl}/api/spray/off`, { method: 'POST' });
+    } catch (err) {
+      console.log('Spray OFF failed', err);
+    }
+    setManualHoldActive(false);
+  };
+
+  // Cleanup heartbeat on unmount
+  useEffect(() => {
+    return () => {
+      if (manualHeartbeatRef.current) clearInterval(manualHeartbeatRef.current);
+    };
+  }, []);
 
   const handleSprayToggle = async () => {
     if (!apiBaseUrl) return;
@@ -7169,6 +7297,163 @@ function SwoziPage({
             <Text style={{ color: "#fff", fontWeight: "700" }}>{isTestActive ? "Stop" : "Start"}</Text>
           </Pressable>
         </View>
+      </View>
+
+      {/* ── Manual Spray Hold Buttons ── */}
+      <View style={{ flexDirection: 'row', gap: 10, marginVertical: 10 }}>
+        <Pressable
+          onPress={startManualHold}
+          disabled={manualHoldActive}
+          style={{
+            flex: 1, paddingVertical: 12, borderRadius: 10, alignItems: 'center',
+            backgroundColor: manualHoldActive ? '#86efac' : '#16a34a',
+            opacity: manualHoldActive ? 0.7 : 1,
+          }}
+        >
+          <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>💧 Spray ON</Text>
+        </Pressable>
+        <Pressable
+          onPress={stopManualHold}
+          disabled={!manualHoldActive}
+          style={{
+            flex: 1, paddingVertical: 12, borderRadius: 10, alignItems: 'center',
+            backgroundColor: !manualHoldActive ? '#fca5a5' : '#dc2626',
+            opacity: !manualHoldActive ? 0.6 : 1,
+          }}
+        >
+          <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>🚫 Spray OFF</Text>
+        </Pressable>
+      </View>
+      {manualHoldActive && (
+        <View style={{ backgroundColor: '#dcfce7', borderRadius: 8, padding: 8, marginBottom: 8 }}>
+          <Text style={{ color: '#15803d', fontSize: 12, textAlign: 'center', fontWeight: '600' }}>● Manual spray active — heartbeat running</Text>
+        </View>
+      )}
+
+      {/* ── Spray Params Table ── */}
+      <View style={{ marginVertical: 12 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+          <Text style={{ color: '#334155', fontSize: 16, fontWeight: '700' }}>Spray Parameters</Text>
+          <Pressable onPress={fetchSprayParams} style={{ padding: 6 }}>
+            <Text style={{ color: '#0ea5e9', fontSize: 13, fontWeight: '600' }}>↻ Refresh</Text>
+          </Pressable>
+        </View>
+
+        {paramsLoading && (
+          <View style={{ alignItems: 'center', paddingVertical: 16 }}>
+            <ActivityIndicator color="#0ea5e9" />
+            <Text style={{ color: '#64748b', marginTop: 6, fontSize: 12 }}>Loading params…</Text>
+          </View>
+        )}
+
+        {paramsError && !paramsLoading && (
+          <View style={{ backgroundColor: '#fee2e2', borderRadius: 8, padding: 10, marginBottom: 8 }}>
+            <Text style={{ color: '#b91c1c', fontSize: 12 }}>Error: {paramsError}</Text>
+          </View>
+        )}
+
+        {sprayParams.length > 0 && !paramsLoading && (
+          <View style={{ borderRadius: 10, overflow: 'hidden', borderWidth: 1, borderColor: '#e2e8f0' }}>
+            {/* Table Header */}
+            <View style={{ flexDirection: 'row', backgroundColor: '#1e3a5f', paddingVertical: 8, paddingHorizontal: 6 }}>
+              <Text style={{ flex: 2.5, color: '#fff', fontWeight: '700', fontSize: 11 }}>Parameter</Text>
+              <Text style={{ flex: 1.2, color: '#fff', fontWeight: '700', fontSize: 11, textAlign: 'center' }}>Type</Text>
+              <Text style={{ flex: 1.8, color: '#fff', fontWeight: '700', fontSize: 11, textAlign: 'center' }}>Default</Text>
+              <Text style={{ flex: 2, color: '#fff', fontWeight: '700', fontSize: 11, textAlign: 'center' }}>Value</Text>
+            </View>
+
+            {/* Table Rows */}
+            {sprayParams.map((param, idx) => (
+              <View
+                key={param.name}
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  paddingVertical: 6,
+                  paddingHorizontal: 6,
+                  backgroundColor: idx % 2 === 0 ? '#f8fafc' : '#ffffff',
+                  borderTopWidth: idx === 0 ? 0 : 1,
+                  borderTopColor: '#e2e8f0',
+                }}
+              >
+                <View style={{ flex: 2.5 }}>
+                  <Text style={{ color: '#1e293b', fontSize: 11, fontWeight: '600' }} numberOfLines={1}>{param.name}</Text>
+                  {param.desc ? <Text style={{ color: '#94a3b8', fontSize: 9 }} numberOfLines={1}>{param.desc}</Text> : null}
+                </View>
+                <Text style={{ flex: 1.2, color: '#64748b', fontSize: 10, textAlign: 'center' }}>{param.type}</Text>
+                <Text style={{ flex: 1.8, color: '#94a3b8', fontSize: 10, textAlign: 'center' }} numberOfLines={1}>
+                  {String(param.default ?? '—')}
+                </Text>
+                {/* Editable current value */}
+                {param.type === 'bool' ? (
+                  <Pressable
+                    style={{
+                      flex: 2,
+                      alignItems: 'center',
+                      backgroundColor: (paramEdits[param.name] === 'true' || paramEdits[param.name] === '1') ? '#22c55e' : '#e2e8f0',
+                      borderRadius: 6,
+                      paddingVertical: 4,
+                      marginLeft: 2,
+                    }}
+                    onPress={() => {
+                      const cur = paramEdits[param.name];
+                      setParamEdits(prev => ({
+                        ...prev,
+                        [param.name]: (cur === 'true' || cur === '1') ? 'false' : 'true',
+                      }));
+                    }}
+                  >
+                    <Text style={{ color: '#fff', fontWeight: '700', fontSize: 11 }}>
+                      {(paramEdits[param.name] === 'true' || paramEdits[param.name] === '1') ? 'ON' : 'OFF'}
+                    </Text>
+                  </Pressable>
+                ) : (
+                  <TextInput
+                    style={{
+                      flex: 2,
+                      borderWidth: 1,
+                      borderColor: '#cbd5e1',
+                      borderRadius: 6,
+                      paddingHorizontal: 6,
+                      paddingVertical: 3,
+                      fontSize: 11,
+                      color: '#1e293b',
+                      textAlign: 'center',
+                      marginLeft: 2,
+                      backgroundColor: '#fff',
+                    }}
+                    value={paramEdits[param.name] ?? ''}
+                    onChangeText={val => setParamEdits(prev => ({ ...prev, [param.name]: val }))}
+                    keyboardType={param.type === 'int' || param.type === 'float' ? 'numeric' : 'default'}
+                  />
+                )}
+              </View>
+            ))}
+          </View>
+        )}
+
+        {/* Save Button */}
+        {sprayParams.length > 0 && !paramsLoading && (
+          <Pressable
+            onPress={handleSaveParams}
+            disabled={paramsSaving}
+            style={{
+              marginTop: 10,
+              backgroundColor: paramsSaveStatus === 'ok' ? '#16a34a' : paramsSaveStatus === 'err' ? '#dc2626' : '#0ea5e9',
+              paddingVertical: 12,
+              borderRadius: 10,
+              alignItems: 'center',
+              opacity: paramsSaving ? 0.7 : 1,
+            }}
+          >
+            {paramsSaving
+              ? <ActivityIndicator color="#fff" />
+              : <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>
+                  {paramsSaveStatus === 'ok' ? '✓ Saved!' : paramsSaveStatus === 'err' ? '✗ Save Failed' : 'Apply Changes'}
+                </Text>
+            }
+          </Pressable>
+        )}
       </View>
 
       <RowToggle label="Manual Painting with Long Press" value={toggleA} onChange={setToggleA} />
