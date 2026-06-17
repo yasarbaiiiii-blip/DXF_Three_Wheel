@@ -135,14 +135,14 @@ export function TemplatesPage(props: TemplatesPageProps) {
     if (previewLines.length === 0) return;
     const bounds = computeBoundingBox(previewLines);
     
-    const newWidth = bounds.width * parsedSize;
-    const newHeight = bounds.height * parsedSize;
+    const newWidth = bounds.width;
+    const newHeight = bounds.height;
     
     // Boundary size validation for sports fields
     if (category === "sports_fields") {
       const fieldBounds = SPORTS_FIELD_BOUNDS[selectedField];
-      const requiredW = (fieldBounds.maxX - fieldBounds.minX) * parsedSize;
-      const requiredH = (fieldBounds.maxY - fieldBounds.minY) * parsedSize;
+      const requiredW = fieldBounds.naturalWidth * parsedSize;
+      const requiredH = fieldBounds.naturalHeight * parsedSize;
       const safeW = bw - 2 * indent;
       const safeH = bh - 2 * indent;
       if (requiredW > safeW || requiredH > safeH) {

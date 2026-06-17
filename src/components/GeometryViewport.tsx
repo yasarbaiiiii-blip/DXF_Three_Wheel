@@ -416,7 +416,7 @@ export function GeometryViewport({
                                 ? palette.foreground
                                 : palette.mutedForeground
                           }
-                          strokeWidth={0.45}
+                          strokeWidth={0.45 / zoom}
                           strokeDasharray={dashPattern(markingStyle)}
                           strokeLinecap="round"
                           fill="none"
@@ -431,20 +431,20 @@ export function GeometryViewport({
                           x2={selectedLine.to.y}
                           y2={selectedLine.to.x}
                           stroke={palette.emerald}
-                          strokeWidth={0.85}
+                          strokeWidth={0.85 / zoom}
                           strokeDasharray={dashPattern(markingStyle)}
                           strokeLinecap="round"
                         />
                         <Circle
                           cx={selectedLine.from.y}
                           cy={selectedLine.from.x}
-                          r="1.2"
+                          r={1.2 / zoom}
                           fill={palette.emerald}
                         />
                         <Circle
                           cx={selectedLine.to.y}
                           cy={selectedLine.to.x}
-                          r="1.2"
+                          r={1.2 / zoom}
                           fill={palette.emerald}
                         />
                       </>

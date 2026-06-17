@@ -696,6 +696,8 @@ const FIELD_DATA: Record<SportsFieldType, number[][]> = {
 export function generateSportsFieldLines(field: SportsFieldType, size: number): PlanLine[] {
     const data = FIELD_DATA[field];
     if (!data) return [];
+    const bounds = SPORTS_FIELD_BOUNDS[field];
+    const scale = bounds ? Math.max(bounds.naturalWidth, bounds.naturalHeight) * size : size;
     const lines: PlanLine[] = [];
     let pointId = 1;
     for (let i = 0; i < data.length; i++) {
@@ -705,8 +707,8 @@ export function generateSportsFieldLines(field: SportsFieldType, size: number): 
             label: "Field Line",
             layer: "marking",
             width: 0.1,
-            from: { id: pointId++, x: x1 * size, y: y1 * size },
-            to: { id: pointId++, x: x2 * size, y: y2 * size },
+            from: { id: pointId++, x: x1 * scale, y: y1 * scale },
+            to: { id: pointId++, x: x2 * scale, y: y2 * scale },
         });
     }
     return lines;

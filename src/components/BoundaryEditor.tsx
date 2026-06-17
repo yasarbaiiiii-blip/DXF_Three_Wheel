@@ -433,7 +433,7 @@ export const BoundaryEditor = memo(function BoundaryEditor({
           height={boundaryHeight * METER_TO_PX}
           fill="#f1f5f9"
           stroke={selectedItemIds.includes("boundary") ? "#ef4444" : "#0f172a"}
-          strokeWidth={selectedItemIds.includes("boundary") ? "4" : "3"}
+          strokeWidth={selectedItemIds.includes("boundary") ? 4 / camera.zoom : 3 / camera.zoom}
           strokeLinejoin="round"
         />
 
@@ -450,15 +450,15 @@ export const BoundaryEditor = memo(function BoundaryEditor({
 
         {/* Draw Snap Lines */}
         {snapLines.map((line, i) => (
-          <Line
-            key={`snap-${i}`}
-            x1={line.x1 * METER_TO_PX}
-            y1={line.y1 * METER_TO_PX}
-            x2={line.x2 * METER_TO_PX}
-            y2={line.y2 * METER_TO_PX}
-            stroke="#ef4444"
-            strokeWidth="1.5"
-          />
+           <Line
+             key={`snap-${i}`}
+             x1={line.x1 * METER_TO_PX}
+             y1={line.y1 * METER_TO_PX}
+             x2={line.x2 * METER_TO_PX}
+             y2={line.y2 * METER_TO_PX}
+             stroke="#ef4444"
+             strokeWidth={1.5 / camera.zoom}
+           />
         ))}
 
         {/* Draw Items */}
@@ -479,7 +479,7 @@ export const BoundaryEditor = memo(function BoundaryEditor({
                     x2={l.to.y * METER_TO_PX}
                     y2={-l.to.x * METER_TO_PX}
                     stroke={isSelected ? "#ef4444" : "#0f172a"}
-                    strokeWidth={isSelected ? "3" : "2"}
+                    strokeWidth={isSelected ? 3 / camera.zoom : 2 / camera.zoom}
                   />
                ))}
             </G>
