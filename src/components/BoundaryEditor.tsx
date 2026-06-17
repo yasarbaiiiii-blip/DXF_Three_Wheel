@@ -46,6 +46,15 @@ export const BoundaryEditor = memo(function BoundaryEditor({
   const [svgSize, setSvgSize] = useState({ width: 400, height: 400 }); // fallback for initial taps
   const [camera, setCamera] = useState({ x: 0, y: 0, zoom: 1 });
 
+  const [lockPanDrag, setLockPanDrag] = useState(false);
+  const [lockZoom, setLockZoom] = useState(false);
+
+  const lockPanDragRef = useRef(lockPanDrag);
+  useEffect(() => { lockPanDragRef.current = lockPanDrag; }, [lockPanDrag]);
+
+  const lockZoomRef = useRef(lockZoom);
+  useEffect(() => { lockZoomRef.current = lockZoom; }, [lockZoom]);
+
   const itemsRef = useRef(items);
   useEffect(() => { itemsRef.current = items; }, [items]);
 
@@ -113,8 +122,9 @@ export const BoundaryEditor = memo(function BoundaryEditor({
     const svgTapX = locationX * scaleX + viewBoxX;
     const svgTapY = locationY * scaleY + viewBoxY;
     
-    let nearestId: string | null = null;
-    let nearestDistSquared = (30 / cam.zoom) ** 2; 
+    const itemScale = cam.zoom < 0.5 ? 50 : 30;
+    let bestLineId: string | null = null;
+    let bestLineDistSq = (itemScale / cam.zoom) ** 2; 
 
     const distToSegmentSquared = (px: number, py: number, vx: number, vy: number, wx: number, wy: number) => {
       const l2 = (vx - wx) ** 2 + (vy - wy) ** 2;
@@ -132,11 +142,15 @@ export const BoundaryEditor = memo(function BoundaryEditor({
     const dBot = distToSegmentSquared(svgTapX, svgTapY, bx1, by2, bx2, by2);
     const dLeft = distToSegmentSquared(svgTapX, svgTapY, bx1, by1, bx1, by2);
     const dRight = distToSegmentSquared(svgTapX, svgTapY, bx2, by1, bx2, by2);
-    if (Math.min(dTop, dBot, dLeft, dRight) < nearestDistSquared) {
-        nearestDistSquared = Math.min(dTop, dBot, dLeft, dRight);
-        nearestId = "boundary";
+    const minBoundaryDist = Math.min(dTop, dBot, dLeft, dRight);
+    if (minBoundaryDist < bestLineDistSq) {
+      bestLineDistSq = minBoundaryDist;
+      bestLineId = "boundary";
     }
     
+    let bestBoxId: string | null = null;
+    let bestBoxArea = Infinity;
+
     itemsRef.current.forEach(item => {
       const dx = svgTapX - (item.x * METER_TO_PX);
       const dy = svgTapY - (-item.y * METER_TO_PX);
@@ -144,33 +158,33 @@ export const BoundaryEditor = memo(function BoundaryEditor({
       const localTapX = dx * Math.cos(rad) - dy * Math.sin(rad);
       const localTapY = dx * Math.sin(rad) + dy * Math.cos(rad);
       
-      let lineHit = false;
+      // 1. Check line hits (precise)
       for (const l of item.lines) {
          const x1 = l.from.y * METER_TO_PX;
          const y1 = -l.from.x * METER_TO_PX;
          const x2 = l.to.y * METER_TO_PX;
          const y2 = -l.to.x * METER_TO_PX;
          const d2 = distToSegmentSquared(localTapX, localTapY, x1, y1, x2, y2);
-         if (d2 < nearestDistSquared) {
-           nearestDistSquared = d2;
-           nearestId = item.id;
-           lineHit = true;
+         if (d2 < bestLineDistSq) {
+           bestLineDistSq = d2;
+           bestLineId = item.id;
          }
       }
 
-      if (!lineHit) {
-         const halfW = (item.height * METER_TO_PX) / 2;
-         const halfH = (item.width * METER_TO_PX) / 2;
-         if (Math.abs(localTapX) <= halfW && Math.abs(localTapY) <= halfH) {
-            const distToCenter = dx * dx + dy * dy;
-            if (distToCenter < nearestDistSquared) {
-               nearestDistSquared = distToCenter;
-               nearestId = item.id;
-            }
+      // 2. Bounding Box check (with tolerance)
+      const tolerance = 30 / cam.zoom;
+      const halfW = (item.height * METER_TO_PX) / 2 + tolerance;
+      const halfH = (item.width * METER_TO_PX) / 2 + tolerance;
+      if (Math.abs(localTapX) <= halfW && Math.abs(localTapY) <= halfH) {
+         const area = item.width * item.height;
+         if (area < bestBoxArea) {
+            bestBoxArea = area;
+            bestBoxId = item.id;
          }
       }
     });
-    return nearestId;
+
+    return bestLineId || bestBoxId;
   };
 
   const panResponder = useMemo(() =>
@@ -212,16 +226,19 @@ export const BoundaryEditor = memo(function BoundaryEditor({
                }
            }
            
-           if (dragData.type === "camera") {
-               const initialDist = dragData.pinchState.initialDist;
-               if (initialDist === 0) return;
-               const scaleMultiplier = currentDist / initialDist;
-               setCamera({
-                  ...dragData.pinchState.startCamera!,
-                  zoom: Math.max(0.01, Math.min(10, dragData.pinchState.startCamera!.zoom * scaleMultiplier))
-               });
-               return;
-           }
+            if (dragData.type === "camera") {
+                if (lockZoomRef.current) return;
+                const initialDist = dragData.pinchState.initialDist;
+                if (initialDist === 0) return;
+                const scaleMultiplier = currentDist / initialDist;
+                setCamera({
+                   ...dragData.pinchState.startCamera!,
+                   zoom: Math.max(0.01, Math.min(10, dragData.pinchState.startCamera!.zoom * scaleMultiplier))
+                });
+                return;
+            }
+            
+            if (lockPanDragRef.current) return;
            
            const initialDist = dragData.pinchState.initialDist;
            const initialAngle = dragData.pinchState.initialAngle;
@@ -303,16 +320,19 @@ export const BoundaryEditor = memo(function BoundaryEditor({
         const dx = gestureState.dx * (bwVal / (screenW * zoom));
         const dy = -gestureState.dy * (bhVal / (screenH * zoom));
 
-        if (dragData.type === "camera") {
-           const camDx = -gestureState.dx * (bwVal / (screenW * zoom));
-           const camDy = gestureState.dy * (bhVal / (screenH * zoom));
-           setCamera({
-              ...dragData.startCamera!,
-              x: dragData.startCamera!.x + camDx,
-              y: dragData.startCamera!.y + camDy
-           });
-           return;
-        }
+         if (dragData.type === "camera") {
+            if (lockPanDragRef.current) return;
+            const camDx = -gestureState.dx * (bwVal / (screenW * zoom));
+            const camDy = gestureState.dy * (bhVal / (screenH * zoom));
+            setCamera({
+               ...dragData.startCamera!,
+               x: dragData.startCamera!.x + camDx,
+               y: dragData.startCamera!.y + camDy
+            });
+            return;
+         }
+
+         if (lockPanDragRef.current) return;
 
         const bw = boundaryWidthRef.current;
         const bh = boundaryHeightRef.current;
@@ -354,73 +374,8 @@ export const BoundaryEditor = memo(function BoundaryEditor({
         setSnapLinesRef.current([]);
         
         if (Math.abs(gestureState.dx) < 3 && Math.abs(gestureState.dy) < 3) {
-          // TAP DETECTION - FIXED coordinate math
           const touch = evt.nativeEvent;
-          const bw = boundaryWidthRef.current;
-          const bh = boundaryHeightRef.current;
-          const sz = svgSizeRef.current;
-          
-          if (sz.width <= 0 || sz.height <= 0) return;
-
-          const cam = cameraRef.current;
-          const viewBoxWidth = (bw * METER_TO_PX) / cam.zoom;
-          const viewBoxHeight = (bh * METER_TO_PX) / cam.zoom;
-          const viewBoxX = -viewBoxWidth / 2 - cam.x * METER_TO_PX;
-          const viewBoxY = -viewBoxHeight / 2 + cam.y * METER_TO_PX;
-          const scaleX = viewBoxWidth / sz.width;
-          const scaleY = viewBoxHeight / sz.height;
-          // Helper: squared distance from point (px, py) to line segment (vx, vy) -> (wx, wy)
-          const distToSegmentSquared = (px: number, py: number, vx: number, vy: number, wx: number, wy: number) => {
-            const l2 = (vx - wx) ** 2 + (vy - wy) ** 2;
-            if (l2 === 0) return (px - vx) ** 2 + (py - vy) ** 2;
-            let t = ((px - vx) * (wx - vx) + (py - vy) * (wy - vy)) / l2;
-            t = Math.max(0, Math.min(1, t));
-            return (px - (vx + t * (wx - vx))) ** 2 + (py - (vy + t * (wy - vy))) ** 2;
-          };
-
-          const svgTapX = touch.locationX * scaleX + viewBoxX;
-          const svgTapY = touch.locationY * scaleY + viewBoxY;
-          
-          let nearestId: string | null = null;
-          const itemScale = cam.zoom < 0.5 ? 50 : 30;
-          let nearestDistSquared = (itemScale / cam.zoom) ** 2;
-          
-          itemsRef.current.forEach(item => {
-            // Inverse transform the tap into the item's local SVG coordinate space
-            const dx = svgTapX - (item.x * METER_TO_PX);
-            const dy = svgTapY - (-item.y * METER_TO_PX);
-            const rad = -item.rotation * Math.PI / 180;
-            const localTapX = dx * Math.cos(rad) - dy * Math.sin(rad);
-            const localTapY = dx * Math.sin(rad) + dy * Math.cos(rad);
-            
-            // Check distance to each line
-            let lineHit = false;
-            for (const l of item.lines) {
-               const x1 = l.from.y * METER_TO_PX;
-               const y1 = -l.from.x * METER_TO_PX;
-               const x2 = l.to.y * METER_TO_PX;
-               const y2 = -l.to.x * METER_TO_PX;
-               
-               const d2 = distToSegmentSquared(localTapX, localTapY, x1, y1, x2, y2);
-               if (d2 < nearestDistSquared) {
-                 nearestDistSquared = d2;
-                 nearestId = item.id;
-                 lineHit = true;
-               }
-            }
-
-            if (!lineHit) {
-               const halfW = (item.height * METER_TO_PX) / 2;
-               const halfH = (item.width * METER_TO_PX) / 2;
-               if (Math.abs(localTapX) <= halfW && Math.abs(localTapY) <= halfH) {
-                  const distToCenter = dx * dx + dy * dy;
-                  if (distToCenter < nearestDistSquared) {
-                     nearestDistSquared = distToCenter;
-                     nearestId = item.id;
-                  }
-               }
-            }
-          });
+          const nearestId = hitTest(touch.locationX, touch.locationY);
           
           if (nearestId) {
             const currentSelected = selectedItemIdsRef.current;
@@ -529,6 +484,47 @@ export const BoundaryEditor = memo(function BoundaryEditor({
           );
         })}
       </Svg>
+
+      {/* Floating Control Panel for Lock Toggles */}
+      <View style={{
+        position: "absolute",
+        top: 16,
+        left: 16,
+        backgroundColor: "rgba(255, 255, 255, 0.95)",
+        borderRadius: 12,
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        shadowColor: "#0f172a",
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.1,
+        shadowRadius: 8,
+        elevation: 4,
+        borderWidth: 1,
+        borderColor: "rgba(226, 232, 240, 0.8)",
+        flexDirection: "column",
+        gap: 8,
+      }}>
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", width: 155 }}>
+          <Text style={{ fontSize: 13, fontWeight: "600", color: "#334155" }}>Lock Pan/Drag</Text>
+          <Switch
+            value={lockPanDrag}
+            onValueChange={setLockPanDrag}
+            trackColor={{ false: "#cbd5e1", true: "#3b82f6" }}
+            thumbColor="#ffffff"
+            ios_backgroundColor="#cbd5e1"
+          />
+        </View>
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", width: 155 }}>
+          <Text style={{ fontSize: 13, fontWeight: "600", color: "#334155" }}>Lock Zoom</Text>
+          <Switch
+            value={lockZoom}
+            onValueChange={setLockZoom}
+            trackColor={{ false: "#cbd5e1", true: "#3b82f6" }}
+            thumbColor="#ffffff"
+            ios_backgroundColor="#cbd5e1"
+          />
+        </View>
+      </View>
     </View>
   );
 });
