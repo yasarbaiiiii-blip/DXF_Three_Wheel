@@ -8,6 +8,7 @@ import { BoundaryEditor, PlacedItem } from "../components/BoundaryEditor";
 import { generateAlphabetLines, FontStyle, AlphabetType, NumberType, generateNumberLines } from "../utils/characterTemplates";
 import { generateRoadSignLines, RoadSignType, ROAD_SIGN_LABELS } from "../utils/roadSignTemplates";
 import { generateTemplateLines, ShapeType, ArcType } from "../utils/shapeTemplates";
+import { generateSportsFieldLines, SportsFieldType, SPORTS_FIELD_LABELS, SPORTS_FIELD_BOUNDS } from "../utils/sportsFieldTemplates";
 import { linesToDxf } from "../utils/dxfGenerator";
 import type { PlanLine, LayerVisibility, Page, TelemetrySnapshot, DxfEntity } from "../types/plan";
 
@@ -75,6 +76,7 @@ export function TemplatesPage(props: TemplatesPageProps) {
   const [selectedLetter, setSelectedLetter] = useState<AlphabetType>("A");
   const [selectedDigit, setSelectedDigit] = useState<NumberType>("0");
   const [selectedSign, setSelectedSign] = useState<RoadSignType>("ArrowStraight");
+  const [selectedField, setSelectedField] = useState<SportsFieldType>("cricket_icc");
   const [arcType, setArcType] = useState<ArcType>("full");
   const [sizeInput, setSizeInput] = useState("1.0");
   const [isParsing, setIsParsing] = useState(false);
@@ -111,8 +113,9 @@ export function TemplatesPage(props: TemplatesPageProps) {
     if (category === "alphabets") return generateAlphabetLines(selectedLetter, parsedSize, fontStyle);
     if (category === "numbers") return generateNumberLines(selectedDigit, parsedSize, fontStyle);
     if (category === "road_signs") return generateRoadSignLines(selectedSign, parsedSize);
+    if (category === "sports_fields") return generateSportsFieldLines(selectedField, parsedSize);
     return [];
-  }, [category, shape, selectedLetter, selectedDigit, selectedSign, parsedSize, arcType, fontStyle]);
+  }, [category, shape, selectedLetter, selectedDigit, selectedSign, selectedField, parsedSize, arcType, fontStyle]);
 
   const computeBoundingBox = useCallback((lines: PlanLine[]): { width: number; height: number } => {
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
@@ -134,6 +137,22 @@ export function TemplatesPage(props: TemplatesPageProps) {
     
     const newWidth = bounds.width * parsedSize;
     const newHeight = bounds.height * parsedSize;
+    
+    // Boundary size validation for sports fields
+    if (category === "sports_fields") {
+      const fieldBounds = SPORTS_FIELD_BOUNDS[selectedField];
+      const requiredW = (fieldBounds.maxX - fieldBounds.minX) * parsedSize;
+      const requiredH = (fieldBounds.maxY - fieldBounds.minY) * parsedSize;
+      const safeW = bw - 2 * indent;
+      const safeH = bh - 2 * indent;
+      if (requiredW > safeW || requiredH > safeH) {
+        Alert.alert(
+          "Field Too Large",
+          `This field requires ${requiredW.toFixed(2)}m × ${requiredH.toFixed(2)}m but the boundary is only ${safeW.toFixed(2)}m × ${safeH.toFixed(2)}m. Increase boundary dimensions or reduce scale.`
+        );
+        return;
+      }
+    }
     
     let newX = 0;
     let newY = 0;
@@ -166,7 +185,7 @@ export function TemplatesPage(props: TemplatesPageProps) {
     setPlacedItems(prev => [...prev, newItem]);
     // Auto-select so user can immediately scale/rotate/drag
     setSelectedItemIds([newItem.id]);
-  }, [previewLines, parsedSize, computeBoundingBox, placedItems, lSpacing, bw, indent]);
+  }, [previewLines, parsedSize, computeBoundingBox, placedItems, lSpacing, bw, bh, indent, category, selectedField]);
 
   const handleDeleteItem = useCallback(() => {
     const deletedGroupIds = new Set(
@@ -366,7 +385,9 @@ export function TemplatesPage(props: TemplatesPageProps) {
           ? `Letter_${selectedLetter}_${fontStyle}_${parsedSize}m`
           : category === "numbers"
             ? `Number_${selectedDigit}_${fontStyle}_${parsedSize}m`
-            : `Road_Sign_${parsedSize}m`;
+            : category === "sports_fields"
+              ? `Sports_Field_${selectedField}_${parsedSize}m`
+              : `Road_Sign_${parsedSize}m`;
       finalLines = previewLines;
     }
 
@@ -547,7 +568,30 @@ export function TemplatesPage(props: TemplatesPageProps) {
                 <Text style={{ color: "#64748b", fontSize: 11, fontWeight: "800", letterSpacing: 1, textTransform: "uppercase", marginBottom: 12 }}>
                   Sports Fields
                 </Text>
-                <Text style={{ color: "#94a3b8", fontSize: 13, textAlign: "center" }}>Empty</Text>
+                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                  {(Object.keys(SPORTS_FIELD_LABELS) as SportsFieldType[]).map((f) => (
+                    <Pressable
+                      key={f}
+                      onPress={() => setSelectedField(f)}
+                      style={{
+                        flexBasis: "47%",
+                        padding: 12,
+                        borderRadius: 12,
+                        backgroundColor: selectedField === f ? "#0f172a" : "#f1f5f9",
+                        borderWidth: 1,
+                        borderColor: selectedField === f ? "#0f172a" : "#e2e8f0",
+                        alignItems: "center",
+                      }}
+                    >
+                      <Text style={{ color: selectedField === f ? "#ffffff" : "#475569", fontSize: 12, fontWeight: "700", textAlign: "center" }}>
+                        {SPORTS_FIELD_LABELS[f]}
+                      </Text>
+                      <Text style={{ color: selectedField === f ? "#94a3b8" : "#94a3b8", fontSize: 10, marginTop: 2, textAlign: "center" }}>
+                        {SPORTS_FIELD_BOUNDS[f].naturalWidth}m × {SPORTS_FIELD_BOUNDS[f].naturalHeight}m
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
               </View>
             )}
 
