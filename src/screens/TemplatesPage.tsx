@@ -87,7 +87,7 @@ export function TemplatesPage(props: TemplatesPageProps) {
   const [activeIndentSpacing, setActiveIndentSpacing] = useState(0.25);
   const [activeLetterSpacingCm, setActiveLetterSpacingCm] = useState(10);
 
-  const parsedSize = Math.max(0.5, Math.min(3.0, parseFloat(sizeInput) || 1.0));
+  const parsedSize = Math.max(0.5, Math.min(4.0, parseFloat(sizeInput) || 1.0));
 
   // PENDING values from text inputs
   const pendingWidth = parseFloat(boundaryWidthStr) || 4.0;
@@ -147,10 +147,9 @@ export function TemplatesPage(props: TemplatesPageProps) {
       const safeH = bh - 2 * indent;
       if (requiredW > safeW || requiredH > safeH) {
         Alert.alert(
-          "Field Too Large",
-          `This field requires ${requiredW.toFixed(2)}m × ${requiredH.toFixed(2)}m but the boundary is only ${safeW.toFixed(2)}m × ${safeH.toFixed(2)}m. Increase boundary dimensions or reduce scale.`
+          "Large Field",
+          `This field (${requiredW.toFixed(1)}m × ${requiredH.toFixed(1)}m) is larger than your boundary (${safeW.toFixed(1)}m × ${safeH.toFixed(1)}m). It will be placed but zoom out to see it.`
         );
-        return;
       }
     }
     
@@ -750,7 +749,7 @@ export function TemplatesPage(props: TemplatesPageProps) {
                     <Slider
                       style={{ width: "100%", height: 40 }}
                       minimumValue={0.5}
-                      maximumValue={3.0}
+                      maximumValue={4.0}
                       step={0.1}
                       value={parsedSize}
                       onValueChange={(val) => setSizeInput(val.toFixed(2))}

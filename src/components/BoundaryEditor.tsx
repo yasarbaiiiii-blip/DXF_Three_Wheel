@@ -114,7 +114,7 @@ export const BoundaryEditor = memo(function BoundaryEditor({
     const svgTapY = locationY * scaleY + viewBoxY;
     
     let nearestId: string | null = null;
-    let nearestDistSquared = (20 / cam.zoom) ** 2; 
+    let nearestDistSquared = (30 / cam.zoom) ** 2; 
 
     const distToSegmentSquared = (px: number, py: number, vx: number, vy: number, wx: number, wy: number) => {
       const l2 = (vx - wx) ** 2 + (vy - wy) ** 2;
@@ -143,6 +143,8 @@ export const BoundaryEditor = memo(function BoundaryEditor({
       const rad = -item.rotation * Math.PI / 180;
       const localTapX = dx * Math.cos(rad) - dy * Math.sin(rad);
       const localTapY = dx * Math.sin(rad) + dy * Math.cos(rad);
+      
+      let lineHit = false;
       for (const l of item.lines) {
          const x1 = l.from.y * METER_TO_PX;
          const y1 = -l.from.x * METER_TO_PX;
@@ -152,6 +154,19 @@ export const BoundaryEditor = memo(function BoundaryEditor({
          if (d2 < nearestDistSquared) {
            nearestDistSquared = d2;
            nearestId = item.id;
+           lineHit = true;
+         }
+      }
+
+      if (!lineHit) {
+         const halfW = (item.height * METER_TO_PX) / 2;
+         const halfH = (item.width * METER_TO_PX) / 2;
+         if (Math.abs(localTapX) <= halfW && Math.abs(localTapY) <= halfH) {
+            const distToCenter = dx * dx + dy * dy;
+            if (distToCenter < nearestDistSquared) {
+               nearestDistSquared = distToCenter;
+               nearestId = item.id;
+            }
          }
       }
     });
@@ -203,7 +218,7 @@ export const BoundaryEditor = memo(function BoundaryEditor({
                const scaleMultiplier = currentDist / initialDist;
                setCamera({
                   ...dragData.pinchState.startCamera!,
-                  zoom: Math.max(0.1, Math.min(10, dragData.pinchState.startCamera!.zoom * scaleMultiplier))
+                  zoom: Math.max(0.01, Math.min(10, dragData.pinchState.startCamera!.zoom * scaleMultiplier))
                });
                return;
            }
@@ -279,12 +294,18 @@ export const BoundaryEditor = memo(function BoundaryEditor({
         }
 
         const zoom = cameraRef.current.zoom;
-        const dx = (gestureState.dx / METER_TO_PX) / zoom;
-        const dy = (-gestureState.dy / METER_TO_PX) / zoom;
+        const sz = svgSizeRef.current;
+        const screenW = sz.width > 0 ? sz.width : 400;
+        const screenH = sz.height > 0 ? sz.height : 400;
+        const bwVal = boundaryWidthRef.current;
+        const bhVal = boundaryHeightRef.current;
+
+        const dx = gestureState.dx * (bwVal / (screenW * zoom));
+        const dy = -gestureState.dy * (bhVal / (screenH * zoom));
 
         if (dragData.type === "camera") {
-           const camDx = (-gestureState.dx / METER_TO_PX) / zoom;
-           const camDy = (gestureState.dy / METER_TO_PX) / zoom;
+           const camDx = -gestureState.dx * (bwVal / (screenW * zoom));
+           const camDy = gestureState.dy * (bhVal / (screenH * zoom));
            setCamera({
               ...dragData.startCamera!,
               x: dragData.startCamera!.x + camDx,
@@ -340,9 +361,14 @@ export const BoundaryEditor = memo(function BoundaryEditor({
           const sz = svgSizeRef.current;
           
           if (sz.width <= 0 || sz.height <= 0) return;
-          
-          const scaleX = (bw * METER_TO_PX) / sz.width;
-          const scaleY = (bh * METER_TO_PX) / sz.height;
+
+          const cam = cameraRef.current;
+          const viewBoxWidth = (bw * METER_TO_PX) / cam.zoom;
+          const viewBoxHeight = (bh * METER_TO_PX) / cam.zoom;
+          const viewBoxX = -viewBoxWidth / 2 - cam.x * METER_TO_PX;
+          const viewBoxY = -viewBoxHeight / 2 + cam.y * METER_TO_PX;
+          const scaleX = viewBoxWidth / sz.width;
+          const scaleY = viewBoxHeight / sz.height;
           // Helper: squared distance from point (px, py) to line segment (vx, vy) -> (wx, wy)
           const distToSegmentSquared = (px: number, py: number, vx: number, vy: number, wx: number, wy: number) => {
             const l2 = (vx - wx) ** 2 + (vy - wy) ** 2;
@@ -352,11 +378,12 @@ export const BoundaryEditor = memo(function BoundaryEditor({
             return (px - (vx + t * (wx - vx))) ** 2 + (py - (vy + t * (wy - vy))) ** 2;
           };
 
-          const svgTapX = touch.locationX * scaleX - (bw * METER_TO_PX / 2);
-          const svgTapY = touch.locationY * scaleY - (bh * METER_TO_PX / 2);
+          const svgTapX = touch.locationX * scaleX + viewBoxX;
+          const svgTapY = touch.locationY * scaleY + viewBoxY;
           
           let nearestId: string | null = null;
-          let nearestDistSquared = 20 * 20; // Hit tolerance: 20 pixels radius
+          const itemScale = cam.zoom < 0.5 ? 50 : 30;
+          let nearestDistSquared = (itemScale / cam.zoom) ** 2;
           
           itemsRef.current.forEach(item => {
             // Inverse transform the tap into the item's local SVG coordinate space
@@ -367,6 +394,7 @@ export const BoundaryEditor = memo(function BoundaryEditor({
             const localTapY = dx * Math.sin(rad) + dy * Math.cos(rad);
             
             // Check distance to each line
+            let lineHit = false;
             for (const l of item.lines) {
                const x1 = l.from.y * METER_TO_PX;
                const y1 = -l.from.x * METER_TO_PX;
@@ -377,6 +405,19 @@ export const BoundaryEditor = memo(function BoundaryEditor({
                if (d2 < nearestDistSquared) {
                  nearestDistSquared = d2;
                  nearestId = item.id;
+                 lineHit = true;
+               }
+            }
+
+            if (!lineHit) {
+               const halfW = (item.height * METER_TO_PX) / 2;
+               const halfH = (item.width * METER_TO_PX) / 2;
+               if (Math.abs(localTapX) <= halfW && Math.abs(localTapY) <= halfH) {
+                  const distToCenter = dx * dx + dy * dy;
+                  if (distToCenter < nearestDistSquared) {
+                     nearestDistSquared = distToCenter;
+                     nearestId = item.id;
+                  }
                }
             }
           });
@@ -464,6 +505,8 @@ export const BoundaryEditor = memo(function BoundaryEditor({
         {/* Draw Items */}
         {items.map(item => {
           const isSelected = selectedItemIds.includes(item.id);
+          const totalDim = Math.max(item.width || 0, item.height || 0) * item.scale;
+          const sizeScale = totalDim > 0 ? Math.sqrt(totalDim) : 1;
           
           return (
             <G 
@@ -479,7 +522,7 @@ export const BoundaryEditor = memo(function BoundaryEditor({
                     x2={l.to.y * METER_TO_PX}
                     y2={-l.to.x * METER_TO_PX}
                     stroke={isSelected ? "#ef4444" : "#0f172a"}
-                    strokeWidth={isSelected ? 3 / camera.zoom : 2 / camera.zoom}
+                    strokeWidth={isSelected ? (3 * sizeScale) / camera.zoom : (2 * sizeScale) / camera.zoom}
                   />
                ))}
             </G>
