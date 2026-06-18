@@ -75,7 +75,7 @@ export function TemplatesPage(props: TemplatesPageProps) {
   const [shape, setShape] = useState<ShapeType>("square");
   const [selectedLetter, setSelectedLetter] = useState<AlphabetType>("A");
   const [selectedDigit, setSelectedDigit] = useState<NumberType>("0");
-  const [selectedSign, setSelectedSign] = useState<RoadSignType>("ArrowStraight");
+  const [selectedSign, setSelectedSign] = useState<RoadSignType>("am_01");
   const [selectedField, setSelectedField] = useState<SportsFieldType>("cricket_icc");
   const [arcType, setArcType] = useState<ArcType>("full");
   const [sizeInput, setSizeInput] = useState("1.0");
@@ -89,7 +89,15 @@ export function TemplatesPage(props: TemplatesPageProps) {
   const [activeIndentSpacing, setActiveIndentSpacing] = useState(0.25);
   const [activeLetterSpacingCm, setActiveLetterSpacingCm] = useState(10);
 
-  const parsedSize = Math.max(0.5, Math.min(15.0, parseFloat(sizeInput) || 1.0));
+  const parsedSize = Math.max(0.1, parseFloat(sizeInput) || 1.0);
+
+  useEffect(() => {
+    if (category === "sports_fields" && SPORTS_FIELD_BOUNDS[selectedField]) {
+      const bounds = SPORTS_FIELD_BOUNDS[selectedField];
+      const naturalSize = Math.max(bounds.naturalWidth, bounds.naturalHeight);
+      setSizeInput(naturalSize.toFixed(2));
+    }
+  }, [category, selectedField]);
 
   // PENDING values from text inputs
   const pendingWidth = parseFloat(boundaryWidthStr) || 4.0;
@@ -141,18 +149,16 @@ export function TemplatesPage(props: TemplatesPageProps) {
     const newWidth = bounds.width;
     const newHeight = bounds.height;
     
-    // Boundary size validation for sports fields
+    // Boundary size validation ONLY for sports fields
     if (category === "sports_fields") {
-      const fieldBounds = SPORTS_FIELD_BOUNDS[selectedField];
-      const requiredW = fieldBounds.naturalWidth * parsedSize;
-      const requiredH = fieldBounds.naturalHeight * parsedSize;
       const safeW = bw - 2 * indent;
       const safeH = bh - 2 * indent;
-      if (requiredW > safeW || requiredH > safeH) {
+      if (newWidth > safeW || newHeight > safeH) {
         Alert.alert(
-          "Large Field",
-          `This field (${requiredW.toFixed(1)}m × ${requiredH.toFixed(1)}m) is larger than your boundary (${safeW.toFixed(1)}m × ${safeH.toFixed(1)}m). It will be placed but zoom out to see it.`
+          "Cannot Add Sports Field",
+          `This field (${newWidth.toFixed(1)}m × ${newHeight.toFixed(1)}m) is larger than your available boundary space (${safeW.toFixed(1)}m × ${safeH.toFixed(1)}m).\n\nPlease increase your boundary size first.`
         );
+        return; // Block addition
       }
     }
     
@@ -789,8 +795,8 @@ export function TemplatesPage(props: TemplatesPageProps) {
                   <View style={{ flex: 1 }}>
                     <Slider
                       style={{ width: "100%", height: 40 }}
-                      minimumValue={0.5}
-                      maximumValue={15.0}
+                      minimumValue={0.1}
+                      maximumValue={category === "sports_fields" ? 500.0 : 15.0}
                       step={0.1}
                       value={parsedSize}
                       onValueChange={(val) => setSizeInput(val.toFixed(2))}

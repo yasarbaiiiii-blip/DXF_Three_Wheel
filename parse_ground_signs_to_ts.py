@@ -1,70 +1,49 @@
 #!/usr/bin/env python3
 """
-Parse DXF sports field templates and generate a TypeScript constants file.
+Parse DXF ground signs and generate the roadSignTemplates.ts file.
 
 Handles entity types: LINE, LWPOLYLINE, CIRCLE, ARC
 Normalizes coordinates so bounding box is centered at origin with 0-1 range.
 """
 
-import os, math
+import os, math, glob
 
-TEMPLATES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
-OUTPUT_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "src", "utils", "sportsFieldTemplates.ts")
-
-FIELDS = {
-    "cricket_icc": "Cricket (ICC)",
-    "field_hockey1_fih": "Field Hockey (FIH)",
-    "football_soccer_fifa": "Football / Soccer (FIFA)",
-    "kabaddi_indoor_mens": "Kabaddi Indoor (Men's)",
-    "lacrosse": "Lacrosse",
-    "nba_court": "Basketball (NBA)",
-    "squash": "Squash",
-    "track_field_400m": "Track & Field (400m)",
-    "badminton_bwf": "Badminton (BWF)",
-    "tennis_itf": "Tennis (ITF)",
-    "volleyball": "Volleyball",
-}
+TEMPLATES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates", "Ground signs")
+OUTPUT_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "src", "utils", "roadSignTemplates.ts")
 
 ARC_SEGMENTS = 24  # segments per full circle for approximation
-
 
 def parse_dxf(filepath: str):
     """Parse a DXF file and return list of (x1,y1,x2,y2) line segments."""
     with open(filepath, "r", encoding="utf-8", errors="replace") as f:
         content = f.read()
 
-    # Split into group code / value pairs
     raw_lines = content.split("\n")
     pairs = []
-    i = 0
-    while i + 1 < len(raw_lines):
-        code = raw_lines[i].strip()
-        value = raw_lines[i + 1].strip()
+    for i in range(0, len(raw_lines) - 1, 2):
         try:
-            code = int(code)
+            code = int(raw_lines[i].strip())
+            val = raw_lines[i + 1].strip()
+            pairs.append((code, val))
         except ValueError:
-            i += 1
-            continue
-        pairs.append((code, value))
-        i += 2
+            pass
 
-    # Find ENTITIES section
-    entities_start = None
-    entities_end = None
-    for idx, (code, value) in enumerate(pairs):
-        if code == 2 and value == "ENTITIES":
-            entities_start = idx + 1
-        if entities_start is not None and code == 0 and value == "ENDSEC":
-            entities_end = idx
-            break
+    entities_start = -1
+    entities_end = -1
 
-    if entities_start is None or entities_end is None:
+    for i, (code, val) in enumerate(pairs):
+        if code == 0 and val == "SECTION":
+            if i + 1 < len(pairs) and pairs[i + 1][1] == "ENTITIES":
+                entities_start = i + 2
+        if code == 0 and val == "ENDSEC" and entities_start != -1 and entities_end == -1:
+            entities_end = i
+
+    if entities_start == -1:
         print(f"  WARNING: No ENTITIES section found in {filepath}")
         return []
 
     entity_pairs = pairs[entities_start:entities_end]
 
-    # Split into individual entities
     entities = []
     current = []
     for code, value in entity_pairs:
@@ -157,7 +136,6 @@ def parse_dxf(filepath: str):
 
 
 def normalize_segments(segments):
-    """Normalize segments to be centered at origin in 0-1 range. Returns (normalized, bounds)."""
     if not segments:
         return [], {"minX": 0, "maxX": 0, "minY": 0, "maxY": 0, "naturalWidth": 0, "naturalHeight": 0}
 
@@ -196,7 +174,6 @@ def normalize_segments(segments):
 
 
 def generate_ts(all_data: dict):
-    """Generate the TypeScript file."""
     field_names = list(all_data.keys())
 
     ts = []
@@ -204,24 +181,20 @@ def generate_ts(all_data: dict):
 
     # Type union
     union = " | ".join(f'"{f}"' for f in field_names)
-    ts.append(f"export type SportsFieldType = {union};\n")
+    if not union:
+        union = '""'
+    ts.append(f"export type RoadSignType = {union};\n")
 
     # Labels
-    ts.append("export const SPORTS_FIELD_LABELS: Record<SportsFieldType, string> = {")
+    ts.append("export const ROAD_SIGN_LABELS: Record<RoadSignType, string> = {")
     for f in field_names:
-        ts.append(f'    "{f}": "{FIELDS[f]}",')
-    ts.append("};\n")
-
-    # Bounds
-    ts.append("export const SPORTS_FIELD_BOUNDS: Record<SportsFieldType, { minX: number; maxX: number; minY: number; maxY: number; naturalWidth: number; naturalHeight: number }> = {")
-    for f in field_names:
-        b = all_data[f]["bounds"]
-        ts.append(f'    "{f}": {{ minX: {b["minX"]}, maxX: {b["maxX"]}, minY: {b["minY"]}, maxY: {b["maxY"]}, naturalWidth: {b["naturalWidth"]}, naturalHeight: {b["naturalHeight"]} }},')
+        label = f.replace("_", " ").upper()
+        ts.append(f'    "{f}": "{label}",')
     ts.append("};\n")
 
     # Raw data arrays
     ts.append("// Pre-computed normalized line segments [x1, y1, x2, y2][]")
-    ts.append("const FIELD_DATA: Record<SportsFieldType, number[][]> = {")
+    ts.append("const SIGN_DATA: Record<RoadSignType, number[][]> = {")
     for f in field_names:
         segs = all_data[f]["segments"]
         ts.append(f'    "{f}": [')
@@ -231,16 +204,16 @@ def generate_ts(all_data: dict):
     ts.append("};\n")
 
     # Generator function
-    ts.append("export function generateSportsFieldLines(field: SportsFieldType, size: number): PlanLine[] {")
-    ts.append("    const data = FIELD_DATA[field];")
+    ts.append("export function generateRoadSignLines(signType: RoadSignType, size: number): PlanLine[] {")
+    ts.append("    const data = SIGN_DATA[signType];")
     ts.append("    if (!data) return [];")
     ts.append("    const lines: PlanLine[] = [];")
     ts.append("    let pointId = 1;")
     ts.append("    for (let i = 0; i < data.length; i++) {")
     ts.append("        const [x1, y1, x2, y2] = data[i];")
     ts.append("        lines.push({")
-    ts.append('            id: `sf-${i}`,')
-    ts.append('            label: "Field Line",')
+    ts.append('            id: `rs-${i}`,')
+    ts.append('            label: "Sign Line",')
     ts.append('            layer: "marking",')
     ts.append("            width: 0.1,")
     ts.append("            from: { id: pointId++, x: x1 * size, y: y1 * size },")
@@ -256,11 +229,13 @@ def generate_ts(all_data: dict):
 def main():
     all_data = {}
 
-    for field_key, label in FIELDS.items():
-        dxf_path = os.path.join(TEMPLATES_DIR, f"{field_key}.dxf")
-        if not os.path.exists(dxf_path):
-            print(f"WARNING: {dxf_path} not found, skipping")
-            continue
+    dxf_files = [f for f in os.listdir(TEMPLATES_DIR) if f.lower().endswith('.dxf')]
+
+    for filename in dxf_files:
+        dxf_path = os.path.join(TEMPLATES_DIR, filename)
+        
+        # Create a clean key (e.g. "am_01" from "am 01.DXF")
+        field_key = os.path.splitext(filename)[0].strip().replace(" ", "_").lower()
 
         print(f"Parsing {field_key}...")
         segments = parse_dxf(dxf_path)
@@ -268,7 +243,6 @@ def main():
 
         normalized, bounds = normalize_segments(segments)
         print(f"  Normalized segments: {len(normalized)}")
-        print(f"  Natural dims: {bounds['naturalWidth']:.2f} x {bounds['naturalHeight']:.2f}")
 
         all_data[field_key] = {
             "segments": normalized,
@@ -283,7 +257,7 @@ def main():
 
     print(f"\nGenerated {OUTPUT_FILE}")
     total_segs = sum(len(d["segments"]) for d in all_data.values())
-    print(f"Total line segments across all fields: {total_segs}")
+    print(f"Total line segments across all signs: {total_segs}")
 
 
 if __name__ == "__main__":
