@@ -6676,62 +6676,92 @@ function PlanPreview({
   useEffect(() => { layoutSizeRef.current = layoutSize; }, [layoutSize]);
 
   const panResponder = useMemo(() => {
-    let initialZoom = 1;
-    let initialDistance = 0;
-    let initialPanX = 0;
-    let initialPanY = 0;
+    let lastTouchX = 0;
+    let lastTouchY = 0;
+
+    let pinchStartDistance = 0;
+    let pinchStartZoom = 1;
+    let pinchStartCenterX = 0;
+    let pinchStartCenterY = 0;
+    let pinchStartPanX = 0;
+    let pinchStartPanY = 0;
 
     return PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
       onPanResponderGrant: (evt) => {
-        initialPanX = viewportRef.current.panX;
-        initialPanY = viewportRef.current.panY;
-        initialZoom = viewportRef.current.zoom;
-
         const touches = evt.nativeEvent.touches;
-        if (touches.length === 2) {
+        if (touches.length === 1) {
+          lastTouchX = touches[0].pageX;
+          lastTouchY = touches[0].pageY;
+          pinchStartDistance = 0;
+        } else if (touches.length === 2) {
           const dx = touches[0].pageX - touches[1].pageX;
           const dy = touches[0].pageY - touches[1].pageY;
-          initialDistance = Math.hypot(dx, dy);
+          pinchStartDistance = Math.hypot(dx, dy);
+          pinchStartZoom = viewportRef.current.zoom;
+          pinchStartPanX = viewportRef.current.panX;
+          pinchStartPanY = viewportRef.current.panY;
+          pinchStartCenterX = (touches[0].locationX + touches[1].locationX) / 2;
+          pinchStartCenterY = (touches[0].locationY + touches[1].locationY) / 2;
         }
       },
       onPanResponderMove: (evt, gestureState) => {
         userPannedRef.current = true;
         const touches = evt.nativeEvent.touches;
 
-        if (touches.length === 2 && initialDistance > 0) {
-          // Pinch Zoom
+        if (touches.length === 2) {
           const dx = touches[0].pageX - touches[1].pageX;
           const dy = touches[0].pageY - touches[1].pageY;
           const distance = Math.hypot(dx, dy);
-          
-          const scale = distance / initialDistance;
-          const newZoom = Math.max(0.01, Math.min(1000, initialZoom * scale));
-          
-          const centerX = (touches[0].locationX + touches[1].locationX) / 2;
-          const centerY = (touches[0].locationY + touches[1].locationY) / 2;
 
-          const zoomRatio = newZoom / initialZoom;
-          const next = {
-            panX: centerX - (centerX - initialPanX) * zoomRatio,
-            panY: centerY - (centerY - initialPanY) * zoomRatio,
-            zoom: newZoom,
-          };
-          rafViewportRef.current = next;
-          scheduleViewportCommit();
+          if (pinchStartDistance === 0) {
+            pinchStartDistance = distance;
+            pinchStartZoom = viewportRef.current.zoom;
+            pinchStartPanX = viewportRef.current.panX;
+            pinchStartPanY = viewportRef.current.panY;
+            pinchStartCenterX = (touches[0].locationX + touches[1].locationX) / 2;
+            pinchStartCenterY = (touches[0].locationY + touches[1].locationY) / 2;
+          } else {
+            const scale = distance / pinchStartDistance;
+            const newZoom = Math.max(0.01, Math.min(1000, pinchStartZoom * scale));
+            
+            const currentCenterX = (touches[0].locationX + touches[1].locationX) / 2;
+            const currentCenterY = (touches[0].locationY + touches[1].locationY) / 2;
+
+            const zoomRatio = newZoom / pinchStartZoom;
+            const next = {
+              panX: currentCenterX - (pinchStartCenterX - pinchStartPanX) * zoomRatio,
+              panY: currentCenterY - (pinchStartCenterY - pinchStartPanY) * zoomRatio,
+              zoom: newZoom,
+            };
+            rafViewportRef.current = next;
+            scheduleViewportCommit();
+          }
         } else if (touches.length === 1) {
-          // Pan
+          if (pinchStartDistance > 0) {
+            pinchStartDistance = 0;
+            lastTouchX = touches[0].pageX;
+            lastTouchY = touches[0].pageY;
+          }
+
+          const dx = touches[0].pageX - lastTouchX;
+          const dy = touches[0].pageY - lastTouchY;
+
           const next = {
-            panX: initialPanX + gestureState.dx,
-            panY: initialPanY + gestureState.dy,
+            panX: viewportRef.current.panX - dx,
+            panY: viewportRef.current.panY - dy,
             zoom: viewportRef.current.zoom,
           };
+          lastTouchX = touches[0].pageX;
+          lastTouchY = touches[0].pageY;
+
           rafViewportRef.current = next;
           scheduleViewportCommit();
         }
       },
       onPanResponderRelease: (evt, gestureState) => {
+        pinchStartDistance = 0;
         // Tap detection
         if (Math.abs(gestureState.dx) < 5 && Math.abs(gestureState.dy) < 5 && evt.nativeEvent.touches.length === 0) {
           const tapX = evt.nativeEvent.locationX;
@@ -6752,6 +6782,9 @@ function PlanPreview({
             onSelectLineRef.current?.(null);
           }
         }
+      },
+      onPanResponderTerminate: () => {
+        pinchStartDistance = 0;
       },
     });
   }, []);
@@ -8194,13 +8227,13 @@ function linesToDxf(lines: PlanLine[], name: string) {
       "370",
       String(mmLineweight(entry.width)),
       "10",
-      String(entry.from.x),
-      "20",
       String(entry.from.y),
+      "20",
+      String(entry.from.x),
       "11",
-      String(entry.to.x),
-      "21",
       String(entry.to.y),
+      "21",
+      String(entry.to.x),
     ].join("\n"))
     .join("\n");
 
@@ -8209,6 +8242,10 @@ function linesToDxf(lines: PlanLine[], name: string) {
     "SECTION",
     "2",
     "HEADER",
+    "9",
+    "$INSUNITS",
+    "70",
+    "6",
     "0",
     "ENDSEC",
     "0",

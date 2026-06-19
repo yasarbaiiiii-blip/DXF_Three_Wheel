@@ -47,9 +47,6 @@ export function TemplatesPage(props: TemplatesPageProps) {
   const [indentSpacingStr, setIndentSpacingStr] = useState("0.25");
   const [letterSpacingStr, setLetterSpacingStr] = useState("10");
   const [charSpacingStr, setCharSpacingStr] = useState("10");
-  const [snapCenter, setSnapCenter] = useState(true);
-  const [snapCorners, setSnapCorners] = useState(true);
-  const [snapAngles, setSnapAngles] = useState(true);
   const [placedItems, setPlacedItems] = useState<PlacedItem[]>([]);
   const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
   
@@ -392,10 +389,10 @@ export function TemplatesPage(props: TemplatesPageProps) {
         const cos = Math.cos((item.rotation || 0) * Math.PI / 180) || 0;
         const sin = Math.sin((item.rotation || 0) * Math.PI / 180) || 0;
         item.lines.forEach((l, i) => {
-          const fx = (l.from.x * cos - l.from.y * sin) + (item.x || 0);
-          const fy = (l.from.x * sin + l.from.y * cos) + (item.y || 0);
-          const tx = (l.to.x * cos - l.to.y * sin) + (item.x || 0);
-          const ty = (l.to.x * sin + l.to.y * cos) + (item.y || 0);
+          const fx = (l.from.x * cos - l.from.y * sin) + (item.y || 0);
+          const fy = (l.from.x * sin + l.from.y * cos) + (item.x || 0);
+          const tx = (l.to.x * cos - l.to.y * sin) + (item.y || 0);
+          const ty = (l.to.x * sin + l.to.y * cos) + (item.x || 0);
           if (!isFinite(fx) || !isFinite(fy) || !isFinite(tx) || !isFinite(ty)) return;
           
           finalLines.push({
@@ -478,12 +475,6 @@ export function TemplatesPage(props: TemplatesPageProps) {
     setActiveLetterSpacingCm(pendingLetterSpacingCm);
   }, [pendingWidth, pendingHeight, pendingIndent, pendingLetterSpacingCm]);
 
-  const memoizedSnapSettings = useMemo(() => ({
-    center: snapCenter,
-    corners: snapCorners,
-    angles: snapAngles,
-  }), [snapCenter, snapCorners, snapAngles]);
-
   const memoSetSelectedItemIds = useCallback((ids: string[]) => {
     setSelectedItemIds(ids);
   }, []);
@@ -502,7 +493,6 @@ export function TemplatesPage(props: TemplatesPageProps) {
               setItems={setPlacedItems}
               selectedItemIds={selectedItemIds}
               setSelectedItemIds={memoSetSelectedItemIds}
-              snapSettings={memoizedSnapSettings}
               multiTouchMode={multiTouchMode}
             />
           ) : (
@@ -561,12 +551,6 @@ export function TemplatesPage(props: TemplatesPageProps) {
                   </View>
                 </View>
 
-                <Text style={{ color: "#64748b", fontSize: 11, fontWeight: "800", letterSpacing: 1, textTransform: "uppercase", marginTop: 8 }}>Object Snapping</Text>
-                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-                  <Pressable onPress={() => setSnapCenter(!snapCenter)} style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, backgroundColor: snapCenter ? "#0b6b68" : "#f1f5f9" }}><Text style={{ color: snapCenter ? "#fff" : "#475569", fontSize: 12, fontWeight: "700" }}>Center</Text></Pressable>
-                  <Pressable onPress={() => setSnapCorners(!snapCorners)} style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, backgroundColor: snapCorners ? "#0b6b68" : "#f1f5f9" }}><Text style={{ color: snapCorners ? "#fff" : "#475569", fontSize: 12, fontWeight: "700" }}>Corners</Text></Pressable>
-                  <Pressable onPress={() => setSnapAngles(!snapAngles)} style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, backgroundColor: snapAngles ? "#0b6b68" : "#f1f5f9" }}><Text style={{ color: snapAngles ? "#fff" : "#475569", fontSize: 12, fontWeight: "700" }}>Angles</Text></Pressable>
-                </View>
                 
                 {hasBoundaryChanges && (
                   <Pressable
