@@ -46,6 +46,7 @@ export function TemplatesPage(props: TemplatesPageProps) {
   const [boundaryHeightStr, setBoundaryHeightStr] = useState("3.0");
   const [indentSpacingStr, setIndentSpacingStr] = useState("0.25");
   const [letterSpacingStr, setLetterSpacingStr] = useState("10");
+  const [charSpacingStr, setCharSpacingStr] = useState("10");
   const [snapCenter, setSnapCenter] = useState(true);
   const [snapCorners, setSnapCorners] = useState(true);
   const [snapAngles, setSnapAngles] = useState(true);
@@ -104,6 +105,7 @@ export function TemplatesPage(props: TemplatesPageProps) {
   const pendingHeight = parseFloat(boundaryHeightStr) || 3.0;
   const pendingIndent = parseFloat(indentSpacingStr) || 0.25;
   const pendingLetterSpacingCm = parseFloat(letterSpacingStr) || 10;
+  const pendingCharSpacingCm = parseFloat(charSpacingStr) || 10;
 
   // ACTIVE values (applied to canvas)
   const bw = activeBoundaryWidth;
@@ -124,9 +126,9 @@ export function TemplatesPage(props: TemplatesPageProps) {
     if (category === "numbers") return generateNumberLines(selectedDigit, parsedSize, fontStyle);
     if (category === "road_signs") return generateRoadSignLines(selectedSign, parsedSize);
     if (category === "sports_fields") return generateSportsFieldLines(selectedField, parsedSize);
-    if (category === "characters") return generateTextLines(previewText, parsedSize, fontStyle, pendingLetterSpacingCm / 100);
+    if (category === "characters") return generateTextLines(previewText, parsedSize, fontStyle, pendingCharSpacingCm / 100);
     return [];
-  }, [category, shape, selectedLetter, selectedDigit, selectedSign, selectedField, parsedSize, arcType, fontStyle, previewText, pendingLetterSpacingCm]);
+  }, [category, shape, selectedLetter, selectedDigit, selectedSign, selectedField, parsedSize, arcType, fontStyle, previewText, pendingCharSpacingCm]);
 
   const computeBoundingBox = useCallback((lines: PlanLine[]): { width: number; height: number } => {
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
@@ -338,6 +340,41 @@ export function TemplatesPage(props: TemplatesPageProps) {
     ));
     setWordGroups(prev => prev.filter(g => g.id !== groupId));
     setSelectedItemIds([firstItem.id]);
+  }, [placedItems, selectedItemIds]);
+
+  const handleCopyItems = useCallback(() => {
+    if (selectedItemIds.length === 0) return;
+    const itemsToCopy = placedItems.filter(p => selectedItemIds.includes(p.id));
+    if (itemsToCopy.length === 0) return;
+
+    const offset = 0.5;
+    const newItems: PlacedItem[] = [];
+    const newIds: string[] = [];
+    const groupMapping: Record<string, string> = {};
+
+    itemsToCopy.forEach(item => {
+      const newId = `item-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      newIds.push(newId);
+
+      let newGroupId: string | undefined = undefined;
+      if (item.groupId) {
+        if (!groupMapping[item.groupId]) {
+          groupMapping[item.groupId] = `grp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        }
+        newGroupId = groupMapping[item.groupId];
+      }
+
+      newItems.push({
+        ...item,
+        id: newId,
+        groupId: newGroupId,
+        x: item.x + offset,
+        y: item.y - offset,
+      });
+    });
+
+    setPlacedItems(prev => [...prev, ...newItems]);
+    setSelectedItemIds(newIds);
   }, [placedItems, selectedItemIds]);
 
   const handleParse = async () => {
@@ -638,6 +675,18 @@ export function TemplatesPage(props: TemplatesPageProps) {
                     Active Text: <Text style={{ color: "#0b6b68", fontWeight: "800" }}>"{previewText}"</Text>
                   </Text>
                 )}
+                
+                <View style={{ marginTop: 4 }}>
+                  <Text style={{ color: "#475569", fontSize: 12, marginBottom: 4, fontWeight: "600" }}>Characters Spacing (cm)</Text>
+                  <TextInput
+                    style={{ borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, padding: 8, color: "#0f172a", fontSize: 14 }}
+                    value={charSpacingStr}
+                    onChangeText={setCharSpacingStr}
+                    keyboardType="numeric"
+                    placeholder="10"
+                    placeholderTextColor="#94a3b8"
+                  />
+                </View>
               </View>
             )}
 
@@ -921,6 +970,15 @@ export function TemplatesPage(props: TemplatesPageProps) {
                     style={{ height: 48, paddingHorizontal: 16, borderRadius: 12, backgroundColor: "#f59e0b", alignItems: "center", justifyContent: "center" }}
                   >
                     <Text style={{ color: "#fff", fontSize: 14, fontWeight: "800" }}>Ungroup</Text>
+                  </Pressable>
+                )}
+                
+                {selectedItemIds.length > 0 && (
+                  <Pressable
+                    onPress={handleCopyItems}
+                    style={{ height: 48, paddingHorizontal: 16, borderRadius: 12, backgroundColor: "#10b981", alignItems: "center", justifyContent: "center" }}
+                  >
+                    <Text style={{ color: "#fff", fontSize: 14, fontWeight: "800" }}>Copy</Text>
                   </Pressable>
                 )}
                 

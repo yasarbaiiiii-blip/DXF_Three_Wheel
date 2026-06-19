@@ -399,6 +399,9 @@ export default function App() {
   const [backendPaths, setBackendPaths] = useState<any[]>([]);
   const [selectedPathName, setSelectedPathName] = useState<string | null>(null);
   const [isPaused, setIsPaused] = useState(false);
+  const [extensionsEnabled, setExtensionsEnabled] = useState(false);
+  const [extPre, setExtPre] = useState("0.5");
+  const [extAft, setExtAft] = useState("0.5");
 
   const [prevMissionState, setPrevMissionState] = useState<string | null>(null);
 
@@ -934,6 +937,12 @@ export default function App() {
           });
           if (res.ok) {
             const body = await res.json();
+            const isEnabled = body.extension_config?.enabled ?? false;
+            setExtensionsEnabled(isEnabled);
+            if (body.extension_config) {
+              setExtPre(String(body.extension_config.pre_extension_m ?? "0.5"));
+              setExtAft(String(body.extension_config.aft_extension_m ?? "0.5"));
+            }
             console.log(`[API GET] /api/path/${pathName}/entities - Success, loaded ${body.num_entities} entities`);
             const entities = body.entities || [];
             // Per-entity extension run-ups are only drawn in the fallback path.
@@ -2049,6 +2058,12 @@ export default function App() {
                   setLayerVisibility={setLayerVisibility}
                   setImportedPlan={setImportedPlan}
                   onRunTemplate={runTemplateOnBackend}
+                  extensionsEnabled={extensionsEnabled}
+                  setExtensionsEnabled={setExtensionsEnabled}
+                  extPre={extPre}
+                  setExtPre={setExtPre}
+                  extAft={extAft}
+                  setExtAft={setExtAft}
                   missionFileReady={missionFileReady}
                   toggleA={toggleA}
                   toggleB={toggleB}
@@ -4505,6 +4520,12 @@ function SectionScreen(props: {
   onRefreshPaths: () => void;
   onParsePlan?: () => Promise<void>;
   onNav: (page: Page) => void;
+  extensionsEnabled?: boolean;
+  setExtensionsEnabled?: React.Dispatch<React.SetStateAction<boolean>>;
+  extPre?: string;
+  setExtPre?: React.Dispatch<React.SetStateAction<string>>;
+  extAft?: string;
+  setExtAft?: React.Dispatch<React.SetStateAction<string>>;
 }) {
   const { title, page, onBack } = props;
 
@@ -4972,6 +4993,12 @@ function FieldsPage({
   apiBaseUrl,
   onRefreshPaths,
   onParsePlan,
+  extensionsEnabled = false,
+  setExtensionsEnabled,
+  extPre = "0.5",
+  setExtPre,
+  extAft = "0.5",
+  setExtAft,
 }: {
   importedPlan: ImportedPlan | null;
   setImportedPlan: React.Dispatch<React.SetStateAction<ImportedPlan | null>>;
@@ -4991,6 +5018,12 @@ function FieldsPage({
   apiBaseUrl: string;
   onRefreshPaths: () => void;
   onParsePlan?: () => Promise<void>;
+  extensionsEnabled?: boolean;
+  setExtensionsEnabled?: React.Dispatch<React.SetStateAction<boolean>>;
+  extPre?: string;
+  setExtPre?: React.Dispatch<React.SetStateAction<string>>;
+  extAft?: string;
+  setExtAft?: React.Dispatch<React.SetStateAction<string>>;
 }) {
   const [pickedFile, setPickedFile] = useState<DocumentPicker.DocumentPickerAsset | null>(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -5001,8 +5034,6 @@ function FieldsPage({
   const [missionSummary, setMissionSummary] = useState<any | null>(null);
 
   const [extModalOpen, setExtModalOpen] = useState(false);
-  const [extPre, setExtPre] = useState("0.5");
-  const [extAft, setExtAft] = useState("0.5");
   const [isExtSetting, setIsExtSetting] = useState(false);
 
   const [isPathPlanningMode, setIsPathPlanningMode] = useState(false);
@@ -5645,21 +5676,21 @@ function FieldsPage({
                   <Text style={{ color: "#0f172a", fontSize: 12, fontWeight: "800" }}>Path Planning</Text>
                 </Pressable>
                 
-                <Pressable
-                  onPress={() => setExtModalOpen(true)}
-                  style={{
-                    height: 36,
-                    paddingHorizontal: 12,
-                    backgroundColor: "#8b5cf6",
-                    borderRadius: 8,
-                    alignItems: "center",
-                    justifyContent: "center",
-                  }}
-                >
-                  <Text style={{ color: "#fff", fontSize: 12, fontWeight: "800" }}>Enable Extension</Text>
-                </Pressable>
-                
-                {lines.some((l) => l.layer === "extension") && (
+                {!extensionsEnabled ? (
+                  <Pressable
+                    onPress={() => setExtModalOpen(true)}
+                    style={{
+                      height: 36,
+                      paddingHorizontal: 12,
+                      backgroundColor: "#8b5cf6",
+                      borderRadius: 8,
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <Text style={{ color: "#fff", fontSize: 12, fontWeight: "800" }}>Enable Extension</Text>
+                  </Pressable>
+                ) : (
                   <Pressable
                     onPress={handleDisableExtension}
                     style={{
@@ -6431,23 +6462,14 @@ function PlanPreview({
     [lines, visibility]
   );
 
-  const filteredPlanSignature = useMemo(
-    () =>
-      filtered
-        .map((line) =>
-          [
-            line.id,
-            line.layer,
-            line.from.x.toFixed(3),
-            line.from.y.toFixed(3),
-            line.to.x.toFixed(3),
-            line.to.y.toFixed(3),
-            normalizeEntityType(line.entity?.entity_type),
-          ].join(":")
-        )
-        .join("|"),
-    [filtered]
-  );
+  const filteredPlanSignature = useMemo(() => {
+    const len = filtered.length;
+    if (len === 0) return '0';
+    const first = filtered[0];
+    const last = filtered[len - 1];
+    const mid = filtered[Math.floor(len / 2)];
+    return `${len}:${first.id}:${last.id}:${mid.from.x.toFixed(2)}:${mid.to.y.toFixed(2)}`;
+  }, [filtered]);
 
   const cornerPoints = useMemo(() => getCornerPoints(filtered).slice(0, MAX_PREVIEW_CORNERS), [filtered]);
   const primarySequenceLines = useMemo(
@@ -6460,14 +6482,14 @@ function PlanPreview({
   );
   const pathChunksByLayer = useMemo(
     () => ({
-      boundary: buildSvgPathChunks(filtered.filter((line) => line.layer === "boundary" && line.id !== selectedLineId)),
-      marking_true: buildSvgPathChunks(filtered.filter((line) => line.layer === "marking" && line.entity?.is_mark !== false && line.id !== selectedLineId)),
-      marking_false: buildSvgPathChunks(filtered.filter((line) => line.layer === "marking" && line.entity?.is_mark === false && line.id !== selectedLineId)),
-      center: buildSvgPathChunks(filtered.filter((line) => line.layer === "center" && line.id !== selectedLineId)),
-      transit: buildSvgPathChunks(filtered.filter((line) => line.layer === "transit" && line.id !== selectedLineId)),
-      extension: buildSvgPathChunks(filtered.filter((line) => line.layer === "extension" && line.id !== selectedLineId)),
+      boundary: buildSvgPathChunks(filtered.filter((line) => line.layer === "boundary")),
+      marking_true: buildSvgPathChunks(filtered.filter((line) => line.layer === "marking" && line.entity?.is_mark !== false)),
+      marking_false: buildSvgPathChunks(filtered.filter((line) => line.layer === "marking" && line.entity?.is_mark === false)),
+      center: buildSvgPathChunks(filtered.filter((line) => line.layer === "center")),
+      transit: buildSvgPathChunks(filtered.filter((line) => line.layer === "transit")),
+      extension: buildSvgPathChunks(filtered.filter((line) => line.layer === "extension")),
     }),
-    [filtered, selectedLineId]
+    [filtered]
   );
 
   // Rover world-space position: pos_e = East, pos_n = North
@@ -6489,6 +6511,26 @@ function PlanPreview({
   const [layoutSize, setLayoutSize] = useState({ width: 0, height: 0 });
   const [viewport, setViewport] = useState<PreviewViewport>({ panX: 0, panY: 0, zoom: 1 });
   const [rotation, setRotation] = useState(0);
+
+  /* ── RAF throttle for viewport (pan/pinch) ── */
+  const rafViewportRef = React.useRef<PreviewViewport | null>(null);
+  const rafViewportIdRef = React.useRef<number | null>(null);
+  const scheduleViewportCommit = React.useCallback(() => {
+    if (rafViewportIdRef.current !== null) return;
+    rafViewportIdRef.current = requestAnimationFrame(() => {
+      if (rafViewportRef.current !== null) {
+        setViewport(rafViewportRef.current);
+        viewportRef.current = rafViewportRef.current;
+        rafViewportRef.current = null;
+      }
+      rafViewportIdRef.current = null;
+    });
+  }, []);
+  React.useEffect(() => {
+    return () => {
+      if (rafViewportIdRef.current !== null) cancelAnimationFrame(rafViewportIdRef.current);
+    };
+  }, []);
   // Track whether user has manually panned so auto-pan doesn't fight them
   const userPannedRef = React.useRef(false);
 
@@ -6665,25 +6707,28 @@ function PlanPreview({
           const distance = Math.hypot(dx, dy);
           
           const scale = distance / initialDistance;
-          const newZoom = Math.max(1, initialZoom * scale);
+          const newZoom = Math.max(0.01, Math.min(1000, initialZoom * scale));
           
           const centerX = (touches[0].locationX + touches[1].locationX) / 2;
           const centerY = (touches[0].locationY + touches[1].locationY) / 2;
 
           const zoomRatio = newZoom / initialZoom;
-          
-          setViewport({
+          const next = {
             panX: centerX - (centerX - initialPanX) * zoomRatio,
             panY: centerY - (centerY - initialPanY) * zoomRatio,
             zoom: newZoom,
-          });
+          };
+          rafViewportRef.current = next;
+          scheduleViewportCommit();
         } else if (touches.length === 1) {
           // Pan
-          setViewport({
+          const next = {
             panX: initialPanX + gestureState.dx,
             panY: initialPanY + gestureState.dy,
             zoom: viewportRef.current.zoom,
-          });
+          };
+          rafViewportRef.current = next;
+          scheduleViewportCommit();
         }
       },
       onPanResponderRelease: (evt, gestureState) => {
@@ -6786,45 +6831,39 @@ function PlanPreview({
           <Svg pointerEvents="none" width="100%" height="100%">
           {/* ── Background grid (always visible) ── */}
           {layoutSize.width > 0 && layoutSize.height > 0 && (() => {
-            const gridLines: React.ReactElement[] = [];
             const spacing = GRID_WORLD_SPACING * viewport.zoom;
             if (spacing < 8) return null; // too dense to draw
-            // Find grid origin in screen space (world 0,0)
             const originX = viewport.panX;
             const originY = viewport.panY;
-            // Vertical lines (constant X in world space)
+            // Batch vertical grid lines into single <Path>
+            let vPath = '';
             const startCol = Math.floor(-originX / spacing) - 1;
             const endCol = Math.ceil((layoutSize.width - originX) / spacing) + 1;
             for (let c = startCol; c <= endCol; c++) {
+              if (c === 0) continue; // origin drawn separately
               const sx = originX + c * spacing;
-              const isOrigin = c === 0;
-              gridLines.push(
-                <Line
-                  key={`gv${c}`}
-                  x1={sx} y1={0} x2={sx} y2={layoutSize.height}
-                  stroke={isOrigin ? "#94a3b8" : "#d8e4f0"}
-                  strokeWidth={isOrigin ? 1.2 : 0.6}
-                  opacity={isOrigin ? 0.9 : 0.6}
-                />
-              );
+              vPath += `M${sx} 0V${layoutSize.height}`;
             }
-            // Horizontal lines (constant Y in world space, NED North=up so invert)
+            // Batch horizontal grid lines into single <Path>
+            let hPath = '';
             const startRow = Math.floor(-originY / spacing) - 1;
             const endRow = Math.ceil((layoutSize.height - originY) / spacing) + 1;
             for (let r = startRow; r <= endRow; r++) {
+              if (r === 0) continue; // origin drawn separately
               const sy = originY + r * spacing;
-              const isOrigin = r === 0;
-              gridLines.push(
-                <Line
-                  key={`gh${r}`}
-                  x1={0} y1={sy} x2={layoutSize.width} y2={sy}
-                  stroke={isOrigin ? "#94a3b8" : "#d8e4f0"}
-                  strokeWidth={isOrigin ? 1.2 : 0.6}
-                  opacity={isOrigin ? 0.9 : 0.6}
-                />
-              );
+              hPath += `M0 ${sy}H${layoutSize.width}`;
             }
-            return gridLines;
+            // Origin axes
+            const oxLine = `M${originX} 0V${layoutSize.height}`;
+            const oyLine = `M0 ${originY}H${layoutSize.width}`;
+            return (
+              <>
+                {vPath ? <Path d={vPath} stroke="#d8e4f0" strokeWidth={0.6} opacity={0.6} /> : null}
+                {hPath ? <Path d={hPath} stroke="#d8e4f0" strokeWidth={0.6} opacity={0.6} /> : null}
+                <Path d={oxLine} stroke="#94a3b8" strokeWidth={1.2} opacity={0.9} />
+                <Path d={oyLine} stroke="#94a3b8" strokeWidth={1.2} opacity={0.9} />
+              </>
+            );
           })()}
 
           {/* ── Plan lines ── */}
@@ -6871,21 +6910,7 @@ function PlanPreview({
                 strokeWidth={1.5 / viewport.zoom}
               />
             ))}
-            {filtered.map((line) => {
-              const d = buildSvgPathForLine(line);
-              if (!d) return null;
-              return (
-                <Path
-                  key={`hit-${line.id}`}
-                  d={d}
-                  stroke="rgba(0,0,0,0.01)"
-                  strokeWidth={26 / viewport.zoom}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  fill="none"
-                />
-              );
-            })}
+
           </G>
 
           {/* ── Rover icon (top-down car shape) ── */}
