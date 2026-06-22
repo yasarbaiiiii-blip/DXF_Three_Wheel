@@ -231,6 +231,7 @@ function evaluateStagedStartGate(
     loadedVerified: stagedWorkflow.loaded === "verified",
     stagedMissionId,
     loaded: loadedPathInspection,
+    alignmentVerified: stagedWorkflow.alignment === "verified",
   });
 }
 

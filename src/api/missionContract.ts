@@ -87,9 +87,17 @@ export function evaluateMissionStartGate(args: {
   loadedVerified: boolean;
   stagedMissionId: string | null;
   loaded: LoadedPathResponse | null;
+  alignmentVerified?: boolean;
 }): StagedStartGate {
-  const { stagedVerified, loadedVerified, stagedMissionId, loaded } = args;
+  const { stagedVerified, loadedVerified, stagedMissionId, loaded, alignmentVerified } = args;
   if (!stagedVerified) {
+    if (alignmentVerified) {
+      return {
+        isStagedWorkflow: true,
+        allowed: false,
+        message: "GPS alignment complete — run Plan & Stage, then Load to controller before starting.",
+      };
+    }
     if (isProtectedMissionResident(loaded)) {
       return {
         isStagedWorkflow: false,
