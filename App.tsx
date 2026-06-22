@@ -58,6 +58,7 @@ import {
   Check as CheckIcon,
 } from "lucide-react-native";
 
+import { BoundaryEditor, PlacedItem } from "./src/components/BoundaryEditor";
 import { readImportedPlanFile, normalizePlanLines } from "./src/utils/planImport";
 import type { ImportedPlan, PlanLine } from "./src/types/plan";
 import * as missionApi from "./src/api/missionApi";
@@ -76,19 +77,8 @@ import { generateTemplateLines, ShapeType, ArcType } from "./src/utils/shapeTemp
 import { generateAlphabetLines, generateNumberLines, FontStyle, AlphabetType, NumberType } from "./src/utils/characterTemplates";
 import { generateRoadSignLines, RoadSignType, ROAD_SIGN_LABELS } from "./src/utils/roadSignTemplates";
 
-type Page =
-  | "connection"
-  | "home"
-  | "fields"
-  | "templates"
-  | "swozi"
-  | "status"
-  | "positioning"
-  | "settings"
-  | "howto"
-  | "about";
-
-type LayerVisibility = { boundary: boolean; marking: boolean; center: boolean; transit: boolean; extension: boolean; };
+import type { Page, TelemetrySnapshot, LayerVisibility } from "./src/types/plan";
+import { TemplatesPage } from "./src/screens/TemplatesPage";
 const MAX_PREVIEW_CORNERS = 450;
 const PATH_SEGMENT_CHUNK_SIZE = 650;
 const PREVIEW_ARROWHEAD_LENGTH_PX = 14;
@@ -457,33 +447,7 @@ type SystemHealth = {
   mission_state?: string | null;
 };
 
-type TelemetrySnapshot = {
-  pos_n?: number | null;
-  pos_e?: number | null;
-  heading_ned_deg?: number | null;
-  xtrack_m?: number | null;
-  heading_err_deg?: number | null;
-  lookahead_m?: number | null;
-  speed_m_s?: number | null;
-  kappa?: number | null;
-  dist_to_goal_m?: number | null;
-  pose_age_ms?: number | null;
-  rpp_state?: number | null;
-  rpp_state_name?: string | null;
-  armed?: boolean | null;
-  mode?: string | null;
-  connected?: boolean | null;
-  battery_v?: number | null;
-  battery_pct?: number | null;
-  gps_fix?: number | null;
-  gps_sat?: number | null;
-  lat?: number | null;
-  lon?: number | null;
-  alt?: number | null;
-  mission_state?: string | null;
-  hrms?: number | null;
-  vrms?: number | null;
-};
+
 
 type ActivityEntry = {
   timestamp: string;
@@ -5056,7 +5020,12 @@ function SectionScreen(props: {
       <TopBar title={title} onBack={onBack} />
 
       {page === "fields" ? <FieldsPage {...props} /> : null}
-      {page === "templates" ? <TemplatesPage {...props} /> : null}
+      {page === "templates" ? (
+        <TemplatesPage
+          {...props}
+          PlanPreviewComponent={PlanPreview}
+        />
+      ) : null}
       {page === "swozi" ? <SwoziPage {...props} /> : null}
       {page === "status" ? <StatusPage /> : null}
       {page === "positioning" ? <PositioningPage {...props} /> : null}
@@ -7087,355 +7056,6 @@ function FieldsPage({
   );
 }
 
-
-
-function TemplatesPage(props: {
-  telemetrySnapshot: TelemetrySnapshot | null;
-  layerVisibility: LayerVisibility;
-  selectedLineId: string | null;
-  onSelectLine: (id: string | null) => void;
-  previewRoverPoint: { north: number; east: number } | null;
-  onGenerateTemplate: (name: string, lines: PlanLine[]) => void;
-  apiBaseUrl: string;
-  onSelectPath: (name: string) => void;
-  onRefreshPaths: () => void;
-  onNav: (page: Page) => void;
-}) {
-  const [category, setCategory] = useState<"shapes" | "alphabets" | "numbers" | "road_signs">("shapes");
-  const [fontStyle, setFontStyle] = useState<FontStyle>("smooth");
-  const [shape, setShape] = useState<ShapeType>("square");
-  const [selectedLetter, setSelectedLetter] = useState<AlphabetType>("A");
-  const [selectedDigit, setSelectedDigit] = useState<NumberType>("0");
-  const [selectedSign, setSelectedSign] = useState<RoadSignType>("ArrowStraight");
-  const [arcType, setArcType] = useState<ArcType>("full");
-  const [sizeInput, setSizeInput] = useState("1.0");
-  const [isParsing, setIsParsing] = useState(false);
-
-  const parsedSize = Math.max(0.5, Math.min(3.0, parseFloat(sizeInput) || 1.0));
-
-  const previewLines = useMemo(() => {
-    if (category === "shapes") return generateTemplateLines(shape, parsedSize, arcType);
-    if (category === "alphabets") return generateAlphabetLines(selectedLetter, parsedSize, fontStyle);
-    if (category === "numbers") return generateNumberLines(selectedDigit, parsedSize, fontStyle);
-    if (category === "road_signs") return generateRoadSignLines(selectedSign, parsedSize);
-    return [];
-  }, [category, shape, selectedLetter, selectedDigit, selectedSign, parsedSize, arcType, fontStyle]);
-
-  const handleParse = async () => {
-    if (!props.apiBaseUrl) return;
-    if (previewLines.length === 0) {
-      Alert.alert("Empty Template", "No valid template to generate.");
-      return;
-    }
-    setIsParsing(true);
-    try {
-      const title = category === "shapes" 
-        ? `${shape.charAt(0).toUpperCase() + shape.slice(1)} Template - ${parsedSize}m`
-        : category === "alphabets"
-          ? `Letter ${selectedLetter} (${fontStyle}) - ${parsedSize}m`
-          : category === "numbers"
-            ? `Number ${selectedDigit} (${fontStyle}) - ${parsedSize}m`
-            : `Road Sign - ${parsedSize}m`;
-      const fileName = `${title.replace(/\s+/g, "_")}.dxf`;
-      const fileContent = linesToDxf(previewLines, fileName);
-
-      const formData = new FormData();
-      if (Platform.OS === "web") {
-        // Web needs a real Blob; the native {uri,name,type} descriptor would
-        // serialise to "[object Object]" and the backend would 422.
-        formData.append("file", new Blob([fileContent], { type: "application/dxf" }), fileName);
-      } else {
-        const fileUri = `${FileSystem.cacheDirectory}${fileName}`;
-        await FileSystem.writeAsStringAsync(fileUri, fileContent, {
-          encoding: FileSystem.EncodingType.UTF8,
-        });
-        formData.append("file", {
-          uri: fileUri,
-          name: fileName,
-          type: "application/dxf",
-        } as any);
-      }
-
-      const res = await pathApi.parseDxf(props.apiBaseUrl, formData);
-
-      if (res.ok) {
-        Alert.alert("Success", `Template sent and parsed successfully.`);
-        props.onRefreshPaths();
-        props.onSelectPath(fileName);
-        props.onNav("fields");
-      } else {
-        const errText = await res.text();
-        Alert.alert("Parse Failed", errText || "Unknown error");
-      }
-    } catch (err: any) {
-      console.log("Error parsing template:", err);
-      Alert.alert("Error", err.message || "Failed to send template to backend.");
-    } finally {
-      setIsParsing(false);
-    }
-  };
-
-  return (
-    <View style={{ flex: 1, flexDirection: "row" }}>
-      <View style={{ width: "58%", backgroundColor: "transparent", padding: 14 }}>
-        <View style={{ flex: 1, borderRadius: 20, overflow: "hidden", backgroundColor: "#ffffff", borderWidth: 1, borderColor: "#d8e1eb" }}>
-          <View style={{ flex: 1, position: "relative" }}>
-            <PlanPreview
-              lines={previewLines}
-              visibility={props.layerVisibility}
-              selectedLineId={props.selectedLineId}
-              onSelectLine={props.onSelectLine}
-              roverPosN={props.previewRoverPoint?.north ?? null}
-              roverPosE={props.previewRoverPoint?.east ?? null}
-              roverHeadingDeg={props.telemetrySnapshot?.heading_ned_deg ?? null}
-            />
-          </View>
-        </View>
-      </View>
-      
-      <View style={{ width: "42%", height: "100%", padding: 14, paddingLeft: 0, gap: 12 }}>
-        <View style={{ borderRadius: 14, padding: 14, backgroundColor: "#0f172a" }}>
-          <Text style={{ color: "#94a3b8", fontSize: 11, fontWeight: "800", letterSpacing: 1.2, textTransform: "uppercase" }}>
-            Templates
-          </Text>
-          <Text style={{ color: "#fff", fontSize: 18, fontWeight: "900", marginTop: 5 }}>
-            {category === "shapes" ? "Shape Generator" : category === "alphabets" ? "Alphabet Generator" : category === "numbers" ? "Number Generator" : "Road Signs"}
-          </Text>
-          <Text style={{ color: "#cbd5e1", fontSize: 12, lineHeight: 17, marginTop: 6 }}>
-            Select a template and size to preview and generate a working plan.
-          </Text>
-        </View>
-
-        <View style={{ borderRadius: 14, padding: 14, backgroundColor: "#ffffff", borderWidth: 1, borderColor: "#d8e1eb" }}>
-          <Text style={{ color: "#64748b", fontSize: 11, fontWeight: "800", letterSpacing: 1, textTransform: "uppercase", marginBottom: 12 }}>
-            Category
-          </Text>
-          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}>
-            {(["shapes", "alphabets", "numbers", "road_signs"] as const).map((c) => (
-              <Pressable
-                key={c}
-                onPress={() => setCategory(c)}
-                style={{
-                  flexBasis: "47%",
-                  padding: 8,
-                  borderRadius: 12,
-                  backgroundColor: category === c ? "#0b6b68" : "#f8fafc",
-                  borderWidth: 1,
-                  borderColor: category === c ? "#0b6b68" : "#e2e8f0",
-                  alignItems: "center"
-                }}
-              >
-                <Text style={{ color: category === c ? "#fff" : "#0f172a", fontSize: 13, fontWeight: "800", textTransform: "capitalize" }}>
-                  {c.replace("_", " ")}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-        </View>
-
-        {(category === "alphabets" || category === "numbers") && (
-          <View style={{ borderRadius: 14, padding: 14, backgroundColor: "#ffffff", borderWidth: 1, borderColor: "#d8e1eb" }}>
-            <Text style={{ color: "#64748b", fontSize: 11, fontWeight: "800", letterSpacing: 1, textTransform: "uppercase", marginBottom: 12 }}>
-              Font Style
-            </Text>
-            <View style={{ flexDirection: "row", gap: 10 }}>
-              {(["smooth", "stencil"] as FontStyle[]).map((f) => (
-                <Pressable
-                  key={f}
-                  onPress={() => setFontStyle(f)}
-                  style={{
-                    flex: 1,
-                    padding: 12,
-                    borderRadius: 12,
-                    backgroundColor: fontStyle === f ? "#0f172a" : "#f8fafc",
-                    borderWidth: 1,
-                    borderColor: fontStyle === f ? "#0f172a" : "#e2e8f0",
-                    alignItems: "center"
-                  }}
-                >
-                  <Text style={{ color: fontStyle === f ? "#fff" : "#0f172a", fontSize: 14, fontWeight: "800", textTransform: "capitalize" }}>
-                    {f}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-          </View>
-        )}
-
-        <View style={{ flex: 1, borderRadius: 14, padding: 14, backgroundColor: "#ffffff", borderWidth: 1, borderColor: "#d8e1eb" }}>
-          <Text style={{ color: "#64748b", fontSize: 11, fontWeight: "800", letterSpacing: 1, textTransform: "uppercase", marginBottom: 12 }}>
-            Selection
-          </Text>
-          <ScrollView style={{ flex: 1 }}>
-            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-              {category === "shapes" && ([] as ShapeType[]).concat(["square", "circle", "triangle"]).map((s) => (
-                <Pressable
-                  key={s}
-                  onPress={() => setShape(s)}
-                  style={{
-                    width: "30%",
-                    padding: 12,
-                    borderRadius: 12,
-                    backgroundColor: shape === s ? "#0b6b68" : "#f8fafc",
-                    borderWidth: 1,
-                    borderColor: shape === s ? "#0b6b68" : "#e2e8f0",
-                    alignItems: "center"
-                  }}
-                >
-                  <Text style={{ color: shape === s ? "#fff" : "#0f172a", fontSize: 13, fontWeight: "800", textTransform: "capitalize" }}>
-                    {s}
-                  </Text>
-                </Pressable>
-              ))}
-
-              {category === "alphabets" && Array.from("ABCDEFGHIJKLMNOPQRSTUVWXYZ").map((l) => (
-                <Pressable
-                  key={l}
-                  onPress={() => setSelectedLetter(l as AlphabetType)}
-                  style={{
-                    width: 44,
-                    height: 44,
-                    borderRadius: 12,
-                    backgroundColor: selectedLetter === l ? "#0b6b68" : "#f8fafc",
-                    borderWidth: 1,
-                    borderColor: selectedLetter === l ? "#0b6b68" : "#e2e8f0",
-                    alignItems: "center",
-                    justifyContent: "center"
-                  }}
-                >
-                  <Text style={{ color: selectedLetter === l ? "#fff" : "#0f172a", fontSize: 18, fontWeight: "800" }}>
-                    {l}
-                  </Text>
-                </Pressable>
-              ))}
-
-              {category === "numbers" && Array.from("0123456789").map((n) => (
-                <Pressable
-                  key={n}
-                  onPress={() => setSelectedDigit(n as NumberType)}
-                  style={{
-                    width: 50,
-                    height: 50,
-                    borderRadius: 12,
-                    backgroundColor: selectedDigit === n ? "#0b6b68" : "#f8fafc",
-                    borderWidth: 1,
-                    borderColor: selectedDigit === n ? "#0b6b68" : "#e2e8f0",
-                    alignItems: "center",
-                    justifyContent: "center"
-                  }}
-                >
-                  <Text style={{ color: selectedDigit === n ? "#fff" : "#0f172a", fontSize: 20, fontWeight: "800" }}>
-                    {n}
-                  </Text>
-                </Pressable>
-              ))}
-
-              {category === "road_signs" && (Object.keys(ROAD_SIGN_LABELS) as RoadSignType[]).map((s) => (
-                <Pressable
-                  key={s}
-                  onPress={() => setSelectedSign(s)}
-                  style={{
-                    flexBasis: "31%",
-                    padding: 12,
-                    borderRadius: 12,
-                    backgroundColor: selectedSign === s ? "#0f172a" : "#f1f5f9",
-                    borderWidth: 1,
-                    borderColor: selectedSign === s ? "#0f172a" : "#e2e8f0",
-                    alignItems: "center",
-                  }}
-                >
-                  <Text style={{ color: selectedSign === s ? "#ffffff" : "#475569", fontSize: 13, fontWeight: "700", textAlign: "center" }}>
-                    {ROAD_SIGN_LABELS[s]}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-
-            {category === "shapes" && shape === "circle" && (
-              <View style={{ marginTop: 20 }}>
-                <Text style={{ color: "#64748b", fontSize: 11, fontWeight: "800", letterSpacing: 1, textTransform: "uppercase", marginBottom: 12 }}>
-                  Arc Type
-                </Text>
-                <View style={{ flexDirection: "row", gap: 10 }}>
-                  {([] as ArcType[]).concat(["quarter", "half", "full"]).map((a) => (
-                    <Pressable
-                      key={a}
-                      onPress={() => setArcType(a)}
-                      style={{
-                        flex: 1,
-                        padding: 12,
-                        borderRadius: 12,
-                        backgroundColor: arcType === a ? "#0b6b68" : "#f8fafc",
-                        borderWidth: 1,
-                        borderColor: arcType === a ? "#0b6b68" : "#e2e8f0",
-                        alignItems: "center"
-                      }}
-                    >
-                      <Text style={{ color: arcType === a ? "#fff" : "#0f172a", fontSize: 14, fontWeight: "800", textTransform: "capitalize" }}>
-                        {a === "full" ? "Full" : a === "half" ? "Half" : "Quarter"}
-                      </Text>
-                    </Pressable>
-                  ))}
-                </View>
-              </View>
-            )}
-          </ScrollView>
-        </View>
-
-        <View style={{ borderRadius: 14, padding: 14, backgroundColor: "#ffffff", borderWidth: 1, borderColor: "#d8e1eb" }}>
-          <Text style={{ color: "#64748b", fontSize: 11, fontWeight: "800", letterSpacing: 1, textTransform: "uppercase", marginBottom: 12 }}>
-            Size (Scale)
-          </Text>
-          
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-            <View style={{ flex: 1 }}>
-              <Slider
-                style={{ width: "100%", height: 40 }}
-                minimumValue={0.5}
-                maximumValue={3.0}
-                step={0.1}
-                value={parsedSize}
-                onValueChange={(val) => setSizeInput(val.toFixed(2))}
-                minimumTrackTintColor="#0f988f"
-                maximumTrackTintColor="#cbd5e1"
-                thumbTintColor="#0f172a"
-              />
-            </View>
-            <View style={{ flexDirection: "row", alignItems: "center", backgroundColor: "#f8fafc", borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, paddingHorizontal: 10 }}>
-              <TextInput
-                value={sizeInput}
-                onChangeText={setSizeInput}
-                keyboardType="numeric"
-                style={{ width: 44, height: 40, color: "#0f172a", fontSize: 14, fontWeight: "700", textAlign: "right" }}
-              />
-              <Text style={{ color: "#64748b", fontSize: 14, fontWeight: "700", marginLeft: 2 }}>m</Text>
-            </View>
-          </View>
-          <Text style={{ color: "#64748b", fontSize: 11, marginTop: 4 }}>
-            {category === "shapes" ? (shape === "circle" ? "Diameter in meters" : shape === "square" ? "Side length in meters" : "Height in meters") : "Height in meters"}
-          </Text>
-        </View>
-
-        <Pressable
-          onPress={handleParse}
-          disabled={isParsing || previewLines.length === 0}
-          style={{
-            height: 52,
-            borderRadius: 14,
-            backgroundColor: isParsing || previewLines.length === 0 ? "#94a3b8" : "#0f988f",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          <Text style={{ color: "#fff", fontSize: 15, fontWeight: "800" }}>
-            {isParsing ? "Parsing..." : "Parse"}
-          </Text>
-        </Pressable>
-      </View>
-    </View>
-  );
-}
-
 function LayerRow({ label, value, onToggle }: { label: string; value: boolean; onToggle: () => void }) {
   return (
     <Pressable onPress={onToggle} style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 10 }}>
@@ -8810,6 +8430,29 @@ function SwoziPage({
     loadSprayParams();
   }, [loadSprayParams]);
 
+  // --- Spray Params State ---
+  type SprayParam = {
+    name: string;
+    type: string;
+    default: any;
+    current: any;
+    group: string;
+    desc: string;
+    min?: number;
+    max?: number;
+  };
+  const [sprayParams, setSprayParams] = useState<SprayParam[]>([]);
+  const [paramEdits, setParamEdits] = useState<Record<string, string>>({});
+  const [paramsLoading, setParamsLoading] = useState(false);
+  const [paramsError, setParamsError] = useState<string | null>(null);
+  const [paramsSaving, setParamsSaving] = useState(false);
+  const [paramsSaveStatus, setParamsSaveStatus] = useState<'idle'|'ok'|'err'>('idle');
+
+  // --- Manual Hold State ---
+  const [manualHoldActive, setManualHoldActive] = useState(false);
+  const manualHeartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Status polling
   useEffect(() => {
     if (!apiBaseUrl) return;
     const interval = setInterval(async () => {
@@ -8827,6 +8470,111 @@ function SwoziPage({
     }, 2000);
     return () => clearInterval(interval);
   }, [apiBaseUrl, sprayApiUrl]);
+
+  // Fetch spray params on mount
+  useEffect(() => {
+    if (!apiBaseUrl) return;
+    fetchSprayParams();
+  }, [apiBaseUrl]);
+
+  const fetchSprayParams = async () => {
+    if (!apiBaseUrl) return;
+    setParamsLoading(true);
+    setParamsError(null);
+    try {
+      const res = await fetch(`${apiBaseUrl}/api/spray/params`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      // data may be { parameters: { key: { type, default, current, group, desc, min, max } } }
+      const raw: Record<string, any> = data.parameters ?? data;
+      const parsed: SprayParam[] = Object.entries(raw).map(([name, meta]: [string, any]) => ({
+        name,
+        type: meta.type ?? 'string',
+        default: meta.default,
+        current: meta.current,
+        group: meta.group ?? '',
+        desc: meta.desc ?? meta.description ?? '',
+        min: meta.min,
+        max: meta.max,
+      }));
+      setSprayParams(parsed);
+      // Seed edits with current values
+      const seeds: Record<string, string> = {};
+      parsed.forEach(p => { seeds[p.name] = String(p.current ?? p.default ?? ''); });
+      setParamEdits(seeds);
+    } catch (err: any) {
+      setParamsError(err.message ?? 'Failed to fetch params');
+    } finally {
+      setParamsLoading(false);
+    }
+  };
+
+  const handleSaveParams = async () => {
+    if (!apiBaseUrl) return;
+    setParamsSaving(true);
+    setParamsSaveStatus('idle');
+    try {
+      // Cast values to correct types
+      const payload: Record<string, any> = {};
+      sprayParams.forEach(p => {
+        const raw = paramEdits[p.name] ?? String(p.current ?? p.default ?? '');
+        if (p.type === 'bool') payload[p.name] = raw === 'true' || raw === '1';
+        else if (p.type === 'int') payload[p.name] = parseInt(raw, 10);
+        else if (p.type === 'float') payload[p.name] = parseFloat(raw);
+        else payload[p.name] = raw;
+      });
+      const res = await fetch(`${apiBaseUrl}/api/spray/params`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ parameters: payload }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setParamsSaveStatus('ok');
+      // Refresh to get server-confirmed values
+      await fetchSprayParams();
+    } catch (err: any) {
+      setParamsSaveStatus('err');
+    } finally {
+      setParamsSaving(false);
+      setTimeout(() => setParamsSaveStatus('idle'), 3000);
+    }
+  };
+
+  // Manual spray hold helpers
+  const startManualHold = async () => {
+    if (!apiBaseUrl || manualHoldActive) return;
+    try {
+      await fetch(`${apiBaseUrl}/api/spray/on`, { method: 'POST' });
+      setManualHoldActive(true);
+      // Send a heartbeat every 7 s to keep the 8 s window alive
+      manualHeartbeatRef.current = setInterval(async () => {
+        try { await fetch(`${apiBaseUrl}/api/spray/on`, { method: 'POST' }); } catch (_) {}
+      }, 7000);
+    } catch (err) {
+      console.log('Spray ON failed', err);
+    }
+  };
+
+  const stopManualHold = async () => {
+    if (!apiBaseUrl) return;
+    if (manualHeartbeatRef.current) {
+      clearInterval(manualHeartbeatRef.current);
+      manualHeartbeatRef.current = null;
+    }
+    try {
+      await fetch(`${apiBaseUrl}/api/spray/off`, { method: 'POST' });
+    } catch (err) {
+      console.log('Spray OFF failed', err);
+    }
+    setManualHoldActive(false);
+  };
+
+  // Cleanup heartbeat on unmount
+  useEffect(() => {
+    return () => {
+      if (manualHeartbeatRef.current) clearInterval(manualHeartbeatRef.current);
+    };
+  }, []);
 
   const handleSprayToggle = async () => {
     if (!apiBaseUrl) return;
@@ -8992,6 +8740,37 @@ function SwoziPage({
           </Pressable>
         </View>
       </View>
+
+      {/* ── Manual Spray Hold Buttons ── */}
+      <View style={{ flexDirection: 'row', gap: 10, marginVertical: 10 }}>
+        <Pressable
+          onPress={startManualHold}
+          disabled={manualHoldActive}
+          style={{
+            flex: 1, paddingVertical: 12, borderRadius: 10, alignItems: 'center',
+            backgroundColor: manualHoldActive ? '#86efac' : '#16a34a',
+            opacity: manualHoldActive ? 0.7 : 1,
+          }}
+        >
+          <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>💧 Spray ON</Text>
+        </Pressable>
+        <Pressable
+          onPress={stopManualHold}
+          disabled={!manualHoldActive}
+          style={{
+            flex: 1, paddingVertical: 12, borderRadius: 10, alignItems: 'center',
+            backgroundColor: !manualHoldActive ? '#fca5a5' : '#dc2626',
+            opacity: !manualHoldActive ? 0.6 : 1,
+          }}
+        >
+          <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>🚫 Spray OFF</Text>
+        </Pressable>
+      </View>
+      {manualHoldActive && (
+        <View style={{ backgroundColor: '#dcfce7', borderRadius: 8, padding: 8, marginBottom: 8 }}>
+          <Text style={{ color: '#15803d', fontSize: 12, textAlign: 'center', fontWeight: '600' }}>● Manual spray active — heartbeat running</Text>
+        </View>
+      )}
 
       <View style={{ marginTop: 4, marginBottom: 16 }}>
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>

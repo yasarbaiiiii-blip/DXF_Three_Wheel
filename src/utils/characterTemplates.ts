@@ -7361,3 +7361,45 @@ export function generateNumberLines(digit: NumberType, size: number, fontStyle: 
     }
     return lines;
 }
+
+export function generateTextLines(text: string, size: number, fontStyle: FontStyle, spacing: number): PlanLine[] {
+    const lines: PlanLine[] = [];
+    let currentOffset = 0;
+    let pointId = 1;
+    let lineId = 1;
+    const uppercaseText = text.toUpperCase();
+
+    for (let i = 0; i < uppercaseText.length; i++) {
+        const char = uppercaseText[i];
+        if (char === " ") {
+            currentOffset += size * 0.6 + spacing;
+            continue;
+        }
+
+        let segments: any[] = [];
+        if (char >= "A" && char <= "Z") {
+            segments = alphabetsData[fontStyle][char as AlphabetType] || [];
+        } else if (char >= "0" && char <= "9") {
+            segments = numbersData[fontStyle][char as NumberType] || [];
+        }
+
+        if (segments.length === 0) {
+            currentOffset += size * 0.6 + spacing;
+            continue;
+        }
+
+        for (const seg of segments) {
+            lines.push({
+                id: `char-${lineId++}`,
+                label: "Stroke",
+                layer: "marking",
+                width: 0.1,
+                from: { id: pointId++, x: seg.p1.y * size, y: seg.p1.x * size + currentOffset },
+                to: { id: pointId++, x: seg.p2.y * size, y: seg.p2.x * size + currentOffset },
+            });
+        }
+
+        currentOffset += size * 0.8 + spacing;
+    }
+    return lines;
+}

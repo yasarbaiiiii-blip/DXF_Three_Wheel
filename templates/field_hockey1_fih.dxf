@@ -5,15 +5,19 @@ HEADER
   9
 $ACADVER
   1
-AC1015
+AC1024
   9
 $ACADMAINTVER
  70
-    13
+6
   9
 $DWGCODEPAGE
   3
 ANSI_1252
+  9
+$LASTSAVEDBY
+  1
+ezdxf
   9
 $INSBASE
  10
@@ -25,19 +29,19 @@ $INSBASE
   9
 $EXTMIN
  10
--1.24264068711929
+1e+20
  20
--1.242640687119285
+1e+20
  30
-0.0
+1e+20
   9
 $EXTMAX
  10
-84.10566834024946
+-1e+20
  20
-84.10566834024946
+-1e+20
  30
-0.0
+-1e+20
   9
 $LIMMIN
  10
@@ -53,23 +57,23 @@ $LIMMAX
   9
 $ORTHOMODE
  70
-     0
+0
   9
 $REGENMODE
  70
-     1
+1
   9
 $FILLMODE
  70
-     1
+1
   9
 $QTEXTMODE
  70
-     0
+0
   9
 $MIRRTEXT
  70
-     1
+1
   9
 $LTSCALE
  40
@@ -77,7 +81,7 @@ $LTSCALE
   9
 $ATTMODE
  70
-     1
+1
   9
 $TEXTSIZE
  40
@@ -93,7 +97,7 @@ Standard
   9
 $CLAYER
   8
-ceco.net 473 softball field
+0
   9
 $CELTYPE
   6
@@ -101,7 +105,7 @@ ByLayer
   9
 $CECOLOR
  62
-   256
+256
   9
 $CELTSCALE
  40
@@ -109,7 +113,7 @@ $CELTSCALE
   9
 $DISPSILH
  70
-     0
+0
   9
 $DIMSCALE
  40
@@ -161,35 +165,35 @@ $DIMTSZ
   9
 $DIMTOL
  70
-     0
+0
   9
 $DIMLIM
  70
-     0
+0
   9
 $DIMTIH
  70
-     0
+0
   9
 $DIMTOH
  70
-     0
+0
   9
 $DIMSE1
  70
-     0
+0
   9
 $DIMSE2
  70
-     0
+0
   9
 $DIMTAD
  70
-     1
+1
   9
 $DIMZIN
  70
-     8
+8
   9
 $DIMBLK
   1
@@ -197,11 +201,11 @@ $DIMBLK
   9
 $DIMASO
  70
-     1
+1
   9
 $DIMSHO
  70
-     1
+1
   9
 $DIMPOST
   1
@@ -213,15 +217,15 @@ $DIMAPOST
   9
 $DIMALT
  70
-     0
+0
   9
 $DIMALTD
  70
-     3
+3
   9
 $DIMALTF
  40
-0.03937007874016
+0.03937007874
   9
 $DIMLFAC
  40
@@ -229,7 +233,7 @@ $DIMLFAC
   9
 $DIMTOFL
  70
-     1
+1
   9
 $DIMTVP
  40
@@ -237,15 +241,15 @@ $DIMTVP
   9
 $DIMTIX
  70
-     0
+0
   9
 $DIMSOXD
  70
-     0
+0
   9
 $DIMSAH
  70
-     0
+0
   9
 $DIMBLK1
   1
@@ -261,15 +265,15 @@ ISO-25
   9
 $DIMCLRD
  70
-     0
+0
   9
 $DIMCLRE
  70
-     0
+0
   9
 $DIMCLRT
  70
-     0
+0
   9
 $DIMTFAC
  40
@@ -281,51 +285,51 @@ $DIMGAP
   9
 $DIMJUST
  70
-     0
+0
   9
 $DIMSD1
  70
-     0
+0
   9
 $DIMSD2
  70
-     0
+0
   9
 $DIMTOLJ
  70
-     0
+0
   9
 $DIMTZIN
  70
-     8
+8
   9
 $DIMALTZ
  70
-     0
+0
   9
 $DIMALTTZ
  70
-     0
+0
   9
 $DIMUPT
  70
-     0
+0
   9
 $DIMDEC
  70
-     2
+2
   9
 $DIMTDEC
  70
-     2
+2
   9
 $DIMALTU
  70
-     2
+2
   9
 $DIMALTTD
  70
-     3
+3
   9
 $DIMTXSTY
   7
@@ -333,11 +337,11 @@ Standard
   9
 $DIMAUNIT
  70
-     0
+0
   9
 $DIMADEC
  70
-     0
+0
   9
 $DIMALTRND
  40
@@ -345,19 +349,19 @@ $DIMALTRND
   9
 $DIMAZIN
  70
-     0
+0
   9
 $DIMDSEP
  70
-    44
+44
   9
 $DIMATFIT
  70
-     3
+3
   9
 $DIMFRAC
  70
-     0
+0
   9
 $DIMLDRBLK
   1
@@ -365,27 +369,67 @@ $DIMLDRBLK
   9
 $DIMLUNIT
  70
-     2
+2
   9
 $DIMLWD
  70
-    -2
+-2
   9
 $DIMLWE
  70
-    -2
+-2
   9
 $DIMTMOVE
  70
-     0
+0
+  9
+$DIMFXL
+ 40
+1.0
+  9
+$DIMFXLON
+ 70
+0
+  9
+$DIMJOGANG
+ 40
+0.785398163397
+  9
+$DIMTFILL
+ 70
+0
+  9
+$DIMTFILLCLR
+ 70
+0
+  9
+$DIMARCSYM
+ 70
+0
+  9
+$DIMLTYPE
+  6
+
+  9
+$DIMLTEX1
+  6
+
+  9
+$DIMLTEX2
+  6
+
+  9
+$DIMTXTDIRECTION
+ 70
+0
   9
 $LUNITS
  70
-     2
+2
   9
 $LUPREC
  70
-     4
+4
   9
 $SKETCHINC
  40
@@ -397,11 +441,11 @@ $FILLETRAD
   9
 $AUNITS
  70
-     0
+0
   9
 $AUPREC
  70
-     0
+2
   9
 $MENU
   1
@@ -421,19 +465,19 @@ $THICKNESS
   9
 $LIMCHECK
  70
-     0
+0
   9
 $CHAMFERA
  40
-10.0
+0.0
   9
 $CHAMFERB
  40
-10.0
+0.0
   9
 $CHAMFERC
  40
-20.0
+0.0
   9
 $CHAMFERD
  40
@@ -441,35 +485,35 @@ $CHAMFERD
   9
 $SKPOLY
  70
-     0
+0
   9
 $TDCREATE
  40
-2457858.695660799
+2461208.442824074
   9
 $TDUCREATE
  40
-2457858.820660799
+2458532.153996898
   9
 $TDUPDATE
  40
-2458701.731949491
+2461208.442824074
   9
 $TDUUPDATE
  40
-2458701.856949490
+2458532.1544311
   9
 $TDINDWG
  40
-0.0092036690
+0.0
   9
 $TDUSRTIMER
  40
-0.0092036574
+0.0
   9
 $USRTIMER
  70
-     1
+1
   9
 $ANGBASE
  50
@@ -477,11 +521,11 @@ $ANGBASE
   9
 $ANGDIR
  70
-     0
+0
   9
 $PDMODE
  70
-     0
+0
   9
 $PDSIZE
  40
@@ -493,39 +537,39 @@ $PLINEWID
   9
 $SPLFRAME
  70
-     0
+0
   9
 $SPLINETYPE
  70
-     6
+6
   9
 $SPLINESEGS
  70
-     8
+8
   9
 $HANDSEED
   5
-12E
+6F
   9
 $SURFTAB1
  70
-     6
+6
   9
 $SURFTAB2
  70
-     6
+6
   9
 $SURFTYPE
  70
-     6
+6
   9
 $SURFU
  70
-     6
+6
   9
 $SURFV
  70
-     6
+6
   9
 $UCSBASE
   2
@@ -565,7 +609,7 @@ $UCSORTHOREF
   9
 $UCSORTHOVIEW
  70
-     0
+0
   9
 $UCSORGTOP
  10
@@ -653,7 +697,7 @@ $PUCSORTHOREF
   9
 $PUCSORTHOVIEW
  70
-     0
+0
   9
 $PUCSORGTOP
  10
@@ -705,23 +749,23 @@ $PUCSORGBACK
   9
 $USERI1
  70
-     0
+0
   9
 $USERI2
  70
-     0
+0
   9
 $USERI3
  70
-     0
+0
   9
 $USERI4
  70
-     0
+0
   9
 $USERI5
  70
-     0
+0
   9
 $USERR1
  40
@@ -745,23 +789,23 @@ $USERR5
   9
 $WORLDVIEW
  70
-     1
+1
   9
 $SHADEDGE
  70
-     3
+3
   9
 $SHADEDIF
  70
-    70
+70
   9
 $TILEMODE
  70
-     1
+1
   9
 $MAXACTVP
  70
-    64
+64
   9
 $PINSBASE
  10
@@ -773,55 +817,55 @@ $PINSBASE
   9
 $PLIMCHECK
  70
-     0
+0
   9
 $PEXTMIN
  10
-26.66999878883362
+1e+20
  20
-20.31999878883362
+1e+20
  30
-0.0
+1e+20
   9
 $PEXTMAX
  10
-240.0299890995025
+-1e+20
  20
-182.8799890995025
+-1e+20
  30
-0.0
+-1e+20
   9
 $PLIMMIN
  10
--6.350006103515625
+0.0
  20
--6.349999904632568
+0.0
   9
 $PLIMMAX
  10
-273.0499877929687
+420.0
  20
-209.5499939918517
+297.0
   9
 $UNITMODE
  70
-     0
+0
   9
 $VISRETAIN
  70
-     1
+1
   9
 $PLINEGEN
  70
-     0
+0
   9
 $PSLTSCALE
  70
-     1
+1
   9
 $TREEDEPTH
  70
-  3020
+3020
   9
 $CMLSTYLE
   2
@@ -829,7 +873,7 @@ Standard
   9
 $CMLJUST
  70
-     0
+0
   9
 $CMLSCALE
  40
@@ -837,31 +881,31 @@ $CMLSCALE
   9
 $PROXYGRAPHICS
  70
-     1
+1
   9
 $MEASUREMENT
  70
-     1
+1
   9
 $CELWEIGHT
 370
-    -1
+-1
   9
 $ENDCAPS
 280
-     0
+0
   9
 $JOINSTYLE
 280
-     0
+0
   9
 $LWDISPLAY
 290
-     0
+0
   9
 $INSUNITS
  70
-     6
+6
   9
 $HYPERLINKBASE
   1
@@ -873,27 +917,27 @@ $STYLESHEET
   9
 $XEDIT
 290
-     1
+1
   9
 $CEPSNTYPE
 380
-     0
+0
   9
 $PSTYLEMODE
 290
-     1
+1
   9
 $FINGERPRINTGUID
   2
-{FDEAD578-A652-11D2-9A35-0060089B3A3F}
+{AE10D9DE-36C1-447D-B9B5-AA61906AFDB3}
   9
 $VERSIONGUID
   2
-{B7989CA3-813B-4935-85ED-F9EAD2169397}
+{98CAF26E-D047-42F6-8F94-AECD4E88F56C}
   9
 $EXTNAMES
 290
-     1
+1
   9
 $PSVPSCALE
  40
@@ -901,7 +945,167 @@ $PSVPSCALE
   9
 $OLESTARTUP
 290
-     0
+0
+  9
+$SORTENTS
+280
+127
+  9
+$INDEXCTL
+280
+0
+  9
+$HIDETEXT
+280
+1
+  9
+$XCLIPFRAME
+280
+1
+  9
+$HALOGAP
+280
+0
+  9
+$OBSCOLOR
+ 70
+257
+  9
+$OBSLTYPE
+280
+0
+  9
+$INTERSECTIONDISPLAY
+280
+0
+  9
+$INTERSECTIONCOLOR
+ 70
+257
+  9
+$DIMASSOC
+280
+2
+  9
+$PROJECTNAME
+  1
+
+  9
+$CAMERADISPLAY
+290
+0
+  9
+$LENSLENGTH
+ 40
+50.0
+  9
+$CAMERAHEIGHT
+ 40
+0.0
+  9
+$STEPSPERSEC
+ 40
+24.0
+  9
+$STEPSIZE
+ 40
+100.0
+  9
+$3DDWFPREC
+ 40
+2.0
+  9
+$PSOLWIDTH
+ 40
+0.005
+  9
+$PSOLHEIGHT
+ 40
+0.08
+  9
+$LOFTANG1
+ 40
+1.570796326795
+  9
+$LOFTANG2
+ 40
+1.570796326795
+  9
+$LOFTMAG1
+ 40
+0.0
+  9
+$LOFTMAG2
+ 40
+0.0
+  9
+$LOFTPARAM
+ 70
+7
+  9
+$LOFTNORMALS
+280
+1
+  9
+$LATITUDE
+ 40
+37.795
+  9
+$LONGITUDE
+ 40
+-122.394
+  9
+$NORTHDIRECTION
+ 40
+0.0
+  9
+$TIMEZONE
+ 70
+-8000
+  9
+$LIGHTGLYPHDISPLAY
+280
+1
+  9
+$TILEMODELIGHTSYNCH
+280
+1
+  9
+$CMATERIAL
+347
+20
+  9
+$SOLIDHIST
+280
+0
+  9
+$SHOWHIST
+280
+1
+  9
+$DWFFRAME
+280
+2
+  9
+$DGNFRAME
+280
+2
+  9
+$REALWORLDSCALE
+290
+1
+  9
+$INTERFERECOLOR
+ 62
+256
+  9
+$CSHADOW
+280
+0
+  9
+$SHADOWPLANELOCATION
+ 40
+0.0
   0
 ENDSEC
   0
@@ -915,41 +1119,111 @@ ACDBDICTIONARYWDFLT
   2
 AcDbDictionaryWithDefault
   3
-AutoCAD 2000
+ObjectDBX Classes
  90
-        0
+0
+ 91
+0
 280
-     0
+0
 281
-     0
+0
   0
 CLASS
   1
-ACDBPLACEHOLDER
+SUN
   2
-AcDbPlaceHolder
+AcDbSun
   3
-AutoCAD 2000
+SCENEOE
  90
-        0
+1153
+ 91
+0
 280
-     0
+0
 281
-     0
+0
   0
 CLASS
   1
-LAYOUT
+VISUALSTYLE
   2
-AcDbLayout
+AcDbVisualStyle
   3
-AutoCAD 2000
+ObjectDBX Classes
  90
-        0
+4095
+ 91
+0
 280
-     0
+0
 281
-     0
+0
+  0
+CLASS
+  1
+MATERIAL
+  2
+AcDbMaterial
+  3
+ObjectDBX Classes
+ 90
+1153
+ 91
+0
+280
+0
+281
+0
+  0
+CLASS
+  1
+SCALE
+  2
+AcDbScale
+  3
+ObjectDBX Classes
+ 90
+1153
+ 91
+0
+280
+0
+281
+0
+  0
+CLASS
+  1
+TABLESTYLE
+  2
+AcDbTableStyle
+  3
+ObjectDBX Classes
+ 90
+4095
+ 91
+0
+280
+0
+281
+0
+  0
+CLASS
+  1
+MLEADERSTYLE
+  2
+AcDbMLeaderStyle
+  3
+ACDB_MLEADERSTYLE_CLASS
+ 90
+4095
+ 91
+0
+280
+0
+281
+0
   0
 CLASS
   1
@@ -957,13 +1231,127 @@ DICTIONARYVAR
   2
 AcDbDictionaryVar
   3
-AutoCAD 2000
+ObjectDBX Classes
  90
-        0
+0
+ 91
+0
 280
-     0
+0
 281
-     0
+0
+  0
+CLASS
+  1
+CELLSTYLEMAP
+  2
+AcDbCellStyleMap
+  3
+ObjectDBX Classes
+ 90
+1152
+ 91
+0
+280
+0
+281
+0
+  0
+CLASS
+  1
+MENTALRAYRENDERSETTINGS
+  2
+AcDbMentalRayRenderSettings
+  3
+SCENEOE
+ 90
+1024
+ 91
+0
+280
+0
+281
+0
+  0
+CLASS
+  1
+ACDBDETAILVIEWSTYLE
+  2
+AcDbDetailViewStyle
+  3
+ObjectDBX Classes
+ 90
+1025
+ 91
+0
+280
+0
+281
+0
+  0
+CLASS
+  1
+ACDBSECTIONVIEWSTYLE
+  2
+AcDbSectionViewStyle
+  3
+ObjectDBX Classes
+ 90
+1025
+ 91
+0
+280
+0
+281
+0
+  0
+CLASS
+  1
+RASTERVARIABLES
+  2
+AcDbRasterVariables
+  3
+ISM
+ 90
+0
+ 91
+0
+280
+0
+281
+0
+  0
+CLASS
+  1
+ACDBPLACEHOLDER
+  2
+AcDbPlaceHolder
+  3
+ObjectDBX Classes
+ 90
+0
+ 91
+0
+280
+0
+281
+0
+  0
+CLASS
+  1
+LAYOUT
+  2
+AcDbLayout
+  3
+ObjectDBX Classes
+ 90
+0
+ 91
+0
+280
+0
+281
+0
   0
 ENDSEC
   0
@@ -981,11 +1369,11 @@ VPORT
 100
 AcDbSymbolTable
  70
-     4
+1
   0
 VPORT
   5
-12D
+23
 330
 8
 100
@@ -995,7 +1383,7 @@ AcDbViewportTableRecord
   2
 *Active
  70
-     0
+0
  10
 0.0
  20
@@ -1005,21 +1393,21 @@ AcDbViewportTableRecord
  21
 1.0
  12
-41.43539506876305
+0.0
  22
-41.43479976120262
+0.0
  13
 0.0
  23
 0.0
  14
-10.0
+0.5
  24
-10.0
+0.5
  15
-10.0
+0.5
  25
-10.0
+0.5
  16
 0.0
  26
@@ -1033,9 +1421,9 @@ AcDbViewportTableRecord
  37
 0.0
  40
-85.98721737028171
+1000.0
  41
-2.187425860023724
+1.34
  42
 50.0
  43
@@ -1047,45 +1435,25 @@ AcDbViewportTableRecord
  51
 0.0
  71
-     0
+0
  72
-   100
+1000
  73
-     1
+1
  74
-     3
+3
  75
-     0
+0
  76
-     0
+0
  77
-     0
+0
  78
-     0
+0
 281
-     0
+0
  65
-     1
-110
-0.0
-120
-0.0
-130
-0.0
-111
-1.0
-121
-0.0
-131
-0.0
-112
-0.0
-122
-1.0
-132
-0.0
- 79
-     0
+0
 146
 0.0
   0
@@ -1095,19 +1463,19 @@ TABLE
   2
 LTYPE
   5
-5
+2
 330
 0
 100
 AcDbSymbolTable
  70
-     1
+3
   0
 LTYPE
   5
-14
+24
 330
-5
+2
 100
 AcDbSymbolTableRecord
 100
@@ -1115,21 +1483,21 @@ AcDbLinetypeTableRecord
   2
 ByBlock
  70
-     0
+0
   3
 
  72
-    65
+65
  73
-     0
+0
  40
 0.0
   0
 LTYPE
   5
-15
+25
 330
-5
+2
 100
 AcDbSymbolTableRecord
 100
@@ -1137,21 +1505,21 @@ AcDbLinetypeTableRecord
   2
 ByLayer
  70
-     0
+0
   3
 
  72
-    65
+65
  73
-     0
+0
  40
 0.0
   0
 LTYPE
   5
-16
+26
 330
-5
+2
 100
 AcDbSymbolTableRecord
 100
@@ -1159,13 +1527,13 @@ AcDbLinetypeTableRecord
   2
 Continuous
  70
-     0
+0
   3
-Solid line
+
  72
-    65
+65
  73
-     0
+0
  40
 0.0
   0
@@ -1175,19 +1543,19 @@ TABLE
   2
 LAYER
   5
-2
+1
 330
 0
 100
 AcDbSymbolTable
  70
-     3
+2
   0
 LAYER
   5
-10
+27
 330
-2
+1
 100
 AcDbSymbolTableRecord
 100
@@ -1195,83 +1563,43 @@ AcDbLayerTableRecord
   2
 0
  70
-     0
+0
  62
-     7
+7
   6
 Continuous
 370
-    -3
+-3
 390
-F
+13
+347
+21
   0
 LAYER
   5
-88
-102
-{ACAD_XDICTIONARY
-360
-89
-102
-}
+28
 330
-2
+1
 100
 AcDbSymbolTableRecord
 100
 AcDbLayerTableRecord
   2
-ceco.net 473 grass perimeter
+Defpoints
  70
-     0
+0
  62
-    82
+7
   6
 Continuous
+290
+0
 370
-    -3
+-3
 390
-F
-1001
-AcAecLayerStandard
-1000
-
-1000
-
-  0
-LAYER
-  5
-8B
-102
-{ACAD_XDICTIONARY
-360
-8C
-102
-}
-330
-2
-100
-AcDbSymbolTableRecord
-100
-AcDbLayerTableRecord
-  2
-ceco.net 473 softball field
- 70
-     0
- 62
-     7
-  6
-Continuous
-370
-    -3
-390
-F
-1001
-AcAecLayerStandard
-1000
-
-1000
-
+13
+347
+21
   0
 ENDTAB
   0
@@ -1279,19 +1607,19 @@ TABLE
   2
 STYLE
   5
-3
+5
 330
 0
 100
 AcDbSymbolTable
  70
-     1
+1
   0
 STYLE
   5
-11
+29
 330
-3
+5
 100
 AcDbSymbolTableRecord
 100
@@ -1299,7 +1627,7 @@ AcDbTextStyleTableRecord
   2
 Standard
  70
-     0
+0
  40
 0.0
  41
@@ -1307,7 +1635,7 @@ Standard
  50
 0.0
  71
-     0
+0
  42
 2.5
   3
@@ -1321,13 +1649,13 @@ TABLE
   2
 VIEW
   5
-6
+7
 330
 0
 100
 AcDbSymbolTable
  70
-     0
+0
   0
 ENDTAB
   0
@@ -1335,13 +1663,13 @@ TABLE
   2
 UCS
   5
-7
+6
 330
 0
 100
 AcDbSymbolTable
  70
-     0
+0
   0
 ENDTAB
   0
@@ -1349,19 +1677,19 @@ TABLE
   2
 APPID
   5
-9
+3
 330
 0
 100
 AcDbSymbolTable
  70
-     3
+3
   0
 APPID
   5
-12
+2A
 330
-9
+3
 100
 AcDbSymbolTableRecord
 100
@@ -1369,35 +1697,35 @@ AcDbRegAppTableRecord
   2
 ACAD
  70
-     0
+0
   0
 APPID
   5
-8E
+6C
 330
-9
+3
 100
 AcDbSymbolTableRecord
 100
 AcDbRegAppTableRecord
   2
-ACAD_EXEMPT_FROM_CAD_STANDARDS
+HATCHBACKGROUNDCOLOR
  70
-     0
+0
   0
 APPID
   5
-8F
+6D
 330
-9
+3
 100
 AcDbSymbolTableRecord
 100
 AcDbRegAppTableRecord
   2
-AcAecLayerStandard
+EZDXF
  70
-     0
+0
   0
 ENDTAB
   0
@@ -1405,31 +1733,31 @@ TABLE
   2
 DIMSTYLE
   5
-A
+4
 330
 0
 100
 AcDbSymbolTable
  70
-     1
+1
 100
 AcDbDimStyleTable
- 71
-     0
   0
 DIMSTYLE
 105
-27
+2B
 330
-A
+4
 100
 AcDbSymbolTableRecord
 100
 AcDbDimStyleTableRecord
   2
-ISO-25
+Standard
  70
-     0
+0
+ 40
+1.0
  41
 2.5
  42
@@ -1438,40 +1766,118 @@ ISO-25
 3.75
  44
 1.25
- 73
-     0
- 74
-     0
- 77
-     1
- 78
-     8
+ 45
+0.0
+ 46
+0.0
+ 47
+0.0
+ 48
+0.0
+ 49
+2.5
 140
 2.5
 141
 2.5
+142
+0.0
 143
-0.03937007874016
+0.03937007874
+144
+1.0
+145
+0.0
+146
+1.0
 147
 0.625
+148
+0.0
+ 69
+0
+ 70
+0
+ 71
+0
+ 72
+0
+ 73
+0
+ 74
+0
+ 75
+0
+ 76
+0
+ 77
+1
+ 78
+8
+ 79
+3
+170
+0
 171
-     3
+3
 172
-     1
+1
+173
+0
+174
+0
+175
+0
+176
+0
+177
+0
+178
+0
+179
+2
 271
-     2
+2
 272
-     2
+2
+273
+2
 274
-     3
+3
+275
+0
+276
+0
+277
+2
 278
-    44
+44
+279
+0
+280
+0
+281
+0
+282
+0
 283
-     0
+0
 284
-     8
-340
-11
+8
+285
+0
+286
+0
+288
+0
+289
+3
+290
+0
+371
+-2
+372
+-2
   0
 ENDTAB
   0
@@ -1479,19 +1885,19 @@ TABLE
   2
 BLOCK_RECORD
   5
-1
+9
 330
 0
 100
 AcDbSymbolTable
  70
-     0
+2
   0
 BLOCK_RECORD
   5
-1F
+17
 330
-1
+9
 100
 AcDbSymbolTableRecord
 100
@@ -1499,13 +1905,19 @@ AcDbBlockTableRecord
   2
 *Model_Space
 340
-22
+1A
+ 70
+0
+280
+1
+281
+0
   0
 BLOCK_RECORD
   5
-55
+1B
 330
-1
+9
 100
 AcDbSymbolTableRecord
 100
@@ -1513,7 +1925,13 @@ AcDbBlockTableRecord
   2
 *Paper_Space
 340
-56
+1E
+ 70
+0
+280
+1
+281
+0
   0
 ENDTAB
   0
@@ -1525,9 +1943,9 @@ BLOCKS
   0
 BLOCK
   5
-20
+18
 330
-1F
+17
 100
 AcDbEntity
   8
@@ -1537,7 +1955,7 @@ AcDbBlockBegin
   2
 *Model_Space
  70
-     0
+0
  10
 0.0
  20
@@ -1551,9 +1969,9 @@ AcDbBlockBegin
   0
 ENDBLK
   5
-21
+19
 330
-1F
+17
 100
 AcDbEntity
   8
@@ -1563,13 +1981,11 @@ AcDbBlockEnd
   0
 BLOCK
   5
-57
+1C
 330
-55
+1B
 100
 AcDbEntity
- 67
-     1
   8
 0
 100
@@ -1577,7 +1993,7 @@ AcDbBlockBegin
   2
 *Paper_Space
  70
-     0
+0
  10
 0.0
  20
@@ -1591,13 +2007,11 @@ AcDbBlockBegin
   0
 ENDBLK
   5
-58
+1D
 330
-55
+1B
 100
 AcDbEntity
- 67
-     1
   8
 0
 100
@@ -1609,1293 +2023,149 @@ SECTION
   2
 ENTITIES
   0
-LINE
+LWPOLYLINE
   5
-DD
+2F
 330
-1F
+17
 100
 AcDbEntity
   8
-ceco.net 473 softball field
+0
 100
-AcDbLine
+AcDbPolyline
+ 90
+4
+ 70
+1
  10
-8.0
+0.0
  20
-8.0
- 30
 0.0
- 11
-8.318198051533947
- 21
-8.0
- 31
+ 10
+91.4
+ 20
 0.0
+ 10
+91.4
+ 20
+55.0
+ 10
+0.0
+ 20
+55.0
   0
 LINE
   5
-DE
+30
 330
-1F
+17
 100
 AcDbEntity
   8
-ceco.net 473 softball field
+0
 100
 AcDbLine
  10
-26.288
- 20
-8.0
- 30
-0.0
- 11
-26.288
- 21
-26.088
- 31
-0.0
-  0
-LINE
-  5
-DF
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbLine
- 10
-26.088
- 20
-26.288
- 30
-0.0
- 11
-8.0
- 21
-26.288
- 31
-0.0
-  0
-LINE
-  5
-E0
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbLine
- 10
-8.0
- 20
-8.0
- 30
-0.0
- 11
-8.0
- 21
-8.318198051533947
- 31
-0.0
-  0
-LINE
-  5
-E1
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbLine
- 10
-26.088
- 20
-26.088
- 30
-0.0
- 11
-26.488
- 21
-26.088
- 31
-0.0
-  0
-LINE
-  5
-E2
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbLine
- 10
-26.488
- 20
-26.088
- 30
-0.0
- 11
-26.488
- 21
-26.488
- 31
-0.0
-  0
-LINE
-  5
-E3
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbLine
- 10
-26.488
- 20
-26.488
- 30
-0.0
- 11
-26.088
- 21
-26.488
- 31
-0.0
-  0
-LINE
-  5
-E4
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbLine
- 10
-26.088
- 20
-26.088
- 30
-0.0
- 11
-26.088
- 21
-26.48889036370216
- 31
-0.0
-  0
-LINE
-  5
-E5
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbLine
- 10
-25.88799999999999
- 20
-8.0
- 30
-0.0
- 11
-26.288
- 21
-8.0
- 31
-0.0
-  0
-LINE
-  5
-E6
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbLine
- 10
-26.288
- 20
-8.0
- 30
-0.0
- 11
-26.288
- 21
-8.4
- 31
-0.0
-  0
-LINE
-  5
-E7
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbLine
- 10
-26.288
- 20
-8.4
- 30
-0.0
- 11
-25.88799999999999
- 21
-8.4
- 31
-0.0
-  0
-LINE
-  5
-E8
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbLine
- 10
-25.88799999999999
- 20
-8.0
- 30
-0.0
- 11
-25.88799999999999
- 21
-8.40089036370216
- 31
-0.0
-  0
-LINE
-  5
-E9
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbLine
- 10
-8.0
- 20
-25.88710963629784
- 30
-0.0
- 11
-8.4
- 21
-25.88710963629784
- 31
-0.0
-  0
-LINE
-  5
-EA
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbLine
- 10
-8.4
- 20
-25.88710963629784
- 30
-0.0
- 11
-8.4
- 21
-26.28710963629784
- 31
-0.0
-  0
-LINE
-  5
-EB
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbLine
- 10
-8.4
- 20
-26.28710963629784
- 30
-0.0
- 11
-8.0
- 21
-26.28710963629784
- 31
-0.0
-  0
-LINE
-  5
-EC
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbLine
- 10
-8.0
- 20
-25.88710963629784
- 30
-0.0
- 11
-8.0
- 21
-26.288
- 31
-0.0
-  0
-LINE
-  5
-ED
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 grass perimeter
-100
-AcDbLine
- 10
-0.0
- 20
-6.000000000000005
- 30
-0.0
- 11
-0.0000000000000568
- 21
-71.048
- 31
-0.0
-  0
-LINE
-  5
-EE
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 grass perimeter
-100
-AcDbLine
- 10
-5.999999999999999
+45.7
  20
 0.0
  30
 0.0
  11
-71.04799999999997
+45.7
  21
-0.0
- 31
-0.0
-  0
-LINE
-  5
-EF
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbLine
- 10
-25.88799999999999
- 20
-7.599999999999999
- 30
-0.0
- 11
-26.288
- 21
-7.599999999999999
- 31
-0.0
-  0
-LINE
-  5
-F0
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbLine
- 10
-26.288
- 20
-7.599999999999999
- 30
-0.0
- 11
-26.288
- 21
-8.0
- 31
-0.0
-  0
-LINE
-  5
-F1
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbLine
- 10
-26.288
- 20
-8.0
- 30
-0.0
- 11
-25.88799999999999
- 21
-8.0
- 31
-0.0
-  0
-LINE
-  5
-F2
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbLine
- 10
-25.88799999999999
- 20
-7.599999999999999
- 30
-0.0
- 11
-25.88799999999999
- 21
-8.00089036370216
- 31
-0.0
-  0
-LINE
-  5
-F3
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbLine
- 10
-21.288
- 20
-5.5
- 30
-0.0
- 11
-26.288
- 21
-5.5
- 31
-0.0
-  0
-LINE
-  5
-F4
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbLine
- 10
-5.5
- 20
-21.288
- 30
-0.0
- 11
-5.5
- 21
-26.288
- 31
-0.0
-  0
-LINE
-  5
-F5
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbLine
- 10
-26.288
- 20
-5.5
- 30
-0.0
- 11
-26.288
- 21
-4.5
- 31
-0.0
-  0
-LINE
-  5
-F6
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbLine
- 10
-5.5
- 20
-26.288
- 30
-0.0
- 11
-4.5
- 21
-26.288
- 31
-0.0
-  0
-LINE
-  5
-F7
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbLine
- 10
-21.288
- 20
-4.5
- 30
-0.0
- 11
-26.288
- 21
-4.5
- 31
-0.0
-  0
-LINE
-  5
-F8
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbLine
- 10
-4.5
- 20
-21.288
- 30
-0.0
- 11
-4.5
- 21
-26.288
- 31
-0.0
-  0
-LINE
-  5
-F9
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbLine
- 10
-21.288
- 20
-5.5
- 30
-0.0
- 11
-21.288
- 21
-4.5
- 31
-0.0
-  0
-LINE
-  5
-FA
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbLine
- 10
-5.5
- 20
-21.288
- 30
-0.0
- 11
-4.5
- 21
-21.288
- 31
-0.0
-  0
-LINE
-  5
-FB
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbLine
- 10
-8.0
- 20
-8.318198051533947
- 30
-0.0
- 11
-8.176776695296636
- 21
-8.494974746830584
- 31
-0.0
-  0
-LINE
-  5
-FC
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbLine
- 10
-8.318198051533947
- 20
-8.0
- 30
-0.0
- 11
-8.494974746830584
- 21
-8.176776695296636
- 31
-0.0
-  0
-LINE
-  5
-FD
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbLine
- 10
-8.176776695296636
- 20
-8.494974746830584
- 30
-0.0
- 11
-8.494974746830584
- 21
-8.176776695296636
- 31
-0.0
-  0
-LINE
-  5
-FE
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbLine
- 10
-7.186827201635471
- 20
-7.71715728752538
- 30
-0.0
- 11
-8.707106781186547
- 21
-9.237436867076455
- 31
-0.0
-  0
-LINE
-  5
-FF
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbLine
- 10
-7.71715728752538
- 20
-7.186827201635471
- 30
-0.0
- 11
-9.237436867076455
- 21
-8.707106781186547
- 31
-0.0
-  0
-LINE
-  5
-100
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbLine
- 10
-6.30294372515229
- 20
-4.358400076889278
- 30
-0.0
- 11
-9.944543648263005
- 21
-8.0
- 31
-0.0
-  0
-LINE
-  5
-101
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbLine
- 10
-4.358400076889278
- 20
-6.30294372515229
- 30
-0.0
- 11
-8.0
- 21
-9.944543648263005
- 31
-0.0
-  0
-LINE
-  5
-102
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbLine
- 10
-8.318198051533947
- 20
-8.0
- 30
-0.0
- 11
-9.131370849898477
- 21
-7.186827201635472
- 31
-0.0
-  0
-LINE
-  5
-103
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbLine
- 10
-8.0
- 20
-8.318198051533947
- 30
-0.0
- 11
-7.186827201635472
- 21
-9.131370849898477
- 31
-0.0
-  0
-LINE
-  5
-104
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbLine
- 10
-7.71715728752538
- 20
-7.186827201635471
- 30
-0.0
- 11
-8.424264068711929
- 21
-6.479720420448924
- 31
-0.0
-  0
-LINE
-  5
-105
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbLine
- 10
-7.186827201635471
- 20
-7.71715728752538
- 30
-0.0
- 11
-6.479720420448924
- 21
-8.424264068711929
- 31
-0.0
-  0
-LINE
-  5
-106
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbLine
- 10
-8.707106781186546
- 20
-9.237436867076457
- 30
-0.0
- 11
-8.0
- 21
-9.944543648263005
- 31
-0.0
-  0
-LINE
-  5
-107
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbLine
- 10
-9.237436867076455
- 20
-8.707106781186547
- 30
-0.0
- 11
-9.944543648263003
- 21
-8.000000000000001
- 31
-0.0
-  0
-LINE
-  5
-108
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbLine
- 10
-6.30294372515229
- 20
-4.358400076889278
- 30
-0.0
- 11
-4.358400076889278
- 21
-6.30294372515229
- 31
-0.0
-  0
-LINE
-  5
-109
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbLine
- 10
-18.11162697096762
- 20
-17.6873629022557
- 30
-0.0
- 11
-17.6873629022557
- 21
-18.11162697096762
+55.0
  31
 0.0
   0
 CIRCLE
   5
-10A
+31
 330
-1F
+17
 100
 AcDbEntity
   8
-ceco.net 473 softball field
+0
 100
 AcDbCircle
  10
-17.89949493661166
+45.7
  20
-17.89949493661166
+27.5
  30
 0.0
  40
-2.5
+0.15
   0
 LINE
   5
-10B
+32
 330
-1F
+17
 100
 AcDbEntity
   8
-ceco.net 473 softball field
+0
 100
 AcDbLine
  10
-17.288
+22.9
  20
-7.0
+0.0
  30
 0.0
  11
-26.288
+22.9
  21
-7.0
+55.0
  31
 0.0
   0
 LINE
   5
-10C
+33
 330
-1F
+17
 100
 AcDbEntity
   8
-ceco.net 473 softball field
+0
 100
 AcDbLine
  10
-26.288
- 20
-7.0
- 30
-0.0
- 11
-26.288
- 21
-6.707590258355367
- 31
-0.0
-  0
-LINE
-  5
-10D
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbLine
- 10
-17.288
- 20
-7.0
- 30
-0.0
- 11
-17.288
- 21
-6.707590258355367
- 31
-0.0
-  0
-LINE
-  5
-10E
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbLine
- 10
-8.0
- 20
-9.944543648263005
- 30
-0.0
- 11
-8.0
- 21
-26.288
- 31
-0.0
-  0
-LINE
-  5
-10F
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbLine
- 10
-9.944543648263005
- 20
-8.0
- 30
-0.0
- 11
-26.288
- 21
-8.0
- 31
-0.0
-  0
-LINE
-  5
-110
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 grass perimeter
-100
-AcDbLine
- 10
-0.0
- 20
-68.0
- 30
-0.0
- 11
-8.0
- 21
-68.00000000000001
- 31
-0.0
-  0
-LINE
-  5
-111
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 grass perimeter
-100
-AcDbLine
- 10
-68.0
+68.5
  20
 0.0
  30
 0.0
  11
-68.0
+68.5
  21
-8.0
+55.0
  31
 0.0
   0
 ARC
   5
-112
+34
 330
-1F
+17
 100
 AcDbEntity
   8
-ceco.net 473 grass perimeter
+0
 100
 AcDbCircle
  10
-7.999999999999996
+0.0
  20
-8.0
+29.33
  30
 0.0
  40
-60.0
+14.63
 100
 AcDbArc
  50
@@ -2905,23 +2175,1045 @@ AcDbArc
   0
 ARC
   5
-113
+35
 330
-1F
+17
 100
 AcDbEntity
   8
-ceco.net 473 grass perimeter
+0
 100
 AcDbCircle
  10
-7.999999999999996
+0.0
  20
-8.0
+25.67
  30
 0.0
  40
-63.048
+14.63
+100
+AcDbArc
+ 50
+270.0
+ 51
+360.0
+  0
+LINE
+  5
+36
+330
+17
+100
+AcDbEntity
+  8
+0
+100
+AcDbLine
+ 10
+14.63
+ 20
+25.67
+ 30
+0.0
+ 11
+14.63
+ 21
+29.33
+ 31
+0.0
+  0
+ARC
+  5
+37
+330
+17
+100
+AcDbEntity
+  8
+0
+100
+AcDbCircle
+ 10
+91.4
+ 20
+29.33
+ 30
+0.0
+ 40
+14.63
+100
+AcDbArc
+ 50
+90.0
+ 51
+180.0
+  0
+ARC
+  5
+38
+330
+17
+100
+AcDbEntity
+  8
+0
+100
+AcDbCircle
+ 10
+91.4
+ 20
+25.67
+ 30
+0.0
+ 40
+14.63
+100
+AcDbArc
+ 50
+180.0
+ 51
+270.0
+  0
+LINE
+  5
+39
+330
+17
+100
+AcDbEntity
+  8
+0
+100
+AcDbLine
+ 10
+76.77000000000001
+ 20
+25.67
+ 30
+0.0
+ 11
+76.77000000000001
+ 21
+29.33
+ 31
+0.0
+  0
+ARC
+  5
+3A
+330
+17
+100
+AcDbEntity
+  8
+0
+  6
+DASHED
+100
+AcDbCircle
+ 10
+0.0
+ 20
+27.5
+ 30
+0.0
+ 40
+19.200000000000003
+100
+AcDbArc
+ 50
+-90.0
+ 51
+90.0
+  0
+ARC
+  5
+3B
+330
+17
+100
+AcDbEntity
+  8
+0
+  6
+DASHED
+100
+AcDbCircle
+ 10
+91.4
+ 20
+27.5
+ 30
+0.0
+ 40
+19.200000000000003
+100
+AcDbArc
+ 50
+90.0
+ 51
+270.0
+  0
+CIRCLE
+  5
+3C
+330
+17
+100
+AcDbEntity
+  8
+0
+100
+AcDbCircle
+ 10
+6.475
+ 20
+27.5
+ 30
+0.0
+ 40
+0.15
+  0
+CIRCLE
+  5
+3D
+330
+17
+100
+AcDbEntity
+  8
+0
+100
+AcDbCircle
+ 10
+84.92500000000001
+ 20
+27.5
+ 30
+0.0
+ 40
+0.15
+  0
+LINE
+  5
+3E
+330
+17
+100
+AcDbEntity
+  8
+0
+100
+AcDbLine
+ 10
+0.0
+ 20
+34.155
+ 30
+0.0
+ 11
+0.3
+ 21
+34.155
+ 31
+0.0
+  0
+LINE
+  5
+3F
+330
+17
+100
+AcDbEntity
+  8
+0
+100
+AcDbLine
+ 10
+0.3
+ 20
+34.155
+ 30
+0.0
+ 11
+0.3
+ 21
+34.455
+ 31
+0.0
+  0
+LINE
+  5
+40
+330
+17
+100
+AcDbEntity
+  8
+0
+100
+AcDbLine
+ 10
+0.3
+ 20
+34.455
+ 30
+0.0
+ 11
+0.0
+ 21
+34.455
+ 31
+0.0
+  0
+LINE
+  5
+41
+330
+17
+100
+AcDbEntity
+  8
+0
+100
+AcDbLine
+ 10
+0.0
+ 20
+39.155
+ 30
+0.0
+ 11
+0.3
+ 21
+39.155
+ 31
+0.0
+  0
+LINE
+  5
+42
+330
+17
+100
+AcDbEntity
+  8
+0
+100
+AcDbLine
+ 10
+0.3
+ 20
+39.155
+ 30
+0.0
+ 11
+0.3
+ 21
+39.455
+ 31
+0.0
+  0
+LINE
+  5
+43
+330
+17
+100
+AcDbEntity
+  8
+0
+100
+AcDbLine
+ 10
+0.3
+ 20
+39.455
+ 30
+0.0
+ 11
+0.0
+ 21
+39.455
+ 31
+0.0
+  0
+LINE
+  5
+44
+330
+17
+100
+AcDbEntity
+  8
+0
+100
+AcDbLine
+ 10
+0.0
+ 20
+20.545
+ 30
+0.0
+ 11
+0.3
+ 21
+20.545
+ 31
+0.0
+  0
+LINE
+  5
+45
+330
+17
+100
+AcDbEntity
+  8
+0
+100
+AcDbLine
+ 10
+0.3
+ 20
+20.545
+ 30
+0.0
+ 11
+0.3
+ 21
+20.845
+ 31
+0.0
+  0
+LINE
+  5
+46
+330
+17
+100
+AcDbEntity
+  8
+0
+100
+AcDbLine
+ 10
+0.3
+ 20
+20.845
+ 30
+0.0
+ 11
+0.0
+ 21
+20.845
+ 31
+0.0
+  0
+LINE
+  5
+47
+330
+17
+100
+AcDbEntity
+  8
+0
+100
+AcDbLine
+ 10
+0.0
+ 20
+15.545
+ 30
+0.0
+ 11
+0.3
+ 21
+15.545
+ 31
+0.0
+  0
+LINE
+  5
+48
+330
+17
+100
+AcDbEntity
+  8
+0
+100
+AcDbLine
+ 10
+0.3
+ 20
+15.545
+ 30
+0.0
+ 11
+0.3
+ 21
+15.845
+ 31
+0.0
+  0
+LINE
+  5
+49
+330
+17
+100
+AcDbEntity
+  8
+0
+100
+AcDbLine
+ 10
+0.3
+ 20
+15.845
+ 30
+0.0
+ 11
+0.0
+ 21
+15.845
+ 31
+0.0
+  0
+LINE
+  5
+4A
+330
+17
+100
+AcDbEntity
+  8
+0
+100
+AcDbLine
+ 10
+91.4
+ 20
+34.155
+ 30
+0.0
+ 11
+91.10000000000001
+ 21
+34.155
+ 31
+0.0
+  0
+LINE
+  5
+4B
+330
+17
+100
+AcDbEntity
+  8
+0
+100
+AcDbLine
+ 10
+91.10000000000001
+ 20
+34.155
+ 30
+0.0
+ 11
+91.10000000000001
+ 21
+34.455
+ 31
+0.0
+  0
+LINE
+  5
+4C
+330
+17
+100
+AcDbEntity
+  8
+0
+100
+AcDbLine
+ 10
+91.10000000000001
+ 20
+34.455
+ 30
+0.0
+ 11
+91.4
+ 21
+34.455
+ 31
+0.0
+  0
+LINE
+  5
+4D
+330
+17
+100
+AcDbEntity
+  8
+0
+100
+AcDbLine
+ 10
+91.4
+ 20
+39.155
+ 30
+0.0
+ 11
+91.10000000000001
+ 21
+39.155
+ 31
+0.0
+  0
+LINE
+  5
+4E
+330
+17
+100
+AcDbEntity
+  8
+0
+100
+AcDbLine
+ 10
+91.10000000000001
+ 20
+39.155
+ 30
+0.0
+ 11
+91.10000000000001
+ 21
+39.455
+ 31
+0.0
+  0
+LINE
+  5
+4F
+330
+17
+100
+AcDbEntity
+  8
+0
+100
+AcDbLine
+ 10
+91.10000000000001
+ 20
+39.455
+ 30
+0.0
+ 11
+91.4
+ 21
+39.455
+ 31
+0.0
+  0
+LINE
+  5
+50
+330
+17
+100
+AcDbEntity
+  8
+0
+100
+AcDbLine
+ 10
+91.4
+ 20
+20.545
+ 30
+0.0
+ 11
+91.10000000000001
+ 21
+20.545
+ 31
+0.0
+  0
+LINE
+  5
+51
+330
+17
+100
+AcDbEntity
+  8
+0
+100
+AcDbLine
+ 10
+91.10000000000001
+ 20
+20.545
+ 30
+0.0
+ 11
+91.10000000000001
+ 21
+20.845
+ 31
+0.0
+  0
+LINE
+  5
+52
+330
+17
+100
+AcDbEntity
+  8
+0
+100
+AcDbLine
+ 10
+91.10000000000001
+ 20
+20.845
+ 30
+0.0
+ 11
+91.4
+ 21
+20.845
+ 31
+0.0
+  0
+LINE
+  5
+53
+330
+17
+100
+AcDbEntity
+  8
+0
+100
+AcDbLine
+ 10
+91.4
+ 20
+15.545
+ 30
+0.0
+ 11
+91.10000000000001
+ 21
+15.545
+ 31
+0.0
+  0
+LINE
+  5
+54
+330
+17
+100
+AcDbEntity
+  8
+0
+100
+AcDbLine
+ 10
+91.10000000000001
+ 20
+15.545
+ 30
+0.0
+ 11
+91.10000000000001
+ 21
+15.845
+ 31
+0.0
+  0
+LINE
+  5
+55
+330
+17
+100
+AcDbEntity
+  8
+0
+100
+AcDbLine
+ 10
+91.10000000000001
+ 20
+15.845
+ 30
+0.0
+ 11
+91.4
+ 21
+15.845
+ 31
+0.0
+  0
+LINE
+  5
+56
+330
+17
+100
+AcDbEntity
+  8
+0
+100
+AcDbLine
+ 10
+0.0
+ 20
+25.67
+ 30
+0.0
+ 11
+-1.0
+ 21
+25.67
+ 31
+0.0
+  0
+LINE
+  5
+57
+330
+17
+100
+AcDbEntity
+  8
+0
+100
+AcDbLine
+ 10
+0.0
+ 20
+29.33
+ 30
+0.0
+ 11
+-1.0
+ 21
+29.33
+ 31
+0.0
+  0
+LINE
+  5
+58
+330
+17
+100
+AcDbEntity
+  8
+0
+100
+AcDbLine
+ 10
+-1.0
+ 20
+25.67
+ 30
+0.0
+ 11
+-1.0
+ 21
+29.33
+ 31
+0.0
+  0
+CIRCLE
+  5
+59
+330
+17
+100
+AcDbEntity
+  8
+0
+100
+AcDbCircle
+ 10
+0.0
+ 20
+25.67
+ 30
+0.0
+ 40
+0.1
+  0
+CIRCLE
+  5
+5A
+330
+17
+100
+AcDbEntity
+  8
+0
+100
+AcDbCircle
+ 10
+0.0
+ 20
+29.33
+ 30
+0.0
+ 40
+0.1
+  0
+LINE
+  5
+5B
+330
+17
+100
+AcDbEntity
+  8
+0
+100
+AcDbLine
+ 10
+91.4
+ 20
+25.67
+ 30
+0.0
+ 11
+92.4
+ 21
+25.67
+ 31
+0.0
+  0
+LINE
+  5
+5C
+330
+17
+100
+AcDbEntity
+  8
+0
+100
+AcDbLine
+ 10
+91.4
+ 20
+29.33
+ 30
+0.0
+ 11
+92.4
+ 21
+29.33
+ 31
+0.0
+  0
+LINE
+  5
+5D
+330
+17
+100
+AcDbEntity
+  8
+0
+100
+AcDbLine
+ 10
+92.4
+ 20
+25.67
+ 30
+0.0
+ 11
+92.4
+ 21
+29.33
+ 31
+0.0
+  0
+CIRCLE
+  5
+5E
+330
+17
+100
+AcDbEntity
+  8
+0
+100
+AcDbCircle
+ 10
+91.4
+ 20
+25.67
+ 30
+0.0
+ 40
+0.1
+  0
+CIRCLE
+  5
+5F
+330
+17
+100
+AcDbEntity
+  8
+0
+100
+AcDbCircle
+ 10
+91.4
+ 20
+29.33
+ 30
+0.0
+ 40
+0.1
+  0
+ARC
+  5
+60
+330
+17
+100
+AcDbEntity
+  8
+0
+100
+AcDbCircle
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+ 40
+1.0
 100
 AcDbArc
  50
@@ -2929,638 +3221,274 @@ AcDbArc
  51
 90.0
   0
-LINE
-  5
-114
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 grass perimeter
-100
-AcDbLine
- 10
-0.0000000000000568
- 20
-71.048
- 30
-0.0
- 11
-8.000000000000056
- 21
-71.048
- 31
-0.0
-  0
-LINE
-  5
-115
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 grass perimeter
-100
-AcDbLine
- 10
-71.04799999999997
- 20
-0.0
- 30
-0.0
- 11
-71.04799999999999
- 21
-8.0
- 31
-0.0
-  0
-LINE
-  5
-116
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbLine
- 10
-18.21769298814561
- 20
-17.79342891943367
- 30
-0.0
- 11
-17.79342891943368
- 21
-18.21769298814561
- 31
-0.0
-  0
-LINE
-  5
-117
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbLine
- 10
-18.11162697096762
- 20
-17.6873629022557
- 30
-0.0
- 11
-18.2176929881456
- 21
-17.79342891943367
- 31
-0.0
-  0
-LINE
-  5
-118
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbLine
- 10
-17.6873629022557
- 20
-18.11162697096762
- 30
-0.0
- 11
-17.79342891943367
- 21
-18.2176929881456
- 31
-0.0
-  0
-CIRCLE
-  5
-119
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbCircle
- 10
-4.773613025199665
- 20
-11.17358708921142
- 30
-0.0
- 40
-0.75
-  0
-CIRCLE
-  5
-11A
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbCircle
- 10
-11.17358708921142
- 20
-4.773613025199665
- 30
-0.0
- 40
-0.75
-  0
-LINE
-  5
-11B
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbLine
- 10
-20.04399999999999
- 20
-1.0
- 30
-0.0
- 11
-20.04399999999999
- 21
-0.0
- 31
-0.0
-  0
-LINE
-  5
-11C
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbLine
- 10
-14.044
- 20
-1.0
- 30
-0.0
- 11
-14.04399999999999
- 21
-0.0
- 31
-0.0
-  0
-LINE
-  5
-11D
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbLine
- 10
-14.044
- 20
-1.0
- 30
-0.0
- 11
-20.04399999999999
- 21
-1.0
- 31
-0.0
-  0
-LINE
-  5
-11E
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbLine
- 10
-1.0
- 20
-14.044
- 30
-0.0
- 11
-1.0
- 21
-20.04399999999999
- 31
-0.0
-  0
-LINE
-  5
-11F
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbLine
- 10
-1.0
- 20
-14.044
- 30
-0.0
- 11
-0.0
- 21
-14.04399999999999
- 31
-0.0
-  0
-LINE
-  5
-120
-330
-1F
-100
-AcDbEntity
-  8
-ceco.net 473 softball field
-100
-AcDbLine
- 10
-1.0
- 20
-20.04399999999999
- 30
-0.0
- 11
-0.0
- 21
-20.04399999999999
- 31
-0.0
-  0
 ARC
   5
-121
+61
 330
-1F
+17
 100
 AcDbEntity
   8
-ceco.net 473 grass perimeter
+0
 100
 AcDbCircle
  10
-7.151471862576143
+91.4
  20
-7.151471862576142
+0.0
  30
 0.0
  40
-3.70177654572487
+1.0
 100
 AcDbArc
  50
-84.59750952848251
+90.0
  51
-5.402490471517494
+180.0
   0
 ARC
   5
-122
+62
 330
-1F
+17
 100
 AcDbEntity
   8
-ceco.net 473 grass perimeter
+0
 100
 AcDbCircle
  10
-5.999999999999999
+91.4
  20
-6.0
+55.0
  30
 0.0
  40
-6.0
+1.0
 100
 AcDbArc
  50
-179.9999999999998
+180.0
  51
 270.0
   0
 ARC
   5
-123
+63
 330
-1F
+17
 100
 AcDbEntity
   8
-ceco.net 473 grass perimeter
+0
 100
 AcDbCircle
  10
-7.5
+0.0
  20
-7.5
+55.0
  30
 0.0
  40
-29.70354487802706
+1.0
 100
 AcDbArc
  50
-0.0
+270.0
  51
-90.0
+360.0
   0
 LINE
   5
-124
+64
 330
-1F
+17
 100
 AcDbEntity
   8
-ceco.net 473 grass perimeter
+0
 100
 AcDbLine
  10
-7.5
+0.0
  20
-10.83680464699366
+0.4
  30
 0.0
  11
-7.5
+0.4
  21
-37.20354487802706
+0.4
  31
 0.0
   0
 LINE
   5
-125
+65
 330
-1F
+17
 100
 AcDbEntity
   8
-ceco.net 473 grass perimeter
+0
 100
 AcDbLine
  10
-10.83680464699366
+0.0
  20
-7.5
+54.6
  30
 0.0
  11
-37.20354487802706
+0.4
  21
-7.5
+54.6
  31
 0.0
   0
-VIEWPORT
+LINE
   5
-7A
+66
 330
-55
+17
 100
 AcDbEntity
- 67
-     1
   8
 0
 100
-AcDbViewport
+AcDbLine
  10
-133.3499908447265
+91.4
  20
-101.5999970436096
+0.4
  30
 0.0
- 40
-499.656613158166
- 41
-228.4221935424804
- 68
-     2
- 69
-     1
- 12
-133.3499908447265
- 22
-101.5999970436096
- 13
-0.0
- 23
-0.0
- 14
-10.0
- 24
-10.0
- 15
-10.0
- 25
-10.0
- 16
-0.0
- 26
-0.0
- 36
-1.0
- 17
-0.0
- 27
-0.0
- 37
-0.0
- 42
-50.0
- 43
-0.0
- 44
-0.0
- 45
-228.4221935424804
- 50
-0.0
- 51
-0.0
- 72
-   100
- 90
-    32800
-  1
-
-281
-     0
- 71
-     1
- 74
-     0
-110
-0.0
-120
-0.0
-130
-0.0
-111
-1.0
-121
-0.0
-131
-0.0
-112
-0.0
-122
-1.0
-132
-0.0
- 79
-     0
-146
+ 11
+91.0
+ 21
+0.4
+ 31
 0.0
   0
-VIEWPORT
+LINE
   5
-7C
+67
 330
-55
+17
 100
 AcDbEntity
- 67
-     1
   8
 0
 100
-AcDbViewport
+AcDbLine
  10
-133.349993944168
+91.4
  20
-101.599993944168
+54.6
  30
 0.0
- 40
-213.3599903106689
- 41
-162.5599903106689
- 68
-     1
- 69
-     2
- 12
-41.43839992619389
- 22
-41.42409541270127
- 13
+ 11
+91.0
+ 21
+54.6
+ 31
 0.0
- 23
+  0
+LINE
+  5
+68
+330
+17
+100
+AcDbEntity
+  8
+0
+100
+AcDbLine
+ 10
+0.4
+ 20
 0.0
- 14
-10.0
- 24
-10.0
- 15
-10.0
- 25
-10.0
- 16
+ 30
 0.0
- 26
+ 11
+0.4
+ 21
+0.4
+ 31
 0.0
- 36
-1.0
- 17
+  0
+LINE
+  5
+69
+330
+17
+100
+AcDbEntity
+  8
+0
+100
+AcDbLine
+ 10
+0.4
+ 20
+55.0
+ 30
 0.0
- 27
+ 11
+0.4
+ 21
+54.6
+ 31
 0.0
- 37
+  0
+LINE
+  5
+6A
+330
+17
+100
+AcDbEntity
+  8
+0
+100
+AcDbLine
+ 10
+91.0
+ 20
 0.0
- 42
-50.0
- 43
+ 30
 0.0
- 44
+ 11
+91.0
+ 21
+0.4
+ 31
 0.0
- 45
-86.23366859858549
- 50
+  0
+LINE
+  5
+6B
+330
+17
+100
+AcDbEntity
+  8
+0
+100
+AcDbLine
+ 10
+91.0
+ 20
+55.0
+ 30
 0.0
- 51
-0.0
- 72
-   100
- 90
-    32864
-  1
-
-281
-     0
- 71
-     1
- 74
-     0
-110
-0.0
-120
-0.0
-130
-0.0
-111
-1.0
-121
-0.0
-131
-0.0
-112
-0.0
-122
-1.0
-132
-0.0
- 79
-     0
-146
+ 11
+91.0
+ 21
+54.6
+ 31
 0.0
   0
 ENDSEC
@@ -3571,267 +3499,239 @@ OBJECTS
   0
 DICTIONARY
   5
-C
+A
 330
 0
 100
 AcDbDictionary
 281
-     1
+1
+  3
+ACAD_COLOR
+350
+B
   3
 ACAD_GROUP
 350
-D
+C
   3
 ACAD_LAYOUT
 350
-1A
+D
   3
-ACAD_MLINESTYLE
-350
-17
-  3
-ACAD_PLOTSETTINGS
-350
-19
-  3
-ACAD_PLOTSTYLENAME
+ACAD_MATERIAL
 350
 E
   3
-AcDbVariableDictionary
+ACAD_MLEADERSTYLE
 350
-5E
+F
+  3
+ACAD_MLINESTYLE
+350
+10
+  3
+ACAD_PLOTSETTINGS
+350
+11
+  3
+ACAD_PLOTSTYLENAME
+350
+12
+  3
+ACAD_SCALELIST
+350
+14
+  3
+ACAD_TABLESTYLE
+350
+15
+  3
+ACAD_VISUALSTYLE
+350
+16
+  3
+EZDXF_META
+350
+2D
   0
 DICTIONARY
   5
-89
+B
 330
-88
+A
 100
 AcDbDictionary
-280
-     1
 281
-     1
-  3
-ACAD_XREC_ROUNDTRIP
-360
-8A
+1
   0
 DICTIONARY
   5
-8C
+C
 330
-8B
+A
 100
 AcDbDictionary
-280
-     1
 281
-     1
-  3
-ACAD_XREC_ROUNDTRIP
-360
-8D
+1
   0
 DICTIONARY
   5
 D
-102
-{ACAD_REACTORS
 330
-C
-102
-}
-330
-C
+A
 100
 AcDbDictionary
 281
-     1
-  0
-DICTIONARY
-  5
-1A
-102
-{ACAD_REACTORS
-330
-C
-102
-}
-330
-C
-100
-AcDbDictionary
-281
-     1
+1
   3
 Model
 350
-22
+1A
   3
-www.ceco.net
+Layout1
 350
-56
+1E
   0
 DICTIONARY
   5
-17
-102
-{ACAD_REACTORS
+E
 330
-C
-102
-}
-330
-C
+A
 100
 AcDbDictionary
 281
-     1
+1
+  3
+ByBlock
+350
+1F
+  3
+ByLayer
+350
+20
+  3
+Global
+350
+21
+  0
+DICTIONARY
+  5
+F
+330
+A
+100
+AcDbDictionary
+281
+1
   3
 Standard
 350
-18
+2C
   0
 DICTIONARY
   5
-19
-102
-{ACAD_REACTORS
+10
 330
-C
-102
-}
-330
-C
+A
 100
 AcDbDictionary
 281
-     1
+1
+  3
+Standard
+350
+22
+  0
+DICTIONARY
+  5
+11
+330
+A
+100
+AcDbDictionary
+281
+1
   0
 ACDBDICTIONARYWDFLT
   5
-E
-102
-{ACAD_REACTORS
+12
 330
-C
-102
-}
-330
-C
+A
 100
 AcDbDictionary
 281
-     1
+1
   3
 Normal
 350
-F
+13
 100
 AcDbDictionaryWithDefault
 340
-F
+13
+  0
+ACDBPLACEHOLDER
+  5
+13
+330
+12
   0
 DICTIONARY
   5
-5E
-102
-{ACAD_REACTORS
+14
 330
-C
-102
-}
-330
-C
+A
 100
 AcDbDictionary
 281
-     1
-  3
-DIMASSOC
-350
-5F
-  3
-HIDETEXT
-350
-63
+1
   0
-XRECORD
+DICTIONARY
   5
-8A
-102
-{ACAD_REACTORS
+15
 330
-89
-102
-}
-330
-89
+A
 100
-AcDbXrecord
-280
-     1
-102
-MATERIAL
-340
-0
+AcDbDictionary
+281
+1
   0
-XRECORD
+DICTIONARY
   5
-8D
-102
-{ACAD_REACTORS
+16
 330
-8C
-102
-}
-330
-8C
+A
 100
-AcDbXrecord
-280
-     1
-102
-MATERIAL
-340
-0
+AcDbDictionary
+281
+1
   0
 LAYOUT
   5
-22
-102
-{ACAD_REACTORS
-330
 1A
-102
-}
 330
-1A
+D
 100
 AcDbPlotSettings
   1
 
-  2
-none_device
   4
-ANSI_A_(8.50_x_11.00_Inches)
+A3
   6
 
  40
-6.349999904632568
+7.5
  41
-19.04999923706054
+20.0
  42
-6.350006103515625
+7.5
  43
-19.04998779296875
+20.0
  44
-215.8999938964843
+420.0
  45
-279.3999938964843
+297.0
  46
 0.0
  47
@@ -3847,21 +3747,27 @@ ANSI_A_(8.50_x_11.00_Inches)
 142
 1.0
 143
-78.436453180766
+1.0
  70
- 11952
+1024
  72
-     0
+1
  73
-     1
+0
  74
-     0
+5
   7
 
  75
-     0
+16
+ 76
+0
+ 77
+2
+ 78
+300
 147
-0.0127491741332998
+1.0
 148
 0.0
 149
@@ -3871,17 +3777,17 @@ AcDbLayout
   1
 Model
  70
-     1
+1
  71
-     0
+0
  10
 0.0
  20
 0.0
  11
-12.0
+420.0
  21
-9.0
+297.0
  12
 0.0
  22
@@ -3889,17 +3795,17 @@ Model
  32
 0.0
  14
-0.0
+1e+20
  24
-0.0
+1e+20
  34
-0.0
+1e+20
  15
-0.0
+-1e+20
  25
-0.0
+-1e+20
  35
-0.0
+-1e+20
 146
 0.0
  13
@@ -3921,43 +3827,35 @@ Model
  37
 0.0
  76
-     0
+1
 330
-1F
+17
   0
 LAYOUT
   5
-56
-102
-{ACAD_REACTORS
+1E
 330
-1A
-102
-}
-330
-1A
+D
 100
 AcDbPlotSettings
   1
 
-  2
-none_device
   4
-Letter_(8.50_x_11.00_Inches)
+A3
   6
 
  40
-6.349999904632568
+7.5
  41
-6.349999904632568
+20.0
  42
-6.350006103515625
+7.5
  43
-6.350006103515625
+20.0
  44
-215.8999938964843
+420.0
  45
-279.3999938964843
+297.0
  46
 0.0
  47
@@ -3975,17 +3873,23 @@ Letter_(8.50_x_11.00_Inches)
 143
 1.0
  70
-   688
+0
  72
-     1
+1
  73
-     1
+0
  74
-     5
+5
   7
 
  75
-    16
+16
+ 76
+0
+ 77
+2
+ 78
+300
 147
 1.0
 148
@@ -3995,19 +3899,19 @@ Letter_(8.50_x_11.00_Inches)
 100
 AcDbLayout
   1
-www.ceco.net
+Layout1
  70
-     1
+1
  71
-     1
+1
  10
--6.350006103515625
+0.0
  20
--6.349999904632568
+0.0
  11
-273.0499877929687
+420.0
  21
-209.5499939918517
+297.0
  12
 0.0
  22
@@ -4015,17 +3919,17 @@ www.ceco.net
  32
 0.0
  14
-26.66999878883362
+1e+20
  24
-20.31999878883362
+1e+20
  34
-0.0
+1e+20
  15
-240.0299890995025
+-1e+20
  25
-182.8799890995025
+-1e+20
  35
-0.0
+-1e+20
 146
 0.0
  13
@@ -4047,99 +3951,561 @@ www.ceco.net
  37
 0.0
  76
-     0
+1
 330
-55
-331
-7C
+1B
   0
-MLINESTYLE
+MATERIAL
   5
-18
+1F
 102
 {ACAD_REACTORS
 330
-17
+E
 102
 }
 330
-17
+E
+100
+AcDbMaterial
+  1
+ByBlock
+  2
+
+ 70
+0
+ 40
+1.0
+ 71
+1
+ 41
+1.0
+ 91
+-1023410177
+ 42
+1.0
+ 72
+1
+  3
+
+ 73
+1
+ 74
+1
+ 75
+1
+ 44
+0.5
+ 73
+0
+ 45
+1.0
+ 46
+1.0
+ 77
+1
+  4
+
+ 78
+1
+ 79
+1
+170
+1
+ 48
+1.0
+171
+1
+  6
+
+172
+1
+173
+1
+174
+1
+140
+1.0
+141
+1.0
+175
+1
+  7
+
+176
+1
+177
+1
+178
+1
+143
+1.0
+179
+1
+  8
+
+270
+1
+271
+1
+272
+1
+145
+1.0
+146
+1.0
+273
+1
+  9
+
+274
+1
+275
+1
+276
+1
+ 42
+1.0
+ 72
+1
+  3
+
+ 73
+1
+ 74
+1
+ 75
+1
+ 94
+63
+  0
+MATERIAL
+  5
+20
+102
+{ACAD_REACTORS
+330
+E
+102
+}
+330
+E
+100
+AcDbMaterial
+  1
+ByLayer
+  2
+
+ 70
+0
+ 40
+1.0
+ 71
+1
+ 41
+1.0
+ 91
+-1023410177
+ 42
+1.0
+ 72
+1
+  3
+
+ 73
+1
+ 74
+1
+ 75
+1
+ 44
+0.5
+ 73
+0
+ 45
+1.0
+ 46
+1.0
+ 77
+1
+  4
+
+ 78
+1
+ 79
+1
+170
+1
+ 48
+1.0
+171
+1
+  6
+
+172
+1
+173
+1
+174
+1
+140
+1.0
+141
+1.0
+175
+1
+  7
+
+176
+1
+177
+1
+178
+1
+143
+1.0
+179
+1
+  8
+
+270
+1
+271
+1
+272
+1
+145
+1.0
+146
+1.0
+273
+1
+  9
+
+274
+1
+275
+1
+276
+1
+ 42
+1.0
+ 72
+1
+  3
+
+ 73
+1
+ 74
+1
+ 75
+1
+ 94
+63
+  0
+MATERIAL
+  5
+21
+102
+{ACAD_REACTORS
+330
+E
+102
+}
+330
+E
+100
+AcDbMaterial
+  1
+Global
+  2
+
+ 70
+0
+ 40
+1.0
+ 71
+1
+ 41
+1.0
+ 91
+-1023410177
+ 42
+1.0
+ 72
+1
+  3
+
+ 73
+1
+ 74
+1
+ 75
+1
+ 44
+0.5
+ 73
+0
+ 45
+1.0
+ 46
+1.0
+ 77
+1
+  4
+
+ 78
+1
+ 79
+1
+170
+1
+ 48
+1.0
+171
+1
+  6
+
+172
+1
+173
+1
+174
+1
+140
+1.0
+141
+1.0
+175
+1
+  7
+
+176
+1
+177
+1
+178
+1
+143
+1.0
+179
+1
+  8
+
+270
+1
+271
+1
+272
+1
+145
+1.0
+146
+1.0
+273
+1
+  9
+
+274
+1
+275
+1
+276
+1
+ 42
+1.0
+ 72
+1
+  3
+
+ 73
+1
+ 74
+1
+ 75
+1
+ 94
+63
+  0
+MLINESTYLE
+  5
+22
+102
+{ACAD_REACTORS
+330
+10
+102
+}
+330
+10
 100
 AcDbMlineStyle
   2
-STANDARD
+Standard
  70
-     0
+0
   3
 
  62
-   256
+256
  51
 90.0
  52
 90.0
  71
-     2
+2
  49
 0.5
  62
-   256
+256
   6
 BYLAYER
  49
 -0.5
  62
-   256
+256
   6
 BYLAYER
   0
-ACDBPLACEHOLDER
+MLEADERSTYLE
   5
+2C
+102
+{ACAD_REACTORS
+330
 F
 102
-{ACAD_REACTORS
-330
-E
-102
 }
 330
-E
-  0
-DICTIONARYVAR
-  5
-5F
-102
-{ACAD_REACTORS
-330
-5E
-102
-}
-330
-5E
+F
 100
-DictionaryVariables
-280
-     0
-  1
+AcDbMLeaderStyle
+179
 2
+170
+2
+171
+1
+172
+0
+ 90
+2
+ 40
+0.0
+ 41
+0.0
+173
+1
+ 91
+-1056964608
+ 92
+-2
+290
+1
+ 42
+2.0
+291
+1
+ 43
+8.0
+  3
+Standard
+ 44
+4.0
+300
+
+342
+29
+174
+1
+175
+1
+176
+0
+178
+1
+ 93
+-1056964608
+ 45
+4.0
+292
+0
+297
+0
+ 46
+4.0
+ 94
+-1056964608
+ 47
+1.0
+ 49
+1.0
+140
+1.0
+294
+1
+141
+0.0
+177
+0
+142
+1.0
+295
+0
+296
+0
+143
+3.75
+271
+0
+272
+9
+273
+9
+  0
+DICTIONARY
+  5
+2D
+330
+A
+100
+AcDbDictionary
+280
+1
+281
+1
+  3
+CREATED_BY_EZDXF
+350
+2E
+  3
+WRITTEN_BY_EZDXF
+350
+6E
   0
 DICTIONARYVAR
   5
-63
-102
-{ACAD_REACTORS
+2E
 330
-5E
-102
-}
-330
-5E
+2D
 100
 DictionaryVariables
 280
-     0
+0
   1
-1
+1.4.3 @ 2026-06-16T10:37:40.878709+00:00
+  0
+DICTIONARYVAR
+  5
+6E
+330
+2D
+100
+DictionaryVariables
+280
+0
+  1
+1.4.3 @ 2026-06-16T10:37:40.880009+00:00
   0
 ENDSEC
   0

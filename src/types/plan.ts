@@ -80,3 +80,34 @@ export interface LayerVisibility {
   transit: boolean;
   extension: boolean;
 }
+
+export type Page = "connection" | "home" | "fields" | "templates" | "swozi" | "status" | "positioning" | "settings" | "howto" | "about";
+
+export interface TelemetrySnapshot {
+  pos_n?: number | null;
+  pos_e?: number | null;
+  heading_ned_deg?: number | null;
+  xtrack_m?: number | null;
+  heading_err_deg?: number | null;
+  lookahead_m?: number | null;
+  speed_m_s?: number | null;
+  kappa?: number | null;
+  dist_to_goal_m?: number | null;
+  pose_age_ms?: number | null;
+  rpp_state?: number | null;
+  rpp_state_name?: string | null;
+  armed?: boolean | null;
+  mode?: string | null;
+  connected?: boolean | null;
+  battery_v?: number | null;
+  battery_pct?: number | null;
+  gps_fix?: number | null;
+  gps_sat?: number | null;
+  lat?: number | null;
+  lon?: number | null;
+  alt?: number | null;
+  mission_state?: string | null;
+  hrms?: number | null;
+  vrms?: number | null;
+}
+
