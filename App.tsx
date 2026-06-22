@@ -79,6 +79,7 @@ import { generateRoadSignLines, RoadSignType, ROAD_SIGN_LABELS } from "./src/uti
 
 import type { Page, TelemetrySnapshot, LayerVisibility } from "./src/types/plan";
 import { TemplatesPage } from "./src/screens/TemplatesPage";
+import { MapView } from "./src/components/MapView";
 const MAX_PREVIEW_CORNERS = 450;
 const PATH_SEGMENT_CHUNK_SIZE = 650;
 const PREVIEW_ARROWHEAD_LENGTH_PX = 14;
@@ -239,6 +240,24 @@ function isPrimaryEditableLine(line: PlanLine) {
   }
 
   return PRIMARY_ENTITY_TYPES.has(normalizeEntityType(line.entity?.entity_type));
+}
+
+function projectGpsToLocalMeters(
+  lat: number,
+  lon: number,
+  originLat: number,
+  originLon: number
+) {
+  const EARTH_RADIUS = 6378137.0;
+  const latRad = (lat * Math.PI) / 180;
+  const lonRad = (lon * Math.PI) / 180;
+  const originLatRad = (originLat * Math.PI) / 180;
+  const originLonRad = (originLon * Math.PI) / 180;
+
+  const north = (latRad - originLatRad) * EARTH_RADIUS;
+  const east = (lonRad - originLonRad) * EARTH_RADIUS * Math.cos(originLatRad);
+
+  return { north, east };
 }
 
 function getPlanStartPoint(lines: PlanLine[]) {
@@ -573,6 +592,9 @@ export default function App() {
   const [stagedMissionId, setStagedMissionId] = useState<string | null>(null);
   const [loadedPathInspection, setLoadedPathInspection] = useState<missionApi.LoadedPathResponse | null>(null);
   const [isPaused, setIsPaused] = useState(false);
+  const [extensionsEnabled, setExtensionsEnabled] = useState(false);
+  const [extPre, setExtPre] = useState("0.5");
+  const [extAft, setExtAft] = useState("0.5");
 
   const [prevMissionState, setPrevMissionState] = useState<string | null>(null);
 
@@ -583,6 +605,8 @@ export default function App() {
   useEffect(() => {
     if (protectedMissionResident && autoOrigin) setAutoOrigin(false);
   }, [autoOrigin, protectedMissionResident]);
+  const [alignedRefPoints, setAlignedRefPoints] = useState<{ dxf_x: number; dxf_y: number; lat: number; lon: number }[]>([]);
+  const [mapViewEnabled, setMapViewEnabled] = useState(false);
 
   useEffect(() => {
     if (autoOrigin) {
@@ -689,19 +713,10 @@ export default function App() {
         : null;
     const planStartPoint = getPlanStartPoint(displayedLines);
 
-    if (autoOrigin && !missionRunning) {
-      return planStartPoint ?? telemetryPoint;
-    }
-
-    if (missionRunning) {
-      return telemetryPoint ?? planStartPoint;
-    }
-
+    // ALWAYS use real telemetry when available, so the icon shows the true rover position
     return telemetryPoint ?? planStartPoint;
   }, [
-    autoOrigin,
     displayedLines,
-    missionRunning,
     telemetrySnapshot?.pos_e,
     telemetrySnapshot?.pos_n,
   ]);
@@ -1229,6 +1244,12 @@ export default function App() {
           const res = await fetchWithRetry(() => pathApi.getPathEntities(apiBaseUrl, pathName));
           if (res.ok) {
             const body = await res.json();
+            const isEnabled = body.extension_config?.enabled ?? false;
+            setExtensionsEnabled(isEnabled);
+            if (body.extension_config) {
+              setExtPre(String(body.extension_config.pre_extension_m ?? "0.5"));
+              setExtAft(String(body.extension_config.aft_extension_m ?? "0.5"));
+            }
             console.log(`[API GET] /api/path/${pathName}/entities - Success, loaded ${body.num_entities} entities`);
             setWorkflowStep("entities", "verified");
             const entities = body.entities || [];
@@ -2449,6 +2470,10 @@ export default function App() {
                   stagedMissionId={stagedMissionId}
                   loadedPathInspection={loadedPathInspection}
                   onInvalidateWorkflow={invalidateStagedWorkflowFrom}
+                  alignedRefPoints={alignedRefPoints}
+                  setAlignedRefPoints={setAlignedRefPoints}
+                  mapViewEnabled={mapViewEnabled}
+                  setMapViewEnabled={setMapViewEnabled}
                 />
               ) : (
                 <SectionScreen
@@ -2490,6 +2515,12 @@ export default function App() {
                   setLayerVisibility={setLayerVisibility}
                   setImportedPlan={setImportedPlan}
                   onRunTemplate={runTemplateOnBackend}
+                  extensionsEnabled={extensionsEnabled}
+                  setExtensionsEnabled={setExtensionsEnabled}
+                  extPre={extPre}
+                  setExtPre={setExtPre}
+                  extAft={extAft}
+                  setExtAft={setExtAft}
                   missionFileReady={missionFileReady}
                   toggleA={toggleA}
                   toggleB={toggleB}
@@ -2520,6 +2551,10 @@ export default function App() {
                   setStagedMissionId={setStagedMissionId}
                   loadedPathInspection={loadedPathInspection}
                   onInvalidateWorkflow={invalidateStagedWorkflowFrom}
+                  alignedRefPoints={alignedRefPoints}
+                  setAlignedRefPoints={setAlignedRefPoints}
+                  mapViewEnabled={mapViewEnabled}
+                  setMapViewEnabled={setMapViewEnabled}
                 />
               )}
 
@@ -2588,10 +2623,14 @@ function TopBar({
   title,
   onBack,
   onMorePress,
+  mapViewEnabled,
+  setMapViewEnabled,
 }: {
   title: string;
   onBack?: () => void;
   onMorePress?: () => void;
+  mapViewEnabled?: boolean;
+  setMapViewEnabled?: React.Dispatch<React.SetStateAction<boolean>>;
 }) {
   return (
     <View
@@ -2627,26 +2666,49 @@ function TopBar({
         ) : null}
         <Text style={{ fontSize: 18, color: "#0f172a", fontWeight: "700" }}>{title}</Text>
       </View>
-      {onMorePress ? (
-        <Pressable
-          onPress={onMorePress}
-          hitSlop={14}
-          style={{
-            width: 38,
-            height: 38,
-            borderRadius: 12,
-            backgroundColor: "#eef2f7",
-            alignItems: "center",
-            justifyContent: "center",
-            borderWidth: 1,
-            borderColor: "#d7dee8",
-          }}
-        >
-          <Text style={{ fontSize: 20, color: "#0f172a", lineHeight: 20 }}>⋮</Text>
-        </Pressable>
-      ) : (
-        <View style={{ width: 38, height: 38 }} />
-      )}
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+        {setMapViewEnabled && (
+          <Pressable
+            onPress={() => setMapViewEnabled((v) => !v)}
+            style={{
+              height: 38,
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 6,
+              paddingHorizontal: 12,
+              borderRadius: 12,
+              backgroundColor: mapViewEnabled ? "#3b82f6" : "#ffffff",
+              borderWidth: 1,
+              borderColor: mapViewEnabled ? "#2563eb" : "#d7dee8",
+            }}
+          >
+            <MapIcon size={14} color={mapViewEnabled ? "#ffffff" : "#0f172a"} />
+            <Text style={{ color: mapViewEnabled ? "#ffffff" : "#0f172a", fontSize: 11, fontWeight: "800" }}>
+              {mapViewEnabled ? "Map On" : "Map"}
+            </Text>
+          </Pressable>
+        )}
+        {onMorePress ? (
+          <Pressable
+            onPress={onMorePress}
+            hitSlop={14}
+            style={{
+              width: 38,
+              height: 38,
+              borderRadius: 12,
+              backgroundColor: "#eef2f7",
+              alignItems: "center",
+              justifyContent: "center",
+              borderWidth: 1,
+              borderColor: "#d7dee8",
+            }}
+          >
+            <Text style={{ fontSize: 20, color: "#0f172a", lineHeight: 20 }}>⋮</Text>
+          </Pressable>
+        ) : (
+          !setMapViewEnabled && <View style={{ width: 38, height: 38 }} />
+        )}
+      </View>
     </View>
   );
 }
@@ -2712,6 +2774,10 @@ function HomeView({
   stagedMissionId,
   loadedPathInspection,
   onInvalidateWorkflow,
+  alignedRefPoints = [],
+  setAlignedRefPoints,
+  mapViewEnabled = false,
+  setMapViewEnabled,
 }: {
   autoOrigin: boolean;
   setAutoOrigin: React.Dispatch<React.SetStateAction<boolean>>;
@@ -2773,6 +2839,10 @@ function HomeView({
   stagedMissionId: string | null;
   loadedPathInspection: missionApi.LoadedPathResponse | null;
   onInvalidateWorkflow?: (step: "alignment" | "spray" | "staged" | "loaded") => void;
+  alignedRefPoints?: { dxf_x: number; dxf_y: number; lat: number; lon: number }[];
+  setAlignedRefPoints?: React.Dispatch<React.SetStateAction<{ dxf_x: number; dxf_y: number; lat: number; lon: number }[]>>;
+  mapViewEnabled?: boolean;
+  setMapViewEnabled?: React.Dispatch<React.SetStateAction<boolean>>;
 }) {
   const stagedStartGate = useMemo(
     () => evaluateStagedStartGate(stagedWorkflow, loadedPathInspection, stagedMissionId),
@@ -2974,6 +3044,26 @@ function HomeView({
               <Menu size={22} color="#0f172a" />
             </Pressable>
 
+            <Pressable
+              onPress={() => setMapViewEnabled?.((v) => !v)}
+              style={{
+                height: 40,
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 6,
+                paddingHorizontal: 12,
+                borderRadius: 12,
+                backgroundColor: mapViewEnabled ? "#3b82f6" : "#ffffff",
+                borderWidth: 1,
+                borderColor: mapViewEnabled ? "#2563eb" : "#e2e8f0",
+              }}
+            >
+              <MapIcon size={16} color={mapViewEnabled ? "#ffffff" : "#0f172a"} />
+              <Text style={{ color: mapViewEnabled ? "#ffffff" : "#0f172a", fontSize: 12, fontWeight: "800" }}>
+                {mapViewEnabled ? "Map On" : "Map"}
+              </Text>
+            </Pressable>
+
             <View style={{ flex: 1, minWidth: 0 }}>
               {importedPlan ? (
                 <View style={{ gap: 10 }}>
@@ -3064,6 +3154,13 @@ function HomeView({
                   roverPosE={previewRoverPoint?.east ?? null}
                   roverHeadingDeg={telemetrySnapshot?.heading_ned_deg ?? null}
                   missionRunning={missionRunning}
+                  alignedRefPoints={alignedRefPoints}
+                  telemetryPosN={telemetrySnapshot?.pos_n ?? null}
+                  telemetryPosE={telemetrySnapshot?.pos_e ?? null}
+                  telemetryPosLat={telemetrySnapshot?.lat ?? null}
+                  telemetryPosLon={telemetrySnapshot?.lon ?? null}
+                  telemetryPosAlt={telemetrySnapshot?.alt ?? null}
+                  mapViewEnabled={mapViewEnabled}
                 />
               </View>
             </View>
@@ -5012,18 +5109,44 @@ function SectionScreen(props: {
   loadedPathInspection: missionApi.LoadedPathResponse | null;
   onInvalidateWorkflow: (step: "alignment" | "spray" | "staged" | "loaded") => void;
   onNav: (page: Page) => void;
+  extensionsEnabled?: boolean;
+  setExtensionsEnabled?: React.Dispatch<React.SetStateAction<boolean>>;
+  extPre?: string;
+  setExtPre?: React.Dispatch<React.SetStateAction<string>>;
+  extAft?: string;
+  setExtAft?: React.Dispatch<React.SetStateAction<string>>;
+  alignedRefPoints?: { dxf_x: number; dxf_y: number; lat: number; lon: number }[];
+  setAlignedRefPoints?: React.Dispatch<React.SetStateAction<{ dxf_x: number; dxf_y: number; lat: number; lon: number }[]>>;
+  mapViewEnabled?: boolean;
+  setMapViewEnabled?: React.Dispatch<React.SetStateAction<boolean>>;
 }) {
-  const { title, page, onBack } = props;
+  const { title, page, onBack, mapViewEnabled, setMapViewEnabled } = props;
 
   return (
     <View style={{ flex: 1, backgroundColor: BG }}>
-      <TopBar title={title} onBack={onBack} />
+      <TopBar
+        title={title}
+        onBack={onBack}
+        mapViewEnabled={mapViewEnabled}
+        setMapViewEnabled={setMapViewEnabled}
+      />
 
       {page === "fields" ? <FieldsPage {...props} /> : null}
       {page === "templates" ? (
         <TemplatesPage
           {...props}
-          PlanPreviewComponent={PlanPreview}
+          renderPlanPreview={(previewProps) => (
+            <PlanPreview
+              {...previewProps}
+              alignedRefPoints={props.alignedRefPoints}
+              telemetryPosN={props.telemetrySnapshot?.pos_n ?? null}
+              telemetryPosE={props.telemetrySnapshot?.pos_e ?? null}
+              telemetryPosLat={props.telemetrySnapshot?.lat ?? null}
+              telemetryPosLon={props.telemetrySnapshot?.lon ?? null}
+              telemetryPosAlt={props.telemetrySnapshot?.alt ?? null}
+              mapViewEnabled={mapViewEnabled}
+            />
+          )}
         />
       ) : null}
       {page === "swozi" ? <SwoziPage {...props} /> : null}
@@ -5521,6 +5644,15 @@ function FieldsPage({
   setStagedMissionId,
   loadedPathInspection,
   onInvalidateWorkflow,
+  extensionsEnabled = false,
+  setExtensionsEnabled,
+  extPre = "0.5",
+  setExtPre,
+  extAft = "0.5",
+  setExtAft,
+  alignedRefPoints = [],
+  setAlignedRefPoints,
+  mapViewEnabled = false,
 }: {
   importedPlan: ImportedPlan | null;
   setImportedPlan: React.Dispatch<React.SetStateAction<ImportedPlan | null>>;
@@ -5556,6 +5688,15 @@ function FieldsPage({
   setStagedMissionId: React.Dispatch<React.SetStateAction<string | null>>;
   loadedPathInspection: missionApi.LoadedPathResponse | null;
   onInvalidateWorkflow: (step: "alignment" | "spray" | "staged" | "loaded") => void;
+  extensionsEnabled?: boolean;
+  setExtensionsEnabled?: React.Dispatch<React.SetStateAction<boolean>>;
+  extPre?: string;
+  setExtPre?: React.Dispatch<React.SetStateAction<string>>;
+  extAft?: string;
+  setExtAft?: React.Dispatch<React.SetStateAction<string>>;
+  alignedRefPoints?: { dxf_x: number; dxf_y: number; lat: number; lon: number }[];
+  setAlignedRefPoints?: React.Dispatch<React.SetStateAction<{ dxf_x: number; dxf_y: number; lat: number; lon: number }[]>>;
+  mapViewEnabled?: boolean;
 }) {
   const [pickedFile, setPickedFile] = useState<DocumentPicker.DocumentPickerAsset | null>(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -6014,6 +6155,42 @@ function FieldsPage({
 
       if (res.ok) {
         const data = await res.json();
+        if (data.mission_summary) {
+          setMissionSummary(data.mission_summary);
+
+          // Update canvas lines
+          if (data.merged_waypoints) {
+            const alignedLines: PlanLine[] = [];
+            const pts = Array.isArray(data.merged_waypoints) ? data.merged_waypoints : [];
+            const sprayFlags = Array.isArray(data.spray_flags) ? data.spray_flags : [];
+            for (let i = 0; i < pts.length - 1; i++) {
+              const sprayFlag = sprayFlags[i] ?? true;
+              const fromNorth = coerceFiniteNumber(pts[i]?.[0]);
+              const fromEast = coerceFiniteNumber(pts[i]?.[1]);
+              const toNorth = coerceFiniteNumber(pts[i + 1]?.[0]);
+              const toEast = coerceFiniteNumber(pts[i + 1]?.[1]);
+
+              if (fromNorth == null || fromEast == null || toNorth == null || toEast == null) {
+                continue;
+              }
+
+              alignedLines.push({
+                id: `aligned-line-${i}`,
+                label: `Segment ${i + 1}`,
+                layer: sprayFlag ? "marking" : "center",
+                from: { id: i * 2 + 1, x: fromNorth, y: fromEast },
+                to: { id: i * 2 + 2, x: toNorth, y: toEast },
+                width: 0.1,
+              });
+            }
+            setLines(sanitizePlanLines(alignedLines));
+          }
+
+          Alert.alert("Success", "Alignment applied. Mission is ready to be loaded!");
+        } else {
+          Alert.alert("Success", "Alignment applied, but no mission was staged.");
+        }
+        } else {
         setMissionSummary(null);
         setVerifiedAlignmentRequest({ ...payload });
         setAlignmentResult({
@@ -6030,6 +6207,13 @@ function FieldsPage({
         });
         onWorkflowStep?.("alignment", "verified");
         Alert.alert("Success", "Alignment verified.");
+        }
+        // Save the aligned ref points so they continue to render as green markers with GPS labels
+        if (setAlignedRefPoints) {
+          setAlignedRefPoints(validPoints.map(p => ({
+            dxf_x: p.dxf_x, dxf_y: p.dxf_y, lat: p.lat, lon: p.lon
+          })));
+        }
         setRefPoints([]);
       } else {
         onWorkflowStep?.("alignment", "failed");
@@ -6133,6 +6317,13 @@ function FieldsPage({
               roverHeadingDeg={telemetrySnapshot?.heading_ned_deg ?? null}
               selectedPoints={refPoints.map(p => ({ x: p.dxf_y, y: p.dxf_x }))}
               onSelectPoint={handleSelectPoint}
+              alignedRefPoints={alignedRefPoints}
+              telemetryPosN={telemetrySnapshot?.pos_n ?? null}
+              telemetryPosE={telemetrySnapshot?.pos_e ?? null}
+              telemetryPosLat={telemetrySnapshot?.lat ?? null}
+              telemetryPosLon={telemetrySnapshot?.lon ?? null}
+              telemetryPosAlt={telemetrySnapshot?.alt ?? null}
+              mapViewEnabled={mapViewEnabled}
             />
           </View>
         </View>
@@ -7563,6 +7754,13 @@ function PlanPreview({
   missionRunning = false,
   selectedPoints,
   onSelectPoint,
+  alignedRefPoints = [],
+  telemetryPosN = null,
+  telemetryPosE = null,
+  telemetryPosLat = null,
+  telemetryPosLon = null,
+  telemetryPosAlt = null,
+  mapViewEnabled = false,
 }: {
   lines: PlanLine[];
   visibility: LayerVisibility;
@@ -7574,6 +7772,13 @@ function PlanPreview({
   missionRunning?: boolean;
   selectedPoints?: { x: number; y: number }[];
   onSelectPoint?: (pt: { x: number; y: number }) => void;
+  alignedRefPoints?: { dxf_x: number; dxf_y: number; lat: number; lon: number }[];
+  telemetryPosN?: number | null;
+  telemetryPosE?: number | null;
+  telemetryPosLat?: number | null;
+  telemetryPosLon?: number | null;
+  telemetryPosAlt?: number | null;
+  mapViewEnabled?: boolean;
 }) {
   const filtered = useMemo(
     () =>
@@ -7588,23 +7793,14 @@ function PlanPreview({
     [lines, visibility]
   );
 
-  const filteredPlanSignature = useMemo(
-    () =>
-      filtered
-        .map((line) =>
-          [
-            line.id,
-            line.layer,
-            line.from.x.toFixed(3),
-            line.from.y.toFixed(3),
-            line.to.x.toFixed(3),
-            line.to.y.toFixed(3),
-            normalizeEntityType(line.entity?.entity_type),
-          ].join(":")
-        )
-        .join("|"),
-    [filtered]
-  );
+  const filteredPlanSignature = useMemo(() => {
+    const len = filtered.length;
+    if (len === 0) return '0';
+    const first = filtered[0];
+    const last = filtered[len - 1];
+    const mid = filtered[Math.floor(len / 2)];
+    return `${len}:${first.id}:${last.id}:${mid.from.x.toFixed(2)}:${mid.to.y.toFixed(2)}`;
+  }, [filtered]);
 
   const cornerPoints = useMemo(() => getCornerPoints(filtered).slice(0, MAX_PREVIEW_CORNERS), [filtered]);
   const primarySequenceLines = useMemo(
@@ -7617,19 +7813,50 @@ function PlanPreview({
   );
   const pathChunksByLayer = useMemo(
     () => ({
-      boundary: buildSvgPathChunks(filtered.filter((line) => line.layer === "boundary" && line.id !== selectedLineId)),
-      marking_true: buildSvgPathChunks(filtered.filter((line) => line.layer === "marking" && line.entity?.is_mark !== false && line.id !== selectedLineId)),
-      marking_false: buildSvgPathChunks(filtered.filter((line) => line.layer === "marking" && line.entity?.is_mark === false && line.id !== selectedLineId)),
-      center: buildSvgPathChunks(filtered.filter((line) => line.layer === "center" && line.id !== selectedLineId)),
-      transit: buildSvgPathChunks(filtered.filter((line) => line.layer === "transit" && line.id !== selectedLineId)),
-      extension: buildSvgPathChunks(filtered.filter((line) => line.layer === "extension" && line.id !== selectedLineId)),
+      boundary: buildSvgPathChunks(filtered.filter((line) => line.layer === "boundary")),
+      marking_true: buildSvgPathChunks(filtered.filter((line) => line.layer === "marking" && line.entity?.is_mark !== false)),
+      marking_false: buildSvgPathChunks(filtered.filter((line) => line.layer === "marking" && line.entity?.is_mark === false)),
+      center: buildSvgPathChunks(filtered.filter((line) => line.layer === "center")),
+      transit: buildSvgPathChunks(filtered.filter((line) => line.layer === "transit")),
+      extension: buildSvgPathChunks(filtered.filter((line) => line.layer === "extension")),
     }),
-    [filtered, selectedLineId]
+    [filtered]
   );
+
+  // Projected rover point from raw GPS telemetry (Lat/Lon) or fallback to EKF offsets
+  const projectedRoverPoint = useMemo(() => {
+    if (
+      telemetryPosLat != null &&
+      telemetryPosLon != null &&
+      alignedRefPoints &&
+      alignedRefPoints.length > 0
+    ) {
+      const origin = alignedRefPoints[0];
+      const { north, east } = projectGpsToLocalMeters(
+        telemetryPosLat,
+        telemetryPosLon,
+        origin.lat,
+        origin.lon
+      );
+      return {
+        north: origin.dxf_x + north,
+        east: origin.dxf_y + east,
+      };
+    }
+    if (roverPosN != null && roverPosE != null) {
+      return {
+        north: roverPosN,
+        east: roverPosE,
+      };
+    }
+    return null;
+  }, [telemetryPosLat, telemetryPosLon, alignedRefPoints, roverPosN, roverPosE]);
+
   // Rover world-space position: pos_e = East, pos_n = North
-  const hasRover = roverPosN != null && roverPosE != null;
-  const roverN = roverPosN ?? 0;   // North → SVG Y (inverted)
-  const roverE = roverPosE ?? 0;   // East → SVG X
+  const hasRover = projectedRoverPoint != null;
+  const hasRealTelemetry = (telemetryPosLat != null && telemetryPosLon != null) || (telemetryPosN != null && telemetryPosE != null);
+  const roverN = projectedRoverPoint?.north ?? 0;   // North → SVG Y (inverted)
+  const roverE = projectedRoverPoint?.east ?? 0;   // East → SVG X
   const roverDeg = roverHeadingDeg ?? 0;
   const [displayRoverPose, setDisplayRoverPose] = useState<{
     north: number;
@@ -7672,6 +7899,26 @@ function PlanPreview({
 
     return result;
   }, [filtered, layoutSize, rotation, selectedLineId, viewport]);
+
+  /* ── RAF throttle for viewport (pan/pinch) ── */
+  const rafViewportRef = React.useRef<PreviewViewport | null>(null);
+  const rafViewportIdRef = React.useRef<number | null>(null);
+  const scheduleViewportCommit = React.useCallback(() => {
+    if (rafViewportIdRef.current !== null) return;
+    rafViewportIdRef.current = requestAnimationFrame(() => {
+      if (rafViewportRef.current !== null) {
+        setViewport(rafViewportRef.current);
+        viewportRef.current = rafViewportRef.current;
+        rafViewportRef.current = null;
+      }
+      rafViewportIdRef.current = null;
+    });
+  }, []);
+  React.useEffect(() => {
+    return () => {
+      if (rafViewportIdRef.current !== null) cancelAnimationFrame(rafViewportIdRef.current);
+    };
+  }, []);
   // Track whether user has manually panned so auto-pan doesn't fight them
   const userPannedRef = React.useRef(false);
 
@@ -7817,59 +8064,92 @@ function PlanPreview({
   useEffect(() => { layoutSizeRef.current = layoutSize; }, [layoutSize]);
 
   const panResponder = useMemo(() => {
-    let initialZoom = 1;
-    let initialDistance = 0;
-    let initialPanX = 0;
-    let initialPanY = 0;
+    let lastTouchX = 0;
+    let lastTouchY = 0;
+
+    let pinchStartDistance = 0;
+    let pinchStartZoom = 1;
+    let pinchStartCenterX = 0;
+    let pinchStartCenterY = 0;
+    let pinchStartPanX = 0;
+    let pinchStartPanY = 0;
 
     return PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
       onPanResponderGrant: (evt) => {
-        initialPanX = viewportRef.current.panX;
-        initialPanY = viewportRef.current.panY;
-        initialZoom = viewportRef.current.zoom;
-
         const touches = evt.nativeEvent.touches;
-        if (touches.length === 2) {
+        if (touches.length === 1) {
+          lastTouchX = touches[0].pageX;
+          lastTouchY = touches[0].pageY;
+          pinchStartDistance = 0;
+        } else if (touches.length === 2) {
           const dx = touches[0].pageX - touches[1].pageX;
           const dy = touches[0].pageY - touches[1].pageY;
-          initialDistance = Math.hypot(dx, dy);
+          pinchStartDistance = Math.hypot(dx, dy);
+          pinchStartZoom = viewportRef.current.zoom;
+          pinchStartPanX = viewportRef.current.panX;
+          pinchStartPanY = viewportRef.current.panY;
+          pinchStartCenterX = (touches[0].locationX + touches[1].locationX) / 2;
+          pinchStartCenterY = (touches[0].locationY + touches[1].locationY) / 2;
         }
       },
       onPanResponderMove: (evt, gestureState) => {
         userPannedRef.current = true;
         const touches = evt.nativeEvent.touches;
 
-        if (touches.length === 2 && initialDistance > 0) {
-          // Pinch Zoom
+        if (touches.length === 2) {
           const dx = touches[0].pageX - touches[1].pageX;
           const dy = touches[0].pageY - touches[1].pageY;
           const distance = Math.hypot(dx, dy);
-          
-          const scale = distance / initialDistance;
-          const newZoom = Math.max(1, initialZoom * scale);
-          
-          const centerX = (touches[0].locationX + touches[1].locationX) / 2;
-          const centerY = (touches[0].locationY + touches[1].locationY) / 2;
 
-          const zoomRatio = newZoom / initialZoom;
-          
-          setViewport({
-            panX: centerX - (centerX - initialPanX) * zoomRatio,
-            panY: centerY - (centerY - initialPanY) * zoomRatio,
-            zoom: newZoom,
-          });
+          if (pinchStartDistance === 0) {
+            pinchStartDistance = distance;
+            pinchStartZoom = viewportRef.current.zoom;
+            pinchStartPanX = viewportRef.current.panX;
+            pinchStartPanY = viewportRef.current.panY;
+            pinchStartCenterX = (touches[0].locationX + touches[1].locationX) / 2;
+            pinchStartCenterY = (touches[0].locationY + touches[1].locationY) / 2;
+          } else {
+            const scale = distance / pinchStartDistance;
+            const newZoom = Math.max(0.01, Math.min(1000, pinchStartZoom * scale));
+            
+            const currentCenterX = (touches[0].locationX + touches[1].locationX) / 2;
+            const currentCenterY = (touches[0].locationY + touches[1].locationY) / 2;
+
+            const zoomRatio = newZoom / pinchStartZoom;
+            const next = {
+              panX: currentCenterX - (pinchStartCenterX - pinchStartPanX) * zoomRatio,
+              panY: currentCenterY - (pinchStartCenterY - pinchStartPanY) * zoomRatio,
+              zoom: newZoom,
+            };
+            rafViewportRef.current = next;
+            scheduleViewportCommit();
+          }
         } else if (touches.length === 1) {
-          // Pan
-          setViewport({
-            panX: initialPanX + gestureState.dx,
-            panY: initialPanY + gestureState.dy,
+          if (pinchStartDistance > 0) {
+            pinchStartDistance = 0;
+            lastTouchX = touches[0].pageX;
+            lastTouchY = touches[0].pageY;
+          }
+
+          const dx = touches[0].pageX - lastTouchX;
+          const dy = touches[0].pageY - lastTouchY;
+
+          const next = {
+            panX: viewportRef.current.panX - dx,
+            panY: viewportRef.current.panY - dy,
             zoom: viewportRef.current.zoom,
-          });
+          };
+          lastTouchX = touches[0].pageX;
+          lastTouchY = touches[0].pageY;
+
+          rafViewportRef.current = next;
+          scheduleViewportCommit();
         }
       },
       onPanResponderRelease: (evt, gestureState) => {
+        pinchStartDistance = 0;
         // Tap detection
         if (Math.abs(gestureState.dx) < 5 && Math.abs(gestureState.dy) < 5 && evt.nativeEvent.touches.length === 0) {
           const tapX = evt.nativeEvent.locationX;
@@ -7891,6 +8171,9 @@ function PlanPreview({
           }
         }
       },
+      onPanResponderTerminate: () => {
+        pinchStartDistance = 0;
+      },
     });
   }, []);
 
@@ -7904,26 +8187,37 @@ function PlanPreview({
     return "#475569";
   };
 
+  const [recenterRoverCount, setRecenterRoverCount] = useState(0);
+  const [recenterPlanCount, setRecenterPlanCount] = useState(0);
+
   const handleFocusRover = () => {
-    focusRover();
+    if (mapViewEnabled) {
+      setRecenterRoverCount((c) => c + 1);
+    } else {
+      focusRover();
+    }
   };
 
   const handleFocusPlan = () => {
-    if (layoutSize.width <= 0 || layoutSize.height <= 0) return;
-    userPannedRef.current = true;
-    if (filtered.length === 0) {
-      const next: PreviewViewport = {
-        panX: layoutSize.width / 2,
-        panY: layoutSize.height / 2,
-        zoom: 40,
-      };
-      viewportRef.current = next;
-      setViewport(next);
-      return;
+    if (mapViewEnabled) {
+      setRecenterPlanCount((c) => c + 1);
+    } else {
+      if (layoutSize.width <= 0 || layoutSize.height <= 0) return;
+      userPannedRef.current = true;
+      if (filtered.length === 0) {
+        const next: PreviewViewport = {
+          panX: layoutSize.width / 2,
+          panY: layoutSize.height / 2,
+          zoom: 40,
+        };
+        viewportRef.current = next;
+        setViewport(next);
+        return;
+      }
+      const fitted = computeAutoFitViewport(filtered, layoutSize.width, layoutSize.height);
+      viewportRef.current = fitted;
+      setViewport(fitted);
     }
-    const fitted = computeAutoFitViewport(filtered, layoutSize.width, layoutSize.height);
-    viewportRef.current = fitted;
-    setViewport(fitted);
   };
 
   const roverDisplayPose = displayRoverPose ?? {
@@ -7954,8 +8248,32 @@ function PlanPreview({
       onLayout={handleLayout}
       style={{ flex: 1 }}
     >
-      <View {...panResponder.panHandlers} collapsable={false} style={{ flex: 1, position: "relative", backgroundColor: "#f0f4f8", overflow: "hidden" }}>
-        {filtered.length === 0 && !hasRover ? (
+      <View
+        {...(mapViewEnabled ? {} : panResponder.panHandlers)}
+        collapsable={false}
+        style={{ flex: 1, position: "relative", backgroundColor: "#f0f4f8", overflow: "hidden" }}
+      >
+        {mapViewEnabled ? (
+          <MapView
+            telemetrySnapshot={{
+              lat: telemetryPosLat,
+              lon: telemetryPosLon,
+              alt: telemetryPosAlt,
+              heading_ned_deg: roverHeadingDeg,
+              pos_n: telemetryPosN,
+              pos_e: telemetryPosE,
+            } as any}
+            lines={lines}
+            alignedRefPoints={alignedRefPoints}
+            visible={true}
+            recenterRoverTrigger={recenterRoverCount}
+            recenterPlanTrigger={recenterPlanCount}
+            onSelectPoint={onSelectPoint}
+            onSelectLine={onSelectLine}
+            selectedLineId={selectedLineId}
+            showCornerPoints={true}
+          />
+        ) : filtered.length === 0 && !hasRover ? (
           // No plan, no rover: show placeholder
           <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 18 }}>
             <Text style={{ color: "#475569", fontSize: 15, textAlign: "center", lineHeight: 22 }}>
@@ -7969,45 +8287,39 @@ function PlanPreview({
           <Svg pointerEvents="none" width="100%" height="100%">
           {/* ── Background grid (always visible) ── */}
           {layoutSize.width > 0 && layoutSize.height > 0 && (() => {
-            const gridLines: React.ReactElement[] = [];
             const spacing = GRID_WORLD_SPACING * viewport.zoom;
             if (spacing < 8) return null; // too dense to draw
-            // Find grid origin in screen space (world 0,0)
             const originX = viewport.panX;
             const originY = viewport.panY;
-            // Vertical lines (constant X in world space)
+            // Batch vertical grid lines into single <Path>
+            let vPath = '';
             const startCol = Math.floor(-originX / spacing) - 1;
             const endCol = Math.ceil((layoutSize.width - originX) / spacing) + 1;
             for (let c = startCol; c <= endCol; c++) {
+              if (c === 0) continue; // origin drawn separately
               const sx = originX + c * spacing;
-              const isOrigin = c === 0;
-              gridLines.push(
-                <Line
-                  key={`gv${c}`}
-                  x1={sx} y1={0} x2={sx} y2={layoutSize.height}
-                  stroke={isOrigin ? "#94a3b8" : "#d8e4f0"}
-                  strokeWidth={isOrigin ? 1.2 : 0.6}
-                  opacity={isOrigin ? 0.9 : 0.6}
-                />
-              );
+              vPath += `M${sx} 0V${layoutSize.height}`;
             }
-            // Horizontal lines (constant Y in world space, NED North=up so invert)
+            // Batch horizontal grid lines into single <Path>
+            let hPath = '';
             const startRow = Math.floor(-originY / spacing) - 1;
             const endRow = Math.ceil((layoutSize.height - originY) / spacing) + 1;
             for (let r = startRow; r <= endRow; r++) {
+              if (r === 0) continue; // origin drawn separately
               const sy = originY + r * spacing;
-              const isOrigin = r === 0;
-              gridLines.push(
-                <Line
-                  key={`gh${r}`}
-                  x1={0} y1={sy} x2={layoutSize.width} y2={sy}
-                  stroke={isOrigin ? "#94a3b8" : "#d8e4f0"}
-                  strokeWidth={isOrigin ? 1.2 : 0.6}
-                  opacity={isOrigin ? 0.9 : 0.6}
-                />
-              );
+              hPath += `M0 ${sy}H${layoutSize.width}`;
             }
-            return gridLines;
+            // Origin axes
+            const oxLine = `M${originX} 0V${layoutSize.height}`;
+            const oyLine = `M0 ${originY}H${layoutSize.width}`;
+            return (
+              <>
+                {vPath ? <Path d={vPath} stroke="#d8e4f0" strokeWidth={0.6} opacity={0.6} /> : null}
+                {hPath ? <Path d={hPath} stroke="#d8e4f0" strokeWidth={0.6} opacity={0.6} /> : null}
+                <Path d={oxLine} stroke="#94a3b8" strokeWidth={1.2} opacity={0.9} />
+                <Path d={oyLine} stroke="#94a3b8" strokeWidth={1.2} opacity={0.9} />
+              </>
+            );
           })()}
 
           {/* ── Plan lines ── */}
@@ -8054,21 +8366,28 @@ function PlanPreview({
                 strokeWidth={1.5 / viewport.zoom}
               />
             ))}
-            {filtered.map((line) => {
-              const d = buildSvgPathForLine(line);
-              if (!d) return null;
+
+            {/* ── Plan Start Direction Arrow ── */}
+            {filtered.length > 0 && (() => {
+              const first = filtered[0];
+              const startX = first.from.y;
+              const startY = first.from.x;
+              const endX = first.to.y;
+              const endY = first.to.x;
+              const angle = Math.atan2(endY - startY, endX - startX) * 180 / Math.PI;
               return (
-                <Path
-                  key={`hit-${line.id}`}
-                  d={d}
-                  stroke="rgba(0,0,0,0.01)"
-                  strokeWidth={26 / viewport.zoom}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  fill="none"
-                />
+                <G transform={`translate(${startX}, ${startY})`}>
+                  <Polygon
+                    points={`0,${-8 / viewport.zoom} ${12 / viewport.zoom},0 0,${8 / viewport.zoom}`}
+                    fill="#ef4444"
+                    stroke="#ffffff"
+                    strokeWidth={1 / viewport.zoom}
+                    transform={`rotate(${90 - angle})`}
+                  />
+                </G>
               );
-            })}
+            })()}
+
           </G>
 
           {/* ── Direction arrows ── */}
@@ -8100,6 +8419,117 @@ function PlanPreview({
               />
             ) : null;
           })() : null}
+          {/* ── Rover-to-Plan distance indicator ── */}
+          {hasRealTelemetry && filtered.length > 0 && (() => {
+            let nearestDist = Infinity;
+            let nearestPt = null;
+            const realN = roverN;
+            const realE = roverE;
+            for (const line of filtered) {
+              const d1 = Math.hypot(line.from.x - realN, line.from.y - realE);
+              const d2 = Math.hypot(line.to.x - realN, line.to.y - realE);
+              if (d1 < nearestDist) { nearestDist = d1; nearestPt = line.from; }
+              if (d2 < nearestDist) { nearestDist = d2; nearestPt = line.to; }
+            }
+            if (nearestPt && nearestDist < 100) {
+              const planScreenX = nearestPt.y * viewport.zoom + viewport.panX;
+              const planScreenY = -nearestPt.x * viewport.zoom + viewport.panY;
+              let rotatedPlanX = planScreenX;
+              let rotatedPlanY = planScreenY;
+              if (rotation !== 0 && layoutSize.width > 0 && layoutSize.height > 0) {
+                const rotated = rotatePoint(planScreenX, planScreenY, layoutSize.width / 2, layoutSize.height / 2, rotation);
+                rotatedPlanX = rotated.x;
+                rotatedPlanY = rotated.y;
+              }
+              const rx = roverScreenX;
+              const ry = roverScreenY;
+              const midX = (rx + rotatedPlanX) / 2;
+              const midY = (ry + rotatedPlanY) / 2;
+              const altSuffix = telemetryPosAlt != null ? ` (Alt: ${telemetryPosAlt.toFixed(1)}m)` : '';
+              return (
+                <G key="rover-to-plan-distance">
+                  <Line
+                    x1={rx}
+                    y1={ry}
+                    x2={rotatedPlanX}
+                    y2={rotatedPlanY}
+                    stroke="#f59e0b"
+                    strokeWidth={1.5}
+                    strokeDasharray="4 3"
+                  />
+                  <SvgText
+                    x={midX}
+                    y={midY - 8}
+                    fill="#ffffff"
+                    stroke="#ffffff"
+                    strokeWidth={3}
+                    fontSize={11}
+                    fontWeight="800"
+                    textAnchor="middle"
+                  >
+                    {`${nearestDist.toFixed(2)}m${altSuffix}`}
+                  </SvgText>
+                  <SvgText
+                    x={midX}
+                    y={midY - 8}
+                    fill="#f59e0b"
+                    fontSize={11}
+                    fontWeight="800"
+                    textAnchor="middle"
+                  >
+                    {`${nearestDist.toFixed(2)}m${altSuffix}`}
+                  </SvgText>
+                </G>
+              );
+            }
+            return null;
+          })()}
+
+          {/* ── Aligned Reference Points with GPS labels ── */}
+          {alignedRefPoints?.map((pt, i) => {
+            const rawSX = pt.dxf_y * viewport.zoom + viewport.panX;
+            const rawSY = -pt.dxf_x * viewport.zoom + viewport.panY;
+            let sx = rawSX;
+            let sy = rawSY;
+            if (rotation !== 0 && layoutSize.width > 0 && layoutSize.height > 0) {
+              const rotated = rotatePoint(rawSX, rawSY, layoutSize.width / 2, layoutSize.height / 2, rotation);
+              sx = rotated.x;
+              sy = rotated.y;
+            }
+            return (
+              <G key={`arp-${i}`}>
+                <Circle
+                  cx={sx}
+                  cy={sy}
+                  r={8}
+                  fill="none"
+                  stroke="#10b981"
+                  strokeWidth={2}
+                  strokeDasharray="3 2"
+                />
+                <SvgText
+                  x={sx + 12}
+                  y={sy - 10}
+                  fontSize={10}
+                  fill="#ffffff"
+                  stroke="#ffffff"
+                  strokeWidth={3}
+                  fontWeight="700"
+                >
+                  {`${pt.lat.toFixed(6)}, ${pt.lon.toFixed(6)}`}
+                </SvgText>
+                <SvgText
+                  x={sx + 12}
+                  y={sy - 10}
+                  fontSize={10}
+                  fill="#10b981"
+                  fontWeight="700"
+                >
+                  {`${pt.lat.toFixed(6)}, ${pt.lon.toFixed(6)}`}
+                </SvgText>
+              </G>
+            );
+          })}
 
           {/* ── Rover icon (top-down car shape) ── */}
           {hasRover && layoutSize.width > 0 && (() => {
@@ -9564,13 +9994,13 @@ function linesToDxf(lines: PlanLine[], name: string) {
       "370",
       String(mmLineweight(entry.width)),
       "10",
-      String(entry.from.x),
-      "20",
       String(entry.from.y),
+      "20",
+      String(entry.from.x),
       "11",
-      String(entry.to.x),
-      "21",
       String(entry.to.y),
+      "21",
+      String(entry.to.x),
     ].join("\n"))
     .join("\n");
 
@@ -9579,6 +10009,10 @@ function linesToDxf(lines: PlanLine[], name: string) {
     "SECTION",
     "2",
     "HEADER",
+    "9",
+    "$INSUNITS",
+    "70",
+    "6",
     "0",
     "ENDSEC",
     "0",

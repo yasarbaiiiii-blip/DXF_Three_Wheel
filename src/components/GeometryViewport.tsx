@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   LayoutChangeEvent,
   Modal,
@@ -188,7 +188,56 @@ export function GeometryViewport({
   const pinchZoomBaseRef = useRef(1);
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
   const touchMovedRef = useRef(false);
+
+  /* ── RAF throttle refs (Step 1) ── */
+  const rafPendingRef = useRef<Record<string, any>>({});
+  const rafIdRef = useRef<number | null>(null);
+
+  const scheduleCommit = useCallback(() => {
+    if (rafIdRef.current !== null) return;
+    rafIdRef.current = requestAnimationFrame(() => {
+      const pending = rafPendingRef.current;
+      if (pending.offset) {
+        setOffset(pending.offset);
+      }
+      if (pending.zoom !== undefined) {
+        setZoom(pending.zoom);
+      }
+      rafPendingRef.current = {};
+      rafIdRef.current = null;
+    });
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (rafIdRef.current !== null) {
+        cancelAnimationFrame(rafIdRef.current);
+      }
+    };
+  }, []);
+
   const safeLines = useMemo(() => lines.filter(isRenderableLine), [lines]);
+
+  /* ── Viewport culling (Step 2) ── */
+  const visibleBounds = useMemo(() => {
+    if (surfaceSize.width === 0) return null;
+    const margin = 0.2;
+    const halfW = (surfaceSize.width / zoom) * (1 + margin);
+    const halfH = (surfaceSize.height / zoom) * (1 + margin);
+    const cx = -offset.x / zoom;
+    const cy = offset.y / zoom;
+    return { minX: cx - halfW, maxX: cx + halfW, minY: cy - halfH, maxY: cy + halfH };
+  }, [offset.x, offset.y, zoom, surfaceSize.width, surfaceSize.height]);
+
+  const culledLines = useMemo(() => {
+    if (!visibleBounds) return safeLines;
+    return safeLines.filter(line => {
+      const midX = (line.from.x + line.to.x) / 2;
+      const midY = (line.from.y + line.to.y) / 2;
+      return midX >= visibleBounds.minX && midX <= visibleBounds.maxX &&
+             midY >= visibleBounds.minY && midY <= visibleBounds.maxY;
+    });
+  }, [safeLines, visibleBounds]);
 
   useEffect(() => {
     rotationRef.current = rotation;
@@ -251,14 +300,17 @@ export function GeometryViewport({
     [safeLines, selectedLineId]
   );
 
-  const pathChunksByLayer = useMemo(
-    () => ({
-      boundary: buildSvgPathChunks(safeLines.filter((line) => line.layer === "boundary" && line.id !== selectedLineId)),
-      marking: buildSvgPathChunks(safeLines.filter((line) => line.layer === "marking" && line.id !== selectedLineId)),
-      center: buildSvgPathChunks(safeLines.filter((line) => line.layer === "center" && line.id !== selectedLineId)),
-    }),
-    [safeLines, selectedLineId]
-  );
+  /* ── Path chunks via ref + async effect (Step 2) ── */
+  const pathChunksRef = useRef<Record<string, string[]>>({ boundary: [], marking: [], center: [] });
+  const [pathVersion, setPathVersion] = useState(0);
+  useEffect(() => {
+    pathChunksRef.current = {
+      boundary: buildSvgPathChunks(culledLines.filter(line => line.layer === "boundary")),
+      marking:  buildSvgPathChunks(culledLines.filter(line => line.layer === "marking")),
+      center:   buildSvgPathChunks(culledLines.filter(line => line.layer === "center")),
+    };
+    setPathVersion(v => v + 1);
+  }, [culledLines]);
 
   const arrowheadsByLayer = useMemo(
     () => {
@@ -313,10 +365,11 @@ export function GeometryViewport({
           }
 
           if (dragMode) {
-            setOffset({
+            rafPendingRef.current.offset = {
               x: dragBaseOffset.current.x + gesture.dx,
               y: dragBaseOffset.current.y + gesture.dy,
-            });
+            };
+            scheduleCommit();
           }
         },
         onPanResponderRelease: (_, gesture) => {
@@ -392,7 +445,8 @@ export function GeometryViewport({
       const nextDistance = Math.hypot(a.pageX - b.pageX, a.pageY - b.pageY);
       const scale = nextDistance / pinchDistanceRef.current;
       const nextZoom = Math.max(0.6, Math.min(2.6, pinchZoomBaseRef.current * scale));
-      setZoom(nextZoom);
+      rafPendingRef.current.zoom = nextZoom;
+      scheduleCommit();
     }
   };
 

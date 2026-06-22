@@ -4,6 +4,7 @@ import * as FileSystem from "expo-file-system/legacy";
 import { X } from "lucide-react-native";
 import Slider from "@react-native-community/slider";
 
+import { MapView } from "../components/MapView";
 import { BoundaryEditor, PlacedItem } from "../components/BoundaryEditor";
 import { generateAlphabetLines, FontStyle, AlphabetType, NumberType, generateNumberLines, generateTextLines } from "../utils/characterTemplates";
 import { generateRoadSignLines, RoadSignType, ROAD_SIGN_LABELS } from "../utils/roadSignTemplates";
@@ -23,7 +24,7 @@ interface TemplatesPageProps {
   onSelectPath: (name: string) => void;
   onRefreshPaths: () => void;
   onNav: (page: Page) => void;
-  PlanPreviewComponent: React.ComponentType<{
+  renderPlanPreview: (previewProps: {
     lines: PlanLine[];
     visibility: LayerVisibility;
     selectedLineId: string | null;
@@ -31,7 +32,8 @@ interface TemplatesPageProps {
     roverPosN?: number | null;
     roverPosE?: number | null;
     roverHeadingDeg?: number | null;
-  }>;
+  }) => React.ReactNode;
+  mapViewEnabled?: boolean;
 }
 
 interface WordGroup {
@@ -46,15 +48,15 @@ export function TemplatesPage(props: TemplatesPageProps) {
   const [boundaryHeightStr, setBoundaryHeightStr] = useState("3.0");
   const [indentSpacingStr, setIndentSpacingStr] = useState("0.25");
   const [letterSpacingStr, setLetterSpacingStr] = useState("10");
-  const [snapCenter, setSnapCenter] = useState(true);
-  const [snapCorners, setSnapCorners] = useState(true);
-  const [snapAngles, setSnapAngles] = useState(true);
+  const [charSpacingStr, setCharSpacingStr] = useState("10");
   const [placedItems, setPlacedItems] = useState<PlacedItem[]>([]);
   const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
   
   const [wordGroups, setWordGroups] = useState<WordGroup[]>([]);
   const [arrangeMode, setArrangeMode] = useState<"none" | "horizontal" | "vertical">("none");
   const [multiTouchMode, setMultiTouchMode] = useState<"both" | "scale" | "rotate">("both");
+  const [lockPanDrag, setLockPanDrag] = useState(false);
+  const [lockZoom, setLockZoom] = useState(false);
   const [itemScaleStr, setItemScaleStr] = useState("1.0");
   const [itemRotationStr, setItemRotationStr] = useState("0");
 
@@ -104,6 +106,7 @@ export function TemplatesPage(props: TemplatesPageProps) {
   const pendingHeight = parseFloat(boundaryHeightStr) || 3.0;
   const pendingIndent = parseFloat(indentSpacingStr) || 0.25;
   const pendingLetterSpacingCm = parseFloat(letterSpacingStr) || 10;
+  const pendingCharSpacingCm = parseFloat(charSpacingStr) || 10;
 
   // ACTIVE values (applied to canvas)
   const bw = activeBoundaryWidth;
@@ -124,9 +127,77 @@ export function TemplatesPage(props: TemplatesPageProps) {
     if (category === "numbers") return generateNumberLines(selectedDigit, parsedSize, fontStyle);
     if (category === "road_signs") return generateRoadSignLines(selectedSign, parsedSize);
     if (category === "sports_fields") return generateSportsFieldLines(selectedField, parsedSize);
-    if (category === "characters") return generateTextLines(previewText, parsedSize, fontStyle, pendingLetterSpacingCm / 100);
+    if (category === "characters") return generateTextLines(previewText, parsedSize, fontStyle, pendingCharSpacingCm / 100);
     return [];
-  }, [category, shape, selectedLetter, selectedDigit, selectedSign, selectedField, parsedSize, arcType, fontStyle, previewText, pendingLetterSpacingCm]);
+  }, [category, shape, selectedLetter, selectedDigit, selectedSign, selectedField, parsedSize, arcType, fontStyle, previewText, pendingCharSpacingCm]);
+
+  const boundaryLines = useMemo(() => {
+    const finalLines: PlanLine[] = [];
+    
+    // Add boundary box lines
+    const halfW = bw / 2;
+    const halfH = bh / 2;
+    const boxCoords = [
+      { fx: -halfW, fy: -halfH, tx: halfW, ty: -halfH },
+      { fx: halfW, fy: -halfH, tx: halfW, ty: halfH },
+      { fx: halfW, fy: halfH, tx: -halfW, ty: halfH },
+      { fx: -halfW, fy: halfH, tx: -halfW, ty: -halfH },
+    ];
+    boxCoords.forEach((c, idx) => {
+      finalLines.push({
+        id: `box-${idx}`,
+        layer: "boundary",
+        label: "boundary",
+        width: 3,
+        from: { id: idx * 2, x: c.fx, y: c.fy },
+        to: { id: idx * 2 + 1, x: c.tx, y: c.ty },
+      });
+    });
+
+    // Add indent box lines
+    const indW = halfW - indent;
+    const indH = halfH - indent;
+    if (indW > 0 && indH > 0) {
+      const indCoords = [
+        { fx: -indW, fy: -indH, tx: indW, ty: -indH },
+        { fx: indW, fy: -indH, tx: indW, ty: indH },
+        { fx: indW, fy: indH, tx: -indW, ty: indH },
+        { fx: -indW, fy: indH, tx: -indW, ty: -indH },
+      ];
+      indCoords.forEach((c, idx) => {
+        finalLines.push({
+          id: `indent-${idx}`,
+          layer: "transit",
+          label: "transit",
+          width: 2,
+          from: { id: 100 + idx * 2, x: c.fx, y: c.fy },
+          to: { id: 100 + idx * 2 + 1, x: c.tx, y: c.ty },
+        });
+      });
+    }
+
+    // Add placed items lines
+    placedItems.forEach(item => {
+      const cos = Math.cos((item.rotation || 0) * Math.PI / 180) || 0;
+      const sin = Math.sin((item.rotation || 0) * Math.PI / 180) || 0;
+      item.lines.forEach((l, i) => {
+        const fx = (l.from.x * cos - l.from.y * sin) + (item.y || 0);
+        const fy = (l.from.x * sin + l.from.y * cos) + (item.x || 0);
+        const tx = (l.to.x * cos - l.to.y * sin) + (item.y || 0);
+        const ty = (l.to.x * sin + l.to.y * cos) + (item.x || 0);
+        if (!isFinite(fx) || !isFinite(fy) || !isFinite(tx) || !isFinite(ty)) return;
+        
+        finalLines.push({
+          ...l,
+          id: `${item.id}-${i}`,
+          from: { ...l.from, x: fx, y: fy },
+          to: { ...l.to, x: tx, y: ty },
+        });
+      });
+    });
+
+    return finalLines;
+  }, [placedItems, bw, bh, indent]);
 
   const computeBoundingBox = useCallback((lines: PlanLine[]): { width: number; height: number } => {
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
@@ -340,6 +411,41 @@ export function TemplatesPage(props: TemplatesPageProps) {
     setSelectedItemIds([firstItem.id]);
   }, [placedItems, selectedItemIds]);
 
+  const handleCopyItems = useCallback(() => {
+    if (selectedItemIds.length === 0) return;
+    const itemsToCopy = placedItems.filter(p => selectedItemIds.includes(p.id));
+    if (itemsToCopy.length === 0) return;
+
+    const offset = 0.5;
+    const newItems: PlacedItem[] = [];
+    const newIds: string[] = [];
+    const groupMapping: Record<string, string> = {};
+
+    itemsToCopy.forEach(item => {
+      const newId = `item-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      newIds.push(newId);
+
+      let newGroupId: string | undefined = undefined;
+      if (item.groupId) {
+        if (!groupMapping[item.groupId]) {
+          groupMapping[item.groupId] = `grp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        }
+        newGroupId = groupMapping[item.groupId];
+      }
+
+      newItems.push({
+        ...item,
+        id: newId,
+        groupId: newGroupId,
+        x: item.x + offset,
+        y: item.y - offset,
+      });
+    });
+
+    setPlacedItems(prev => [...prev, ...newItems]);
+    setSelectedItemIds(newIds);
+  }, [placedItems, selectedItemIds]);
+
   const handleParse = async () => {
     if (!props.apiBaseUrl) return;
     let finalLines: PlanLine[] = [];
@@ -355,10 +461,10 @@ export function TemplatesPage(props: TemplatesPageProps) {
         const cos = Math.cos((item.rotation || 0) * Math.PI / 180) || 0;
         const sin = Math.sin((item.rotation || 0) * Math.PI / 180) || 0;
         item.lines.forEach((l, i) => {
-          const fx = (l.from.x * cos - l.from.y * sin) + (item.x || 0);
-          const fy = (l.from.x * sin + l.from.y * cos) + (item.y || 0);
-          const tx = (l.to.x * cos - l.to.y * sin) + (item.x || 0);
-          const ty = (l.to.x * sin + l.to.y * cos) + (item.y || 0);
+          const fx = (l.from.x * cos - l.from.y * sin) + (item.y || 0);
+          const fy = (l.from.x * sin + l.from.y * cos) + (item.x || 0);
+          const tx = (l.to.x * cos - l.to.y * sin) + (item.y || 0);
+          const ty = (l.to.x * sin + l.to.y * cos) + (item.x || 0);
           if (!isFinite(fx) || !isFinite(fy) || !isFinite(tx) || !isFinite(ty)) return;
           
           finalLines.push({
@@ -441,12 +547,6 @@ export function TemplatesPage(props: TemplatesPageProps) {
     setActiveLetterSpacingCm(pendingLetterSpacingCm);
   }, [pendingWidth, pendingHeight, pendingIndent, pendingLetterSpacingCm]);
 
-  const memoizedSnapSettings = useMemo(() => ({
-    center: snapCenter,
-    corners: snapCorners,
-    angles: snapAngles,
-  }), [snapCenter, snapCorners, snapAngles]);
-
   const memoSetSelectedItemIds = useCallback((ids: string[]) => {
     setSelectedItemIds(ids);
   }, []);
@@ -455,7 +555,25 @@ export function TemplatesPage(props: TemplatesPageProps) {
     <View style={{ flex: 1, flexDirection: "row" }}>
       <View style={{ width: "58%", backgroundColor: "transparent", padding: 14 }}>
         <View style={{ flex: 1, borderRadius: 20, overflow: "hidden", backgroundColor: "#ffffff", borderWidth: 1, borderColor: "#d8e1eb" }}>
-          {boundaryMode ? (
+          {boundaryMode && props.mapViewEnabled ? (
+            <MapView
+              mode="templates"
+              visible={true}
+              telemetrySnapshot={props.telemetrySnapshot}
+              lines={boundaryLines}
+              alignedRefPoints={[]}
+              placedItems={placedItems}
+              selectedItemIds={selectedItemIds}
+              multiTouchMode={multiTouchMode}
+              lockPanDrag={lockPanDrag}
+              lockZoom={lockZoom}
+              boundaryWidth={bw}
+              boundaryHeight={bh}
+              indentSpacing={indent}
+              onUpdatePlacedItems={(items) => setPlacedItems(items)}
+              onSelectionChange={(ids) => setSelectedItemIds(ids)}
+            />
+          ) : boundaryMode ? (
             <BoundaryEditor
               boundaryWidth={bw}
               boundaryHeight={bh}
@@ -465,20 +583,19 @@ export function TemplatesPage(props: TemplatesPageProps) {
               setItems={setPlacedItems}
               selectedItemIds={selectedItemIds}
               setSelectedItemIds={memoSetSelectedItemIds}
-              snapSettings={memoizedSnapSettings}
               multiTouchMode={multiTouchMode}
             />
           ) : (
             <View style={{ flex: 1, position: "relative" }}>
-              <props.PlanPreviewComponent
-                lines={previewLines}
-                visibility={props.layerVisibility}
-                selectedLineId={props.selectedLineId}
-                onSelectLine={props.onSelectLine}
-                roverPosN={props.previewRoverPoint?.north ?? null}
-                roverPosE={props.previewRoverPoint?.east ?? null}
-                roverHeadingDeg={props.telemetrySnapshot?.heading_ned_deg ?? null}
-              />
+              {props.renderPlanPreview({
+                lines: previewLines,
+                visibility: props.layerVisibility,
+                selectedLineId: props.selectedLineId,
+                onSelectLine: props.onSelectLine,
+                roverPosN: props.previewRoverPoint?.north ?? null,
+                roverPosE: props.previewRoverPoint?.east ?? null,
+                roverHeadingDeg: props.telemetrySnapshot?.heading_ned_deg ?? null,
+              })}
             </View>
           )}
         </View>
@@ -506,30 +623,24 @@ export function TemplatesPage(props: TemplatesPageProps) {
                 <View style={{ flexDirection: "row", gap: 8 }}>
                   <View style={{ flex: 1 }}>
                     <Text style={{ color: "#475569", fontSize: 12, marginBottom: 4 }}>Width (m)</Text>
-                    <TextInput style={{ borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, padding: 8, color: "#0f172a" }} value={boundaryWidthStr} onChangeText={setBoundaryWidthStr} keyboardType="numeric" />
+                    <TextInput style={{ borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, height: 44, color: "#0f172a", backgroundColor: "#ffffff" }} value={boundaryWidthStr} onChangeText={setBoundaryWidthStr} keyboardType="numeric" />
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={{ color: "#475569", fontSize: 12, marginBottom: 4 }}>Height (m)</Text>
-                    <TextInput style={{ borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, padding: 8, color: "#0f172a" }} value={boundaryHeightStr} onChangeText={setBoundaryHeightStr} keyboardType="numeric" />
+                    <TextInput style={{ borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, height: 44, color: "#0f172a", backgroundColor: "#ffffff" }} value={boundaryHeightStr} onChangeText={setBoundaryHeightStr} keyboardType="numeric" />
                   </View>
                 </View>
                 <View style={{ flexDirection: "row", gap: 8 }}>
                   <View style={{ flex: 1 }}>
                     <Text style={{ color: "#475569", fontSize: 12, marginBottom: 4 }}>Indent Spacing</Text>
-                    <TextInput style={{ borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, padding: 8, color: "#0f172a" }} value={indentSpacingStr} onChangeText={setIndentSpacingStr} keyboardType="numeric" />
+                    <TextInput style={{ borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, height: 44, color: "#0f172a", backgroundColor: "#ffffff" }} value={indentSpacingStr} onChangeText={setIndentSpacingStr} keyboardType="numeric" />
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={{ color: "#475569", fontSize: 12, marginBottom: 4 }}>Letter Spacing (cm)</Text>
-                    <TextInput style={{ borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, padding: 8, color: "#0f172a" }} value={letterSpacingStr} onChangeText={setLetterSpacingStr} keyboardType="numeric" />
+                    <TextInput style={{ borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, height: 44, color: "#0f172a", backgroundColor: "#ffffff" }} value={letterSpacingStr} onChangeText={setLetterSpacingStr} keyboardType="numeric" />
                   </View>
                 </View>
 
-                <Text style={{ color: "#64748b", fontSize: 11, fontWeight: "800", letterSpacing: 1, textTransform: "uppercase", marginTop: 8 }}>Object Snapping</Text>
-                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-                  <Pressable onPress={() => setSnapCenter(!snapCenter)} style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, backgroundColor: snapCenter ? "#0b6b68" : "#f1f5f9" }}><Text style={{ color: snapCenter ? "#fff" : "#475569", fontSize: 12, fontWeight: "700" }}>Center</Text></Pressable>
-                  <Pressable onPress={() => setSnapCorners(!snapCorners)} style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, backgroundColor: snapCorners ? "#0b6b68" : "#f1f5f9" }}><Text style={{ color: snapCorners ? "#fff" : "#475569", fontSize: 12, fontWeight: "700" }}>Corners</Text></Pressable>
-                  <Pressable onPress={() => setSnapAngles(!snapAngles)} style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, backgroundColor: snapAngles ? "#0b6b68" : "#f1f5f9" }}><Text style={{ color: snapAngles ? "#fff" : "#475569", fontSize: 12, fontWeight: "700" }}>Angles</Text></Pressable>
-                </View>
                 
                 {hasBoundaryChanges && (
                   <Pressable
@@ -617,7 +728,7 @@ export function TemplatesPage(props: TemplatesPageProps) {
                 </Text>
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
                   <TextInput
-                    style={{ flex: 1, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, padding: 8, color: "#0f172a", fontSize: 14, fontWeight: "700" }}
+                    style={{ flex: 1, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, height: 44, color: "#0f172a", backgroundColor: "#ffffff", fontSize: 14, fontWeight: "700" }}
                     value={inputText}
                     onChangeText={setInputText}
                     placeholder="Type characters..."
@@ -627,7 +738,7 @@ export function TemplatesPage(props: TemplatesPageProps) {
                   {inputText.trim().length > 0 && (
                     <Pressable
                       onPress={() => setPreviewText(inputText)}
-                      style={{ paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8, backgroundColor: "#0b6b68", alignItems: "center" }}
+                      style={{ paddingHorizontal: 16, height: 44, borderRadius: 8, backgroundColor: "#0b6b68", alignItems: "center", justifyContent: "center" }}
                     >
                       <Text style={{ color: "#fff", fontSize: 13, fontWeight: "800" }}>OK</Text>
                     </Pressable>
@@ -638,6 +749,18 @@ export function TemplatesPage(props: TemplatesPageProps) {
                     Active Text: <Text style={{ color: "#0b6b68", fontWeight: "800" }}>"{previewText}"</Text>
                   </Text>
                 )}
+                
+                <View style={{ marginTop: 4 }}>
+                  <Text style={{ color: "#475569", fontSize: 12, marginBottom: 4, fontWeight: "600" }}>Characters Spacing (cm)</Text>
+                  <TextInput
+                    style={{ borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, height: 44, color: "#0f172a", backgroundColor: "#ffffff", fontSize: 14 }}
+                    value={charSpacingStr}
+                    onChangeText={setCharSpacingStr}
+                    keyboardType="numeric"
+                    placeholder="10"
+                    placeholderTextColor="#94a3b8"
+                  />
+                </View>
               </View>
             )}
 
@@ -888,6 +1011,32 @@ export function TemplatesPage(props: TemplatesPageProps) {
               </View>
             )}
 
+            {boundaryMode && props.mapViewEnabled && (
+              <View style={{ borderRadius: 14, padding: 14, backgroundColor: "#ffffff", borderWidth: 1, borderColor: "#d8e1eb", gap: 10 }}>
+                <Text style={{ color: "#64748b", fontSize: 11, fontWeight: "800", letterSpacing: 1, textTransform: "uppercase" }}>
+                  Map View Controls
+                </Text>
+                <View style={{ flexDirection: "row", gap: 8 }}>
+                  <Pressable
+                    onPress={() => setLockPanDrag(!lockPanDrag)}
+                    style={{ flex: 1, height: 38, borderRadius: 8, backgroundColor: lockPanDrag ? "#ef4444" : "#f1f5f9", borderWidth: 1, borderColor: "#cbd5e1", alignItems: "center", justifyContent: "center" }}
+                  >
+                    <Text style={{ color: lockPanDrag ? "#fff" : "#475569", fontWeight: "700", fontSize: 12 }}>
+                      {lockPanDrag ? "Pan: Locked" : "Pan: Active"}
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => setLockZoom(!lockZoom)}
+                    style={{ flex: 1, height: 38, borderRadius: 8, backgroundColor: lockZoom ? "#ef4444" : "#f1f5f9", borderWidth: 1, borderColor: "#cbd5e1", alignItems: "center", justifyContent: "center" }}
+                  >
+                    <Text style={{ color: lockZoom ? "#fff" : "#475569", fontWeight: "700", fontSize: 12 }}>
+                      {lockZoom ? "Zoom: Locked" : "Zoom: Active"}
+                    </Text>
+                  </Pressable>
+                </View>
+              </View>
+            )}
+
             {boundaryMode && (
               <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
                 <Pressable
@@ -921,6 +1070,15 @@ export function TemplatesPage(props: TemplatesPageProps) {
                     style={{ height: 48, paddingHorizontal: 16, borderRadius: 12, backgroundColor: "#f59e0b", alignItems: "center", justifyContent: "center" }}
                   >
                     <Text style={{ color: "#fff", fontSize: 14, fontWeight: "800" }}>Ungroup</Text>
+                  </Pressable>
+                )}
+                
+                {selectedItemIds.length > 0 && (
+                  <Pressable
+                    onPress={handleCopyItems}
+                    style={{ height: 48, paddingHorizontal: 16, borderRadius: 12, backgroundColor: "#10b981", alignItems: "center", justifyContent: "center" }}
+                  >
+                    <Text style={{ color: "#fff", fontSize: 14, fontWeight: "800" }}>Copy</Text>
                   </Pressable>
                 )}
                 

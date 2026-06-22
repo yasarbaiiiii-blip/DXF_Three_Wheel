@@ -1,6 +1,6 @@
-import React, { useState, useMemo, useRef, useEffect, memo } from "react";
+import React, { useState, useMemo, useRef, useEffect, useCallback, memo } from "react";
 import { View, Text, Pressable, PanResponder, Switch, LayoutChangeEvent } from "react-native";
-import Svg, { Path, G, Line, Rect } from "react-native-svg";
+import Svg, { Path, G, Line, Rect, Circle, Polygon, Text as SvgText } from "react-native-svg";
 import type { PlanLine } from "../types/plan";
 
 export interface PlacedItem {
@@ -24,7 +24,6 @@ export interface BoundaryEditorProps {
   setItems: React.Dispatch<React.SetStateAction<PlacedItem[]>>;
   selectedItemIds: string[];
   setSelectedItemIds: (ids: string[]) => void;
-  snapSettings: { center: boolean; corners: boolean; angles: boolean };
   multiTouchMode: "both" | "scale" | "rotate";
 }
 
@@ -37,12 +36,11 @@ export const BoundaryEditor = memo(function BoundaryEditor({
   setItems,
   selectedItemIds,
   setSelectedItemIds,
-  snapSettings,
   multiTouchMode,
 }: BoundaryEditorProps) {
   const METER_TO_PX = 100;
 
-  const [snapLines, setSnapLines] = useState<{ x1: number; y1: number; x2: number; y2: number }[]>([]);
+
   const [svgSize, setSvgSize] = useState({ width: 400, height: 400 }); // fallback for initial taps
   const [camera, setCamera] = useState({ x: 0, y: 0, zoom: 1 });
 
@@ -80,20 +78,45 @@ export const BoundaryEditor = memo(function BoundaryEditor({
   useEffect(() => { multiTouchModeRef.current = multiTouchMode; }, [multiTouchMode]);
   useEffect(() => { letterSpacingRef.current = letterSpacing; }, [letterSpacing]);
 
-  const snapSettingsRef = useRef(snapSettings);
-  useEffect(() => { snapSettingsRef.current = snapSettings; }, [snapSettings]);
-
   const setItemsRef = useRef(setItems);
   useEffect(() => { setItemsRef.current = setItems; }, [setItems]);
 
   const setSelectedItemIdsRef = useRef(setSelectedItemIds);
   useEffect(() => { setSelectedItemIdsRef.current = setSelectedItemIds; }, [setSelectedItemIds]);
 
-  const setSnapLinesRef = useRef(setSnapLines);
-  useEffect(() => { setSnapLinesRef.current = setSnapLines; }, [setSnapLines]);
-
   const svgSizeRef = useRef({ width: 0, height: 0 });
   useEffect(() => { svgSizeRef.current = svgSize; }, [svgSize]);
+
+  /* ── RAF throttle refs (Step 3) ── */
+  const rafPendingRef = useRef(false);
+  const rafIdRef = useRef<number | null>(null);
+  const rafCameraRef = useRef<{ x: number; y: number; zoom: number } | null>(null);
+  const rafItemsFnRef = useRef<((prev: PlacedItem[]) => PlacedItem[]) | null>(null);
+
+
+  const scheduleRaf = useCallback(() => {
+    if (rafIdRef.current !== null) return;
+    rafIdRef.current = requestAnimationFrame(() => {
+      if (rafCameraRef.current !== null) {
+        setCamera(rafCameraRef.current);
+        rafCameraRef.current = null;
+      }
+
+      if (rafItemsFnRef.current !== null) {
+        setItemsRef.current(rafItemsFnRef.current);
+        rafItemsFnRef.current = null;
+      }
+      rafIdRef.current = null;
+    });
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (rafIdRef.current !== null) {
+        cancelAnimationFrame(rafIdRef.current);
+      }
+    };
+  }, []);
 
   type StartPosition = { id: string; x: number; y: number; width: number; height: number; rotation: number; scale: number; lines: PlanLine[] };
   const activeDragRef = useRef<{ 
@@ -247,10 +270,11 @@ export const BoundaryEditor = memo(function BoundaryEditor({
                 const initialDist = dragData.pinchState.initialDist;
                 if (initialDist === 0) return;
                 const scaleMultiplier = currentDist / initialDist;
-                setCamera({
+                rafCameraRef.current = {
                    ...dragData.pinchState.startCamera!,
                    zoom: Math.max(0.01, Math.min(10, dragData.pinchState.startCamera!.zoom * scaleMultiplier))
-                });
+                };
+                scheduleRaf();
                 return;
             }
             
@@ -340,54 +364,45 @@ export const BoundaryEditor = memo(function BoundaryEditor({
             if (lockPanDragRef.current) return;
             const camDx = -gestureState.dx * (bwVal / (screenW * zoom));
             const camDy = gestureState.dy * (bhVal / (screenH * zoom));
-            setCamera({
+            rafCameraRef.current = {
                ...dragData.startCamera!,
                x: dragData.startCamera!.x + camDx,
                y: dragData.startCamera!.y + camDy
-            });
+            };
+            scheduleRaf();
             return;
          }
 
          if (lockPanDragRef.current) return;
 
-        const bw = boundaryWidthRef.current;
-        const bh = boundaryHeightRef.current;
-        const indent = indentSpacingRef.current;
-        const snaps = snapSettingsRef.current;
+         const bw = boundaryWidthRef.current;
+         const bh = boundaryHeightRef.current;
+         const indent = indentSpacingRef.current;
 
-        let newSnapLines: { x1: number; y1: number; x2: number; y2: number }[] = [];
-        const updates: Record<string, {x: number, y: number}> = {};
+         const updates: Record<string, {x: number, y: number}> = {};
 
-        dragData.startPositions!.forEach(start => {
-          let newX = start.x + dx;
-          let newY = start.y + dy;
+         dragData.startPositions!.forEach(start => {
+           let newX = start.x + dx;
+           let newY = start.y + dy;
 
-          const leftIndent = -bw / 2 + indent;
-          const rightIndent = bw / 2 - indent;
-          const topIndent = -bh / 2 + indent;
-          const bottomIndent = bh / 2 - indent;
-          const halfW = start.width / 2;
-          const halfH = start.height / 2;
+           const leftIndent = -bw / 2 + indent;
+           const rightIndent = bw / 2 - indent;
+           const topIndent = -bh / 2 + indent;
+           const bottomIndent = bh / 2 - indent;
+           const halfW = start.width / 2;
+           const halfH = start.height / 2;
 
-          if (snaps.corners) {
-            if (Math.abs(newX - halfW - leftIndent) < 0.1) { newX = leftIndent + halfW; newSnapLines.push({x1: leftIndent, y1: -bh, x2: leftIndent, y2: bh}); }
-            if (Math.abs(newX + halfW - rightIndent) < 0.1) { newX = rightIndent - halfW; newSnapLines.push({x1: rightIndent, y1: -bh, x2: rightIndent, y2: bh}); }
-            if (Math.abs(newY - halfH - topIndent) < 0.1) { newY = topIndent + halfH; newSnapLines.push({x1: -bw, y1: topIndent, x2: bw, y2: topIndent}); }
-            if (Math.abs(newY + halfH - bottomIndent) < 0.1) { newY = bottomIndent - halfH; newSnapLines.push({x1: -bw, y1: bottomIndent, x2: bw, y2: bottomIndent}); }
-          }
-          
-          newX = Math.max(leftIndent + halfW, Math.min(newX, rightIndent - halfW));
-          newY = Math.max(topIndent + halfH, Math.min(newY, bottomIndent - halfH));
+           newX = Math.max(leftIndent + halfW, Math.min(newX, rightIndent - halfW));
+           newY = Math.max(topIndent + halfH, Math.min(newY, bottomIndent - halfH));
 
-          updates[start.id] = {x: newX, y: newY};
-        });
-        
-        setSnapLinesRef.current(newSnapLines);
-        setItemsRef.current(prev => prev.map(item => updates[item.id] ? { ...item, x: updates[item.id].x, y: updates[item.id].y } : item));
+           updates[start.id] = {x: newX, y: newY};
+         });
+         
+         rafItemsFnRef.current = prev => prev.map(item => updates[item.id] ? { ...item, x: updates[item.id].x, y: updates[item.id].y } : item);
+         scheduleRaf();
       },
       onPanResponderRelease: (evt, gestureState) => {
         activeDragRef.current = null;
-        setSnapLinesRef.current([]);
         
         if (Math.abs(gestureState.dx) < 3 && Math.abs(gestureState.dy) < 3) {
           const touch = evt.nativeEvent;
@@ -421,7 +436,6 @@ export const BoundaryEditor = memo(function BoundaryEditor({
       },
       onPanResponderTerminate: () => {
         activeDragRef.current = null;
-        setSnapLinesRef.current([]);
       }
     }),
     []
@@ -436,7 +450,7 @@ export const BoundaryEditor = memo(function BoundaryEditor({
         if (width > 0 && height > 0) setSvgSize({ width, height });
       }}
     >
-      <Svg style={{ width: "100%", height: "100%" }} viewBox={`${-boundaryWidth * METER_TO_PX / (2 * camera.zoom) - camera.x * METER_TO_PX} ${-boundaryHeight * METER_TO_PX / (2 * camera.zoom) + camera.y * METER_TO_PX} ${boundaryWidth * METER_TO_PX / camera.zoom} ${boundaryHeight * METER_TO_PX / camera.zoom}`}>
+      <Svg pointerEvents="none" style={{ width: "100%", height: "100%" }} viewBox={`${-boundaryWidth * METER_TO_PX / (2 * camera.zoom) - camera.x * METER_TO_PX} ${-boundaryHeight * METER_TO_PX / (2 * camera.zoom) + camera.y * METER_TO_PX} ${boundaryWidth * METER_TO_PX / camera.zoom} ${boundaryHeight * METER_TO_PX / camera.zoom}`}>
         {/* Draw Boundary Box (Outer area filled with light gray) */}
         <Rect
           x={-boundaryWidth * METER_TO_PX / 2}
@@ -460,18 +474,7 @@ export const BoundaryEditor = memo(function BoundaryEditor({
            />
         )}
 
-        {/* Draw Snap Lines */}
-        {snapLines.map((line, i) => (
-           <Line
-             key={`snap-${i}`}
-             x1={line.x1 * METER_TO_PX}
-             y1={line.y1 * METER_TO_PX}
-             x2={line.x2 * METER_TO_PX}
-             y2={line.y2 * METER_TO_PX}
-             stroke="#ef4444"
-             strokeWidth={1.5 / camera.zoom}
-           />
-        ))}
+
 
         {/* Draw Items */}
         {items.map(item => {
@@ -484,18 +487,14 @@ export const BoundaryEditor = memo(function BoundaryEditor({
               key={item.id} 
               transform={`translate(${item.x * METER_TO_PX}, ${-item.y * METER_TO_PX}) rotate(${item.rotation})`}
             >
-               {/* Item SVG Lines - Y NEGATED for world coords */}
-               {item.lines.map((l, i) => (
-                  <Line
-                    key={`${item.id}-l-${i}`}
-                    x1={l.from.y * METER_TO_PX}
-                    y1={-l.from.x * METER_TO_PX}
-                    x2={l.to.y * METER_TO_PX}
-                    y2={-l.to.x * METER_TO_PX}
-                    stroke={isSelected ? "#ef4444" : "#0f172a"}
-                    strokeWidth={isSelected ? (3 * sizeScale) / camera.zoom : (2 * sizeScale) / camera.zoom}
-                  />
-               ))}
+               {/* Item SVG Lines - batched into single <Path> per item (Step 4) */}
+               <Path
+                 d={item.lines.map(l => `M${l.from.y * METER_TO_PX} ${-l.from.x * METER_TO_PX}L${l.to.y * METER_TO_PX} ${-l.to.x * METER_TO_PX}`).join('')}
+                 stroke={isSelected ? "#ef4444" : "#0f172a"}
+                 strokeWidth={isSelected ? (3 * sizeScale) / camera.zoom : (2 * sizeScale) / camera.zoom}
+                 strokeLinecap="round"
+                 fill="none"
+               />
             </G>
           );
         })}
@@ -541,6 +540,45 @@ export const BoundaryEditor = memo(function BoundaryEditor({
           />
         </View>
       </View>
+
+      {/* Floating Compass Overlay */}
+      <View
+        style={{
+          position: "absolute",
+          top: 16,
+          right: 16,
+          width: 54,
+          height: 54,
+          zIndex: 40,
+          elevation: 40,
+          backgroundColor: "transparent",
+        }}
+      >
+        <Svg width={54} height={54} viewBox="0 0 54 54">
+          <Circle cx={27} cy={27} r={24} fill="rgba(15,23,42,0.85)" stroke="#e2e8f0" strokeWidth={1.5} />
+          <SvgText x={27} y={12} fontSize={8} fill="#ef4444" fontWeight="900" textAnchor="middle">N</SvgText>
+          <SvgText x={27} y={48} fontSize={7} fill="#64748b" fontWeight="700" textAnchor="middle">S</SvgText>
+          <SvgText x={47} y={30} fontSize={7} fill="#64748b" fontWeight="700" textAnchor="middle">E</SvgText>
+          <SvgText x={7} y={30} fontSize={7} fill="#64748b" fontWeight="700" textAnchor="middle">W</SvgText>
+          <G transform="rotate(0 27 27)">
+            <Polygon points="27,15 31,27 23,27" fill="#ef4444" />
+            <Polygon points="27,39 31,27 23,27" fill="#cbd5e1" />
+            <Circle cx={27} cy={27} r={2.5} fill="#0f172a" stroke="#fff" strokeWidth={1} />
+          </G>
+        </Svg>
+      </View>
     </View>
+  );
+}, (prev, next) => {
+  return (
+    prev.boundaryWidth === next.boundaryWidth &&
+    prev.boundaryHeight === next.boundaryHeight &&
+    prev.indentSpacing === next.indentSpacing &&
+    prev.letterSpacing === next.letterSpacing &&
+    prev.multiTouchMode === next.multiTouchMode &&
+    prev.selectedItemIds.length === next.selectedItemIds.length &&
+    prev.selectedItemIds.every((id, idx) => id === next.selectedItemIds[idx]) &&
+    prev.items.length === next.items.length &&
+    prev.items.every((p, i) => p.x === next.items[i].x && p.y === next.items[i].y && p.rotation === next.items[i].rotation && p.scale === next.items[i].scale)
   );
 });
