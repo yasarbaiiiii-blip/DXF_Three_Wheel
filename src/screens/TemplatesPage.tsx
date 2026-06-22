@@ -4,6 +4,7 @@ import * as FileSystem from "expo-file-system/legacy";
 import { X } from "lucide-react-native";
 import Slider from "@react-native-community/slider";
 
+import { MapView } from "../components/MapView";
 import { BoundaryEditor, PlacedItem } from "../components/BoundaryEditor";
 import { generateAlphabetLines, FontStyle, AlphabetType, NumberType, generateNumberLines, generateTextLines } from "../utils/characterTemplates";
 import { generateRoadSignLines, RoadSignType, ROAD_SIGN_LABELS } from "../utils/roadSignTemplates";
@@ -23,7 +24,7 @@ interface TemplatesPageProps {
   onSelectPath: (name: string) => void;
   onRefreshPaths: () => void;
   onNav: (page: Page) => void;
-  PlanPreviewComponent: React.ComponentType<{
+  renderPlanPreview: (previewProps: {
     lines: PlanLine[];
     visibility: LayerVisibility;
     selectedLineId: string | null;
@@ -31,7 +32,8 @@ interface TemplatesPageProps {
     roverPosN?: number | null;
     roverPosE?: number | null;
     roverHeadingDeg?: number | null;
-  }>;
+  }) => React.ReactNode;
+  mapViewEnabled?: boolean;
 }
 
 interface WordGroup {
@@ -53,6 +55,8 @@ export function TemplatesPage(props: TemplatesPageProps) {
   const [wordGroups, setWordGroups] = useState<WordGroup[]>([]);
   const [arrangeMode, setArrangeMode] = useState<"none" | "horizontal" | "vertical">("none");
   const [multiTouchMode, setMultiTouchMode] = useState<"both" | "scale" | "rotate">("both");
+  const [lockPanDrag, setLockPanDrag] = useState(false);
+  const [lockZoom, setLockZoom] = useState(false);
   const [itemScaleStr, setItemScaleStr] = useState("1.0");
   const [itemRotationStr, setItemRotationStr] = useState("0");
 
@@ -126,6 +130,74 @@ export function TemplatesPage(props: TemplatesPageProps) {
     if (category === "characters") return generateTextLines(previewText, parsedSize, fontStyle, pendingCharSpacingCm / 100);
     return [];
   }, [category, shape, selectedLetter, selectedDigit, selectedSign, selectedField, parsedSize, arcType, fontStyle, previewText, pendingCharSpacingCm]);
+
+  const boundaryLines = useMemo(() => {
+    const finalLines: PlanLine[] = [];
+    
+    // Add boundary box lines
+    const halfW = bw / 2;
+    const halfH = bh / 2;
+    const boxCoords = [
+      { fx: -halfW, fy: -halfH, tx: halfW, ty: -halfH },
+      { fx: halfW, fy: -halfH, tx: halfW, ty: halfH },
+      { fx: halfW, fy: halfH, tx: -halfW, ty: halfH },
+      { fx: -halfW, fy: halfH, tx: -halfW, ty: -halfH },
+    ];
+    boxCoords.forEach((c, idx) => {
+      finalLines.push({
+        id: `box-${idx}`,
+        layer: "boundary",
+        label: "boundary",
+        width: 3,
+        from: { id: idx * 2, x: c.fx, y: c.fy },
+        to: { id: idx * 2 + 1, x: c.tx, y: c.ty },
+      });
+    });
+
+    // Add indent box lines
+    const indW = halfW - indent;
+    const indH = halfH - indent;
+    if (indW > 0 && indH > 0) {
+      const indCoords = [
+        { fx: -indW, fy: -indH, tx: indW, ty: -indH },
+        { fx: indW, fy: -indH, tx: indW, ty: indH },
+        { fx: indW, fy: indH, tx: -indW, ty: indH },
+        { fx: -indW, fy: indH, tx: -indW, ty: -indH },
+      ];
+      indCoords.forEach((c, idx) => {
+        finalLines.push({
+          id: `indent-${idx}`,
+          layer: "transit",
+          label: "transit",
+          width: 2,
+          from: { id: 100 + idx * 2, x: c.fx, y: c.fy },
+          to: { id: 100 + idx * 2 + 1, x: c.tx, y: c.ty },
+        });
+      });
+    }
+
+    // Add placed items lines
+    placedItems.forEach(item => {
+      const cos = Math.cos((item.rotation || 0) * Math.PI / 180) || 0;
+      const sin = Math.sin((item.rotation || 0) * Math.PI / 180) || 0;
+      item.lines.forEach((l, i) => {
+        const fx = (l.from.x * cos - l.from.y * sin) + (item.y || 0);
+        const fy = (l.from.x * sin + l.from.y * cos) + (item.x || 0);
+        const tx = (l.to.x * cos - l.to.y * sin) + (item.y || 0);
+        const ty = (l.to.x * sin + l.to.y * cos) + (item.x || 0);
+        if (!isFinite(fx) || !isFinite(fy) || !isFinite(tx) || !isFinite(ty)) return;
+        
+        finalLines.push({
+          ...l,
+          id: `${item.id}-${i}`,
+          from: { ...l.from, x: fx, y: fy },
+          to: { ...l.to, x: tx, y: ty },
+        });
+      });
+    });
+
+    return finalLines;
+  }, [placedItems, bw, bh, indent]);
 
   const computeBoundingBox = useCallback((lines: PlanLine[]): { width: number; height: number } => {
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
@@ -483,7 +555,25 @@ export function TemplatesPage(props: TemplatesPageProps) {
     <View style={{ flex: 1, flexDirection: "row" }}>
       <View style={{ width: "58%", backgroundColor: "transparent", padding: 14 }}>
         <View style={{ flex: 1, borderRadius: 20, overflow: "hidden", backgroundColor: "#ffffff", borderWidth: 1, borderColor: "#d8e1eb" }}>
-          {boundaryMode ? (
+          {boundaryMode && props.mapViewEnabled ? (
+            <MapView
+              mode="templates"
+              visible={true}
+              telemetrySnapshot={props.telemetrySnapshot}
+              lines={boundaryLines}
+              alignedRefPoints={[]}
+              placedItems={placedItems}
+              selectedItemIds={selectedItemIds}
+              multiTouchMode={multiTouchMode}
+              lockPanDrag={lockPanDrag}
+              lockZoom={lockZoom}
+              boundaryWidth={bw}
+              boundaryHeight={bh}
+              indentSpacing={indent}
+              onUpdatePlacedItems={(items) => setPlacedItems(items)}
+              onSelectionChange={(ids) => setSelectedItemIds(ids)}
+            />
+          ) : boundaryMode ? (
             <BoundaryEditor
               boundaryWidth={bw}
               boundaryHeight={bh}
@@ -497,15 +587,15 @@ export function TemplatesPage(props: TemplatesPageProps) {
             />
           ) : (
             <View style={{ flex: 1, position: "relative" }}>
-              <props.PlanPreviewComponent
-                lines={previewLines}
-                visibility={props.layerVisibility}
-                selectedLineId={props.selectedLineId}
-                onSelectLine={props.onSelectLine}
-                roverPosN={props.previewRoverPoint?.north ?? null}
-                roverPosE={props.previewRoverPoint?.east ?? null}
-                roverHeadingDeg={props.telemetrySnapshot?.heading_ned_deg ?? null}
-              />
+              {props.renderPlanPreview({
+                lines: previewLines,
+                visibility: props.layerVisibility,
+                selectedLineId: props.selectedLineId,
+                onSelectLine: props.onSelectLine,
+                roverPosN: props.previewRoverPoint?.north ?? null,
+                roverPosE: props.previewRoverPoint?.east ?? null,
+                roverHeadingDeg: props.telemetrySnapshot?.heading_ned_deg ?? null,
+              })}
             </View>
           )}
         </View>
@@ -533,21 +623,21 @@ export function TemplatesPage(props: TemplatesPageProps) {
                 <View style={{ flexDirection: "row", gap: 8 }}>
                   <View style={{ flex: 1 }}>
                     <Text style={{ color: "#475569", fontSize: 12, marginBottom: 4 }}>Width (m)</Text>
-                    <TextInput style={{ borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, padding: 8, color: "#0f172a" }} value={boundaryWidthStr} onChangeText={setBoundaryWidthStr} keyboardType="numeric" />
+                    <TextInput style={{ borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, height: 44, color: "#0f172a", backgroundColor: "#ffffff" }} value={boundaryWidthStr} onChangeText={setBoundaryWidthStr} keyboardType="numeric" />
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={{ color: "#475569", fontSize: 12, marginBottom: 4 }}>Height (m)</Text>
-                    <TextInput style={{ borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, padding: 8, color: "#0f172a" }} value={boundaryHeightStr} onChangeText={setBoundaryHeightStr} keyboardType="numeric" />
+                    <TextInput style={{ borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, height: 44, color: "#0f172a", backgroundColor: "#ffffff" }} value={boundaryHeightStr} onChangeText={setBoundaryHeightStr} keyboardType="numeric" />
                   </View>
                 </View>
                 <View style={{ flexDirection: "row", gap: 8 }}>
                   <View style={{ flex: 1 }}>
                     <Text style={{ color: "#475569", fontSize: 12, marginBottom: 4 }}>Indent Spacing</Text>
-                    <TextInput style={{ borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, padding: 8, color: "#0f172a" }} value={indentSpacingStr} onChangeText={setIndentSpacingStr} keyboardType="numeric" />
+                    <TextInput style={{ borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, height: 44, color: "#0f172a", backgroundColor: "#ffffff" }} value={indentSpacingStr} onChangeText={setIndentSpacingStr} keyboardType="numeric" />
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={{ color: "#475569", fontSize: 12, marginBottom: 4 }}>Letter Spacing (cm)</Text>
-                    <TextInput style={{ borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, padding: 8, color: "#0f172a" }} value={letterSpacingStr} onChangeText={setLetterSpacingStr} keyboardType="numeric" />
+                    <TextInput style={{ borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, height: 44, color: "#0f172a", backgroundColor: "#ffffff" }} value={letterSpacingStr} onChangeText={setLetterSpacingStr} keyboardType="numeric" />
                   </View>
                 </View>
 
@@ -638,7 +728,7 @@ export function TemplatesPage(props: TemplatesPageProps) {
                 </Text>
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
                   <TextInput
-                    style={{ flex: 1, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, padding: 8, color: "#0f172a", fontSize: 14, fontWeight: "700" }}
+                    style={{ flex: 1, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, height: 44, color: "#0f172a", backgroundColor: "#ffffff", fontSize: 14, fontWeight: "700" }}
                     value={inputText}
                     onChangeText={setInputText}
                     placeholder="Type characters..."
@@ -648,7 +738,7 @@ export function TemplatesPage(props: TemplatesPageProps) {
                   {inputText.trim().length > 0 && (
                     <Pressable
                       onPress={() => setPreviewText(inputText)}
-                      style={{ paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8, backgroundColor: "#0b6b68", alignItems: "center" }}
+                      style={{ paddingHorizontal: 16, height: 44, borderRadius: 8, backgroundColor: "#0b6b68", alignItems: "center", justifyContent: "center" }}
                     >
                       <Text style={{ color: "#fff", fontSize: 13, fontWeight: "800" }}>OK</Text>
                     </Pressable>
@@ -663,7 +753,7 @@ export function TemplatesPage(props: TemplatesPageProps) {
                 <View style={{ marginTop: 4 }}>
                   <Text style={{ color: "#475569", fontSize: 12, marginBottom: 4, fontWeight: "600" }}>Characters Spacing (cm)</Text>
                   <TextInput
-                    style={{ borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, padding: 8, color: "#0f172a", fontSize: 14 }}
+                    style={{ borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, height: 44, color: "#0f172a", backgroundColor: "#ffffff", fontSize: 14 }}
                     value={charSpacingStr}
                     onChangeText={setCharSpacingStr}
                     keyboardType="numeric"
@@ -916,6 +1006,32 @@ export function TemplatesPage(props: TemplatesPageProps) {
                     style={{ paddingHorizontal: 14, paddingVertical: 6, borderRadius: 8, backgroundColor: "#6366f1" }}
                   >
                     <Text style={{ color: "#fff", fontSize: 12, fontWeight: "700" }}>Apply</Text>
+                  </Pressable>
+                </View>
+              </View>
+            )}
+
+            {boundaryMode && props.mapViewEnabled && (
+              <View style={{ borderRadius: 14, padding: 14, backgroundColor: "#ffffff", borderWidth: 1, borderColor: "#d8e1eb", gap: 10 }}>
+                <Text style={{ color: "#64748b", fontSize: 11, fontWeight: "800", letterSpacing: 1, textTransform: "uppercase" }}>
+                  Map View Controls
+                </Text>
+                <View style={{ flexDirection: "row", gap: 8 }}>
+                  <Pressable
+                    onPress={() => setLockPanDrag(!lockPanDrag)}
+                    style={{ flex: 1, height: 38, borderRadius: 8, backgroundColor: lockPanDrag ? "#ef4444" : "#f1f5f9", borderWidth: 1, borderColor: "#cbd5e1", alignItems: "center", justifyContent: "center" }}
+                  >
+                    <Text style={{ color: lockPanDrag ? "#fff" : "#475569", fontWeight: "700", fontSize: 12 }}>
+                      {lockPanDrag ? "Pan: Locked" : "Pan: Active"}
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => setLockZoom(!lockZoom)}
+                    style={{ flex: 1, height: 38, borderRadius: 8, backgroundColor: lockZoom ? "#ef4444" : "#f1f5f9", borderWidth: 1, borderColor: "#cbd5e1", alignItems: "center", justifyContent: "center" }}
+                  >
+                    <Text style={{ color: lockZoom ? "#fff" : "#475569", fontWeight: "700", fontSize: 12 }}>
+                      {lockZoom ? "Zoom: Locked" : "Zoom: Active"}
+                    </Text>
                   </Pressable>
                 </View>
               </View>

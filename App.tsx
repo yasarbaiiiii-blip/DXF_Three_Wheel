@@ -67,6 +67,7 @@ import { generateRoadSignLines, RoadSignType, ROAD_SIGN_LABELS } from "./src/uti
 
 import type { Page, TelemetrySnapshot, LayerVisibility } from "./src/types/plan";
 import { TemplatesPage } from "./src/screens/TemplatesPage";
+import { MapView } from "./src/components/MapView";
 const MAX_PREVIEW_CORNERS = 450;
 const PATH_SEGMENT_CHUNK_SIZE = 650;
 
@@ -96,6 +97,24 @@ function isPrimaryEditableLine(line: PlanLine) {
   }
 
   return PRIMARY_ENTITY_TYPES.has(normalizeEntityType(line.entity?.entity_type));
+}
+
+function projectGpsToLocalMeters(
+  lat: number,
+  lon: number,
+  originLat: number,
+  originLon: number
+) {
+  const EARTH_RADIUS = 6378137.0;
+  const latRad = (lat * Math.PI) / 180;
+  const lonRad = (lon * Math.PI) / 180;
+  const originLatRad = (originLat * Math.PI) / 180;
+  const originLonRad = (originLon * Math.PI) / 180;
+
+  const north = (latRad - originLatRad) * EARTH_RADIUS;
+  const east = (lonRad - originLonRad) * EARTH_RADIUS * Math.cos(originLatRad);
+
+  return { north, east };
 }
 
 function getPlanStartPoint(lines: PlanLine[]) {
@@ -407,6 +426,8 @@ export default function App() {
 
   const [autoOrigin, setAutoOrigin] = useState(false);
   const [originShift, setOriginShift] = useState<{ offsetN: number; offsetE: number } | null>(null);
+  const [alignedRefPoints, setAlignedRefPoints] = useState<{ dxf_x: number; dxf_y: number; lat: number; lon: number }[]>([]);
+  const [mapViewEnabled, setMapViewEnabled] = useState(false);
 
   useEffect(() => {
     if (autoOrigin) {
@@ -467,19 +488,10 @@ export default function App() {
         : null;
     const planStartPoint = getPlanStartPoint(displayedLines);
 
-    if (autoOrigin && !missionRunning) {
-      return planStartPoint ?? telemetryPoint;
-    }
-
-    if (missionRunning) {
-      return telemetryPoint ?? planStartPoint;
-    }
-
+    // ALWAYS use real telemetry when available, so the icon shows the true rover position
     return telemetryPoint ?? planStartPoint;
   }, [
-    autoOrigin,
     displayedLines,
-    missionRunning,
     telemetrySnapshot?.pos_e,
     telemetrySnapshot?.pos_n,
   ]);
@@ -2021,6 +2033,10 @@ export default function App() {
                     const target = selectedPathName || importedPlan?.fileName;
                     if (target) previewSelectedPath(target);
                   }}
+                  alignedRefPoints={alignedRefPoints}
+                  setAlignedRefPoints={setAlignedRefPoints}
+                  mapViewEnabled={mapViewEnabled}
+                  setMapViewEnabled={setMapViewEnabled}
                 />
               ) : (
                 <SectionScreen
@@ -2078,6 +2094,10 @@ export default function App() {
                   setDelayA={setDelayA}
                   setDelayB={setDelayB}
                   onParsePlan={parseDxfPlan}
+                  alignedRefPoints={alignedRefPoints}
+                  setAlignedRefPoints={setAlignedRefPoints}
+                  mapViewEnabled={mapViewEnabled}
+                  setMapViewEnabled={setMapViewEnabled}
                 />
               )}
 
@@ -2146,10 +2166,14 @@ function TopBar({
   title,
   onBack,
   onMorePress,
+  mapViewEnabled,
+  setMapViewEnabled,
 }: {
   title: string;
   onBack?: () => void;
   onMorePress?: () => void;
+  mapViewEnabled?: boolean;
+  setMapViewEnabled?: React.Dispatch<React.SetStateAction<boolean>>;
 }) {
   return (
     <View
@@ -2185,26 +2209,49 @@ function TopBar({
         ) : null}
         <Text style={{ fontSize: 18, color: "#0f172a", fontWeight: "700" }}>{title}</Text>
       </View>
-      {onMorePress ? (
-        <Pressable
-          onPress={onMorePress}
-          hitSlop={14}
-          style={{
-            width: 38,
-            height: 38,
-            borderRadius: 12,
-            backgroundColor: "#eef2f7",
-            alignItems: "center",
-            justifyContent: "center",
-            borderWidth: 1,
-            borderColor: "#d7dee8",
-          }}
-        >
-          <Text style={{ fontSize: 20, color: "#0f172a", lineHeight: 20 }}>⋮</Text>
-        </Pressable>
-      ) : (
-        <View style={{ width: 38, height: 38 }} />
-      )}
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+        {setMapViewEnabled && (
+          <Pressable
+            onPress={() => setMapViewEnabled((v) => !v)}
+            style={{
+              height: 38,
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 6,
+              paddingHorizontal: 12,
+              borderRadius: 12,
+              backgroundColor: mapViewEnabled ? "#3b82f6" : "#ffffff",
+              borderWidth: 1,
+              borderColor: mapViewEnabled ? "#2563eb" : "#d7dee8",
+            }}
+          >
+            <MapIcon size={14} color={mapViewEnabled ? "#ffffff" : "#0f172a"} />
+            <Text style={{ color: mapViewEnabled ? "#ffffff" : "#0f172a", fontSize: 11, fontWeight: "800" }}>
+              {mapViewEnabled ? "Map On" : "Map"}
+            </Text>
+          </Pressable>
+        )}
+        {onMorePress ? (
+          <Pressable
+            onPress={onMorePress}
+            hitSlop={14}
+            style={{
+              width: 38,
+              height: 38,
+              borderRadius: 12,
+              backgroundColor: "#eef2f7",
+              alignItems: "center",
+              justifyContent: "center",
+              borderWidth: 1,
+              borderColor: "#d7dee8",
+            }}
+          >
+            <Text style={{ fontSize: 20, color: "#0f172a", lineHeight: 20 }}>⋮</Text>
+          </Pressable>
+        ) : (
+          !setMapViewEnabled && <View style={{ width: 38, height: 38 }} />
+        )}
+      </View>
     </View>
   );
 }
@@ -2266,6 +2313,10 @@ function HomeView({
   apiBaseUrl,
   selectedPathName,
   onRefreshPaths,
+  alignedRefPoints = [],
+  setAlignedRefPoints,
+  mapViewEnabled = false,
+  setMapViewEnabled,
 }: {
   autoOrigin: boolean;
   setAutoOrigin: React.Dispatch<React.SetStateAction<boolean>>;
@@ -2323,6 +2374,10 @@ function HomeView({
   apiBaseUrl?: string;
   selectedPathName?: string | null;
   onRefreshPaths?: () => void;
+  alignedRefPoints?: { dxf_x: number; dxf_y: number; lat: number; lon: number }[];
+  setAlignedRefPoints?: React.Dispatch<React.SetStateAction<{ dxf_x: number; dxf_y: number; lat: number; lon: number }[]>>;
+  mapViewEnabled?: boolean;
+  setMapViewEnabled?: React.Dispatch<React.SetStateAction<boolean>>;
 }) {
   const selectedLine = lines.find((line) => line.id === selectedLineId) ?? null;
   const hasPlan = lines.length > 0;
@@ -2517,6 +2572,26 @@ function HomeView({
               <Menu size={22} color="#0f172a" />
             </Pressable>
 
+            <Pressable
+              onPress={() => setMapViewEnabled?.((v) => !v)}
+              style={{
+                height: 40,
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 6,
+                paddingHorizontal: 12,
+                borderRadius: 12,
+                backgroundColor: mapViewEnabled ? "#3b82f6" : "#ffffff",
+                borderWidth: 1,
+                borderColor: mapViewEnabled ? "#2563eb" : "#e2e8f0",
+              }}
+            >
+              <MapIcon size={16} color={mapViewEnabled ? "#ffffff" : "#0f172a"} />
+              <Text style={{ color: mapViewEnabled ? "#ffffff" : "#0f172a", fontSize: 12, fontWeight: "800" }}>
+                {mapViewEnabled ? "Map On" : "Map"}
+              </Text>
+            </Pressable>
+
             <View style={{ flex: 1, minWidth: 0 }}>
               {importedPlan ? (
                 <View style={{ gap: 10 }}>
@@ -2607,6 +2682,13 @@ function HomeView({
                   roverPosE={previewRoverPoint?.east ?? null}
                   roverHeadingDeg={telemetrySnapshot?.heading_ned_deg ?? null}
                   missionRunning={missionRunning}
+                  alignedRefPoints={alignedRefPoints}
+                  telemetryPosN={telemetrySnapshot?.pos_n ?? null}
+                  telemetryPosE={telemetrySnapshot?.pos_e ?? null}
+                  telemetryPosLat={telemetrySnapshot?.lat ?? null}
+                  telemetryPosLon={telemetrySnapshot?.lon ?? null}
+                  telemetryPosAlt={telemetrySnapshot?.alt ?? null}
+                  mapViewEnabled={mapViewEnabled}
                 />
               </View>
             </View>
@@ -4526,18 +4608,38 @@ function SectionScreen(props: {
   setExtPre?: React.Dispatch<React.SetStateAction<string>>;
   extAft?: string;
   setExtAft?: React.Dispatch<React.SetStateAction<string>>;
+  alignedRefPoints?: { dxf_x: number; dxf_y: number; lat: number; lon: number }[];
+  setAlignedRefPoints?: React.Dispatch<React.SetStateAction<{ dxf_x: number; dxf_y: number; lat: number; lon: number }[]>>;
+  mapViewEnabled?: boolean;
+  setMapViewEnabled?: React.Dispatch<React.SetStateAction<boolean>>;
 }) {
-  const { title, page, onBack } = props;
+  const { title, page, onBack, mapViewEnabled, setMapViewEnabled } = props;
 
   return (
     <View style={{ flex: 1, backgroundColor: BG }}>
-      <TopBar title={title} onBack={onBack} />
+      <TopBar
+        title={title}
+        onBack={onBack}
+        mapViewEnabled={mapViewEnabled}
+        setMapViewEnabled={setMapViewEnabled}
+      />
 
       {page === "fields" ? <FieldsPage {...props} /> : null}
       {page === "templates" ? (
         <TemplatesPage
           {...props}
-          PlanPreviewComponent={PlanPreview}
+          renderPlanPreview={(previewProps) => (
+            <PlanPreview
+              {...previewProps}
+              alignedRefPoints={props.alignedRefPoints}
+              telemetryPosN={props.telemetrySnapshot?.pos_n ?? null}
+              telemetryPosE={props.telemetrySnapshot?.pos_e ?? null}
+              telemetryPosLat={props.telemetrySnapshot?.lat ?? null}
+              telemetryPosLon={props.telemetrySnapshot?.lon ?? null}
+              telemetryPosAlt={props.telemetrySnapshot?.alt ?? null}
+              mapViewEnabled={mapViewEnabled}
+            />
+          )}
         />
       ) : null}
       {page === "swozi" ? <SwoziPage {...props} /> : null}
@@ -4999,6 +5101,9 @@ function FieldsPage({
   setExtPre,
   extAft = "0.5",
   setExtAft,
+  alignedRefPoints = [],
+  setAlignedRefPoints,
+  mapViewEnabled = false,
 }: {
   importedPlan: ImportedPlan | null;
   setImportedPlan: React.Dispatch<React.SetStateAction<ImportedPlan | null>>;
@@ -5024,6 +5129,9 @@ function FieldsPage({
   setExtPre?: React.Dispatch<React.SetStateAction<string>>;
   extAft?: string;
   setExtAft?: React.Dispatch<React.SetStateAction<string>>;
+  alignedRefPoints?: { dxf_x: number; dxf_y: number; lat: number; lon: number }[];
+  setAlignedRefPoints?: React.Dispatch<React.SetStateAction<{ dxf_x: number; dxf_y: number; lat: number; lon: number }[]>>;
+  mapViewEnabled?: boolean;
 }) {
   const [pickedFile, setPickedFile] = useState<DocumentPicker.DocumentPickerAsset | null>(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -5328,6 +5436,12 @@ function FieldsPage({
         } else {
           Alert.alert("Success", "Alignment applied, but no mission was staged.");
         }
+        // Save the aligned ref points so they continue to render as green markers with GPS labels
+        if (setAlignedRefPoints) {
+          setAlignedRefPoints(validPoints.map(p => ({
+            dxf_x: p.dxf_x, dxf_y: p.dxf_y, lat: p.lat, lon: p.lon
+          })));
+        }
         setRefPoints([]);
         onRefreshPaths(); // Fetch the new aligned plan
       } else {
@@ -5419,6 +5533,13 @@ function FieldsPage({
               roverHeadingDeg={telemetrySnapshot?.heading_ned_deg ?? null}
               selectedPoints={refPoints.map(p => ({ x: p.dxf_y, y: p.dxf_x }))}
               onSelectPoint={handleSelectPoint}
+              alignedRefPoints={alignedRefPoints}
+              telemetryPosN={telemetrySnapshot?.pos_n ?? null}
+              telemetryPosE={telemetrySnapshot?.pos_e ?? null}
+              telemetryPosLat={telemetrySnapshot?.lat ?? null}
+              telemetryPosLon={telemetrySnapshot?.lon ?? null}
+              telemetryPosAlt={telemetrySnapshot?.alt ?? null}
+              mapViewEnabled={mapViewEnabled}
             />
           </View>
         </View>
@@ -6437,6 +6558,13 @@ function PlanPreview({
   missionRunning = false,
   selectedPoints,
   onSelectPoint,
+  alignedRefPoints = [],
+  telemetryPosN = null,
+  telemetryPosE = null,
+  telemetryPosLat = null,
+  telemetryPosLon = null,
+  telemetryPosAlt = null,
+  mapViewEnabled = false,
 }: {
   lines: PlanLine[];
   visibility: LayerVisibility;
@@ -6448,6 +6576,13 @@ function PlanPreview({
   missionRunning?: boolean;
   selectedPoints?: { x: number; y: number }[];
   onSelectPoint?: (pt: { x: number; y: number }) => void;
+  alignedRefPoints?: { dxf_x: number; dxf_y: number; lat: number; lon: number }[];
+  telemetryPosN?: number | null;
+  telemetryPosE?: number | null;
+  telemetryPosLat?: number | null;
+  telemetryPosLon?: number | null;
+  telemetryPosAlt?: number | null;
+  mapViewEnabled?: boolean;
 }) {
   const filtered = useMemo(
     () =>
@@ -6492,10 +6627,40 @@ function PlanPreview({
     [filtered]
   );
 
+  // Projected rover point from raw GPS telemetry (Lat/Lon) or fallback to EKF offsets
+  const projectedRoverPoint = useMemo(() => {
+    if (
+      telemetryPosLat != null &&
+      telemetryPosLon != null &&
+      alignedRefPoints &&
+      alignedRefPoints.length > 0
+    ) {
+      const origin = alignedRefPoints[0];
+      const { north, east } = projectGpsToLocalMeters(
+        telemetryPosLat,
+        telemetryPosLon,
+        origin.lat,
+        origin.lon
+      );
+      return {
+        north: origin.dxf_x + north,
+        east: origin.dxf_y + east,
+      };
+    }
+    if (roverPosN != null && roverPosE != null) {
+      return {
+        north: roverPosN,
+        east: roverPosE,
+      };
+    }
+    return null;
+  }, [telemetryPosLat, telemetryPosLon, alignedRefPoints, roverPosN, roverPosE]);
+
   // Rover world-space position: pos_e = East, pos_n = North
-  const hasRover = roverPosN != null && roverPosE != null;
-  const roverN = roverPosN ?? 0;   // North → SVG Y (inverted)
-  const roverE = roverPosE ?? 0;   // East → SVG X
+  const hasRover = projectedRoverPoint != null;
+  const hasRealTelemetry = (telemetryPosLat != null && telemetryPosLon != null) || (telemetryPosN != null && telemetryPosE != null);
+  const roverN = projectedRoverPoint?.north ?? 0;   // North → SVG Y (inverted)
+  const roverE = projectedRoverPoint?.east ?? 0;   // East → SVG X
   const roverDeg = roverHeadingDeg ?? 0;
   const [displayRoverPose, setDisplayRoverPose] = useState<{
     north: number;
@@ -6799,26 +6964,37 @@ function PlanPreview({
     return "#475569";
   };
 
+  const [recenterRoverCount, setRecenterRoverCount] = useState(0);
+  const [recenterPlanCount, setRecenterPlanCount] = useState(0);
+
   const handleFocusRover = () => {
-    focusRover();
+    if (mapViewEnabled) {
+      setRecenterRoverCount((c) => c + 1);
+    } else {
+      focusRover();
+    }
   };
 
   const handleFocusPlan = () => {
-    if (layoutSize.width <= 0 || layoutSize.height <= 0) return;
-    userPannedRef.current = true;
-    if (filtered.length === 0) {
-      const next: PreviewViewport = {
-        panX: layoutSize.width / 2,
-        panY: layoutSize.height / 2,
-        zoom: 40,
-      };
-      viewportRef.current = next;
-      setViewport(next);
-      return;
+    if (mapViewEnabled) {
+      setRecenterPlanCount((c) => c + 1);
+    } else {
+      if (layoutSize.width <= 0 || layoutSize.height <= 0) return;
+      userPannedRef.current = true;
+      if (filtered.length === 0) {
+        const next: PreviewViewport = {
+          panX: layoutSize.width / 2,
+          panY: layoutSize.height / 2,
+          zoom: 40,
+        };
+        viewportRef.current = next;
+        setViewport(next);
+        return;
+      }
+      const fitted = computeAutoFitViewport(filtered, layoutSize.width, layoutSize.height);
+      viewportRef.current = fitted;
+      setViewport(fitted);
     }
-    const fitted = computeAutoFitViewport(filtered, layoutSize.width, layoutSize.height);
-    viewportRef.current = fitted;
-    setViewport(fitted);
   };
 
   const roverDisplayPose = displayRoverPose ?? {
@@ -6849,8 +7025,32 @@ function PlanPreview({
       onLayout={handleLayout}
       style={{ flex: 1 }}
     >
-      <View {...panResponder.panHandlers} collapsable={false} style={{ flex: 1, position: "relative", backgroundColor: "#f0f4f8", overflow: "hidden" }}>
-        {filtered.length === 0 && !hasRover ? (
+      <View
+        {...(mapViewEnabled ? {} : panResponder.panHandlers)}
+        collapsable={false}
+        style={{ flex: 1, position: "relative", backgroundColor: "#f0f4f8", overflow: "hidden" }}
+      >
+        {mapViewEnabled ? (
+          <MapView
+            telemetrySnapshot={{
+              lat: telemetryPosLat,
+              lon: telemetryPosLon,
+              alt: telemetryPosAlt,
+              heading_ned_deg: roverHeadingDeg,
+              pos_n: telemetryPosN,
+              pos_e: telemetryPosE,
+            } as any}
+            lines={lines}
+            alignedRefPoints={alignedRefPoints}
+            visible={true}
+            recenterRoverTrigger={recenterRoverCount}
+            recenterPlanTrigger={recenterPlanCount}
+            onSelectPoint={onSelectPoint}
+            onSelectLine={onSelectLine}
+            selectedLineId={selectedLineId}
+            showCornerPoints={true}
+          />
+        ) : filtered.length === 0 && !hasRover ? (
           // No plan, no rover: show placeholder
           <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 18 }}>
             <Text style={{ color: "#475569", fontSize: 15, textAlign: "center", lineHeight: 22 }}>
@@ -6944,7 +7144,140 @@ function PlanPreview({
               />
             ))}
 
+            {/* ── Plan Start Direction Arrow ── */}
+            {filtered.length > 0 && (() => {
+              const first = filtered[0];
+              const startX = first.from.y;
+              const startY = first.from.x;
+              const endX = first.to.y;
+              const endY = first.to.x;
+              const angle = Math.atan2(endY - startY, endX - startX) * 180 / Math.PI;
+              return (
+                <G transform={`translate(${startX}, ${startY})`}>
+                  <Polygon
+                    points={`0,${-8 / viewport.zoom} ${12 / viewport.zoom},0 0,${8 / viewport.zoom}`}
+                    fill="#ef4444"
+                    stroke="#ffffff"
+                    strokeWidth={1 / viewport.zoom}
+                    transform={`rotate(${90 - angle})`}
+                  />
+                </G>
+              );
+            })()}
+
           </G>
+
+          {/* ── Rover-to-Plan distance indicator ── */}
+          {hasRealTelemetry && filtered.length > 0 && (() => {
+            let nearestDist = Infinity;
+            let nearestPt = null;
+            const realN = roverN;
+            const realE = roverE;
+            for (const line of filtered) {
+              const d1 = Math.hypot(line.from.x - realN, line.from.y - realE);
+              const d2 = Math.hypot(line.to.x - realN, line.to.y - realE);
+              if (d1 < nearestDist) { nearestDist = d1; nearestPt = line.from; }
+              if (d2 < nearestDist) { nearestDist = d2; nearestPt = line.to; }
+            }
+            if (nearestPt && nearestDist < 100) {
+              const planScreenX = nearestPt.y * viewport.zoom + viewport.panX;
+              const planScreenY = -nearestPt.x * viewport.zoom + viewport.panY;
+              let rotatedPlanX = planScreenX;
+              let rotatedPlanY = planScreenY;
+              if (rotation !== 0 && layoutSize.width > 0 && layoutSize.height > 0) {
+                const rotated = rotatePoint(planScreenX, planScreenY, layoutSize.width / 2, layoutSize.height / 2, rotation);
+                rotatedPlanX = rotated.x;
+                rotatedPlanY = rotated.y;
+              }
+              const rx = roverScreenX;
+              const ry = roverScreenY;
+              const midX = (rx + rotatedPlanX) / 2;
+              const midY = (ry + rotatedPlanY) / 2;
+              const altSuffix = telemetryPosAlt != null ? ` (Alt: ${telemetryPosAlt.toFixed(1)}m)` : '';
+              return (
+                <G key="rover-to-plan-distance">
+                  <Line
+                    x1={rx}
+                    y1={ry}
+                    x2={rotatedPlanX}
+                    y2={rotatedPlanY}
+                    stroke="#f59e0b"
+                    strokeWidth={1.5}
+                    strokeDasharray="4 3"
+                  />
+                  <SvgText
+                    x={midX}
+                    y={midY - 8}
+                    fill="#ffffff"
+                    stroke="#ffffff"
+                    strokeWidth={3}
+                    fontSize={11}
+                    fontWeight="800"
+                    textAnchor="middle"
+                  >
+                    {`${nearestDist.toFixed(2)}m${altSuffix}`}
+                  </SvgText>
+                  <SvgText
+                    x={midX}
+                    y={midY - 8}
+                    fill="#f59e0b"
+                    fontSize={11}
+                    fontWeight="800"
+                    textAnchor="middle"
+                  >
+                    {`${nearestDist.toFixed(2)}m${altSuffix}`}
+                  </SvgText>
+                </G>
+              );
+            }
+            return null;
+          })()}
+
+          {/* ── Aligned Reference Points with GPS labels ── */}
+          {alignedRefPoints?.map((pt, i) => {
+            const rawSX = pt.dxf_y * viewport.zoom + viewport.panX;
+            const rawSY = -pt.dxf_x * viewport.zoom + viewport.panY;
+            let sx = rawSX;
+            let sy = rawSY;
+            if (rotation !== 0 && layoutSize.width > 0 && layoutSize.height > 0) {
+              const rotated = rotatePoint(rawSX, rawSY, layoutSize.width / 2, layoutSize.height / 2, rotation);
+              sx = rotated.x;
+              sy = rotated.y;
+            }
+            return (
+              <G key={`arp-${i}`}>
+                <Circle
+                  cx={sx}
+                  cy={sy}
+                  r={8}
+                  fill="none"
+                  stroke="#10b981"
+                  strokeWidth={2}
+                  strokeDasharray="3 2"
+                />
+                <SvgText
+                  x={sx + 12}
+                  y={sy - 10}
+                  fontSize={10}
+                  fill="#ffffff"
+                  stroke="#ffffff"
+                  strokeWidth={3}
+                  fontWeight="700"
+                >
+                  {`${pt.lat.toFixed(6)}, ${pt.lon.toFixed(6)}`}
+                </SvgText>
+                <SvgText
+                  x={sx + 12}
+                  y={sy - 10}
+                  fontSize={10}
+                  fill="#10b981"
+                  fontWeight="700"
+                >
+                  {`${pt.lat.toFixed(6)}, ${pt.lon.toFixed(6)}`}
+                </SvgText>
+              </G>
+            );
+          })}
 
           {/* ── Rover icon (top-down car shape) ── */}
           {hasRover && layoutSize.width > 0 && (() => {
