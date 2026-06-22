@@ -5646,10 +5646,6 @@ function FieldsPage({
   onInvalidateWorkflow,
   extensionsEnabled = false,
   setExtensionsEnabled,
-  extPre = "0.5",
-  setExtPre,
-  extAft = "0.5",
-  setExtAft,
   alignedRefPoints = [],
   setAlignedRefPoints,
   mapViewEnabled = false,
@@ -6188,25 +6184,22 @@ function FieldsPage({
 
           Alert.alert("Success", "Alignment applied. Mission is ready to be loaded!");
         } else {
-          Alert.alert("Success", "Alignment applied, but no mission was staged.");
-        }
-        } else {
-        setMissionSummary(null);
-        setVerifiedAlignmentRequest({ ...payload });
-        setAlignmentResult({
-          method: data.method ?? null,
-          scale: coerceFiniteNumber(data.scale),
-          rotation_deg: coerceFiniteNumber(data.rotation_deg),
-          offset_n: coerceFiniteNumber(data.offset_n),
-          offset_e: coerceFiniteNumber(data.offset_e),
-          origin_gps: data.origin_gps ?? null,
-          rmse_m: coerceFiniteNumber(data.rmse_m),
-          sample_coords: data.sample_coords ?? null,
-          residuals: data.residuals ?? null,
-          warnings: data.warnings ?? null,
-        });
-        onWorkflowStep?.("alignment", "verified");
-        Alert.alert("Success", "Alignment verified.");
+          setMissionSummary(null);
+          setVerifiedAlignmentRequest({ ...payload });
+          setAlignmentResult({
+            method: data.method ?? null,
+            scale: coerceFiniteNumber(data.scale),
+            rotation_deg: coerceFiniteNumber(data.rotation_deg),
+            offset_n: coerceFiniteNumber(data.offset_n),
+            offset_e: coerceFiniteNumber(data.offset_e),
+            origin_gps: data.origin_gps ?? null,
+            rmse_m: coerceFiniteNumber(data.rmse_m),
+            sample_coords: data.sample_coords ?? null,
+            residuals: data.residuals ?? null,
+            warnings: data.warnings ?? null,
+          });
+          onWorkflowStep?.("alignment", "verified");
+          Alert.alert("Success", "Alignment verified.");
         }
         // Save the aligned ref points so they continue to render as green markers with GPS labels
         if (setAlignedRefPoints) {
@@ -8860,7 +8853,7 @@ function SwoziPage({
     loadSprayParams();
   }, [loadSprayParams]);
 
-  // --- Spray Params State ---
+  // --- v2 spray params state (used by fetchSprayParams / handleSaveParams) ---
   type SprayParam = {
     name: string;
     type: string;
@@ -8871,7 +8864,6 @@ function SwoziPage({
     min?: number;
     max?: number;
   };
-  const [sprayParams, setSprayParams] = useState<SprayParam[]>([]);
   const [paramEdits, setParamEdits] = useState<Record<string, string>>({});
   const [paramsLoading, setParamsLoading] = useState(false);
   const [paramsError, setParamsError] = useState<string | null>(null);
