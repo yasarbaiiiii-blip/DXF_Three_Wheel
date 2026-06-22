@@ -61,6 +61,16 @@ import {
 import { readImportedPlanFile, normalizePlanLines } from "./src/utils/planImport";
 import type { ImportedPlan, PlanLine } from "./src/types/plan";
 import * as missionApi from "./src/api/missionApi";
+import {
+  buildMissionStartPayload,
+  classifyMissionError,
+  evaluateMissionStartGate,
+  getLoadedMissionId,
+  invalidateWorkflowFrom,
+  isProtectedMissionResident,
+  runningMissionMismatch,
+  verifyStagedLoadedMission,
+} from "./src/api/missionContract";
 import * as pathApi from "./src/api/pathApi";
 import { generateTemplateLines, ShapeType, ArcType } from "./src/utils/shapeTemplates";
 import { generateAlphabetLines, generateNumberLines, FontStyle, AlphabetType, NumberType } from "./src/utils/characterTemplates";
@@ -209,35 +219,9 @@ function parsePlanAndStageResponse(data: unknown): { plan: pathApi.PathPlanRespo
   return { plan, missionId: missionId.trim() };
 }
 
-function verifyLoadedPathInspection(
-  loaded: missionApi.LoadedPathResponse,
-  expectedMissionId: string
-): boolean {
-  if (!loaded.loaded || loaded.num_waypoints <= 0) return false;
-  const expected = expectedMissionId.trim();
-  if (!expected) return false;
-
-  const reportedMissionId = typeof loaded.mission_id === "string" ? loaded.mission_id.trim() : "";
-  const reportedName = typeof loaded.name === "string" ? loaded.name.trim() : "";
-  if (!reportedMissionId && !reportedName) return false;
-
-  return reportedMissionId === expected || reportedName === expected;
-}
-
 function formatSprayFlagSample(loaded: missionApi.LoadedPathResponse): string {
   if (!loaded.has_spray_flags) return "n/a";
   return `mark ${loaded.num_mark} / transit ${loaded.num_transit}`;
-}
-
-function getLoadedMissionId(loaded: missionApi.LoadedPathResponse | null): string | null {
-  if (!loaded?.loaded) return null;
-  if (typeof loaded.mission_id === "string" && loaded.mission_id.trim() !== "") {
-    return loaded.mission_id.trim();
-  }
-  if (typeof loaded.name === "string" && loaded.name.trim() !== "") {
-    return loaded.name.trim();
-  }
-  return null;
 }
 
 type StagedStartGate = {
@@ -248,39 +232,15 @@ type StagedStartGate = {
 
 function evaluateStagedStartGate(
   stagedWorkflow: StagedWorkflowState,
-  loadedPathInspection: missionApi.LoadedPathResponse | null
+  loadedPathInspection: missionApi.LoadedPathResponse | null,
+  stagedMissionId: string | null
 ): StagedStartGate {
-  const isStagedWorkflow = stagedWorkflow.staged === "verified";
-  if (!isStagedWorkflow) {
-    return { isStagedWorkflow: false, allowed: true, message: null };
-  }
-
-  if (stagedWorkflow.loaded !== "verified") {
-    return {
-      isStagedWorkflow: true,
-      allowed: false,
-      message: "Load and verify the staged mission on the controller before starting.",
-    };
-  }
-
-  const missionId = getLoadedMissionId(loadedPathInspection);
-  if (!missionId) {
-    return {
-      isStagedWorkflow: true,
-      allowed: false,
-      message: "Staged mission ID is missing from loaded-path verification.",
-    };
-  }
-
-  if (!loadedPathInspection?.loaded || !verifyLoadedPathInspection(loadedPathInspection, missionId)) {
-    return {
-      isStagedWorkflow: true,
-      allowed: false,
-      message: "Loaded controller path does not match the staged mission.",
-    };
-  }
-
-  return { isStagedWorkflow: true, allowed: true, message: null };
+  return evaluateMissionStartGate({
+    stagedVerified: stagedWorkflow.staged === "verified",
+    loadedVerified: stagedWorkflow.loaded === "verified",
+    stagedMissionId,
+    loaded: loadedPathInspection,
+  });
 }
 
 function isPrimaryEditableLine(line: PlanLine) {
@@ -654,6 +614,11 @@ export default function App() {
 
   const [autoOrigin, setAutoOrigin] = useState(false);
   const [originShift, setOriginShift] = useState<{ offsetN: number; offsetE: number } | null>(null);
+  const protectedMissionResident = isProtectedMissionResident(loadedPathInspection);
+
+  useEffect(() => {
+    if (protectedMissionResident && autoOrigin) setAutoOrigin(false);
+  }, [autoOrigin, protectedMissionResident]);
 
   useEffect(() => {
     if (autoOrigin) {
@@ -824,15 +789,7 @@ export default function App() {
   }, []);
 
   const invalidateStagedWorkflowFrom = useCallback((step: "alignment" | "spray" | "staged" | "loaded") => {
-    setStagedWorkflow((prev) => {
-      const next = { ...prev };
-      if (step === "alignment") next.alignment = "pending";
-      if (step === "alignment" || step === "spray") next.spray = "pending";
-      if (step === "alignment" || step === "spray" || step === "staged") next.staged = "pending";
-      next.loaded = "pending";
-      next.started = "pending";
-      return next;
-    });
+    setStagedWorkflow((prev) => invalidateWorkflowFrom(prev, step));
 
     if (step === "alignment") {
       setAlignmentResult(null);
@@ -849,6 +806,30 @@ export default function App() {
     setLoadedPathInspection(null);
     setMissionLoaded(false);
   }, []);
+
+  const reconcileLoadedMission = useCallback((
+    loaded: missionApi.LoadedPathResponse,
+    status?: missionApi.MissionStatus
+  ) => {
+    const inspection = {
+      ...loaded,
+      running_mission_id: status?.running_mission_id ?? loaded.running_mission_id ?? null,
+    };
+    setLoadedPathInspection(inspection);
+
+    if (stagedWorkflow.staged === "verified" && stagedMissionId) {
+      const verification = verifyStagedLoadedMission(inspection, stagedMissionId);
+      setMissionLoaded(verification.verified);
+      setStagedWorkflow((prev) => ({
+        ...prev,
+        loaded: verification.verified ? "verified" : "pending",
+        started: verification.verified ? prev.started : "pending",
+      }));
+      return;
+    }
+
+    setMissionLoaded(Boolean(inspection.loaded && !isProtectedMissionResident(inspection)));
+  }, [stagedMissionId, stagedWorkflow.staged]);
 
   useEffect(() => {
     if (previousSelectedPathRef.current === selectedPathName) return;
@@ -908,6 +889,10 @@ export default function App() {
 
   const deleteSelectedLine = () => {
     if (!selectedLineId) return;
+    if (protectedMissionResident) {
+      Alert.alert("Mission conflict", "Editing the plan is blocked while a protected surveyed mission is resident.");
+      return;
+    }
     logAction("DELETE_LINE", { selectedLineId });
     setLines((prev) => {
       const next = prev.filter((line) => line.id !== selectedLineId);
@@ -920,6 +905,10 @@ export default function App() {
   };
 
   const deleteEntirePlan = () => {
+    if (protectedMissionResident) {
+      Alert.alert("Mission conflict", "Deleting the plan is blocked while a protected surveyed mission is resident.");
+      return;
+    }
     logAction("DELETE_PLAN");
     setLines([]);
     setSelectedLineId(null);
@@ -1052,6 +1041,7 @@ export default function App() {
             if (prev && prev.mission_state === next.mission_state) return prev;
             return next;
           });
+          void refreshMissionIdentity();
         }
       });
 
@@ -1488,6 +1478,12 @@ export default function App() {
 
   const parseDxfPlan = async () => {
     if (!apiBaseUrl || !importedPlan) return;
+    if (protectedMissionResident) {
+      const message = "Reparse is blocked while a protected surveyed mission is resident.";
+      Alert.alert("Mission conflict", message);
+      showToast("Mission conflict", message, "error");
+      return;
+    }
     setMissionActionBusy(true);
     try {
       showToast("Parse", "Sending modifications to backend...", "info");
@@ -1559,7 +1555,7 @@ export default function App() {
     setTelemetryLoading(true);
     setTelemetryError("");
     try {
-      const [statusRes, healthRes, telemetryRes] = await Promise.all([
+      const [statusRes, healthRes, telemetryRes, loadedRes] = await Promise.all([
         fetchMissionStatus(apiBaseUrl),
         fetchJson<{
           ros_node: boolean;
@@ -1599,8 +1595,15 @@ export default function App() {
         }>(`${apiBaseUrl}/api/telemetry/latest`).catch((err) => {
           console.log("telemetry/latest failed:", err);
           return null;
-        })
+        }),
+        fetchJson<missionApi.LoadedPathResponse>(`${apiBaseUrl}/api/mission/loaded-path`).catch((err) => {
+          console.log("loaded-path failed:", err);
+          return null;
+        }),
       ]);
+
+      if (loadedRes) reconcileLoadedMission(loadedRes, statusRes);
+      setMissionRunning(statusRes.state === "running");
 
       setTelemetrySnapshot({
         rpp_state: telemetryRes ? telemetryRes.rpp_state : statusRes.rpp_state,
@@ -1648,6 +1651,27 @@ export default function App() {
     }
   }
 
+  async function refreshMissionIdentity() {
+    if (!apiBaseUrl) return;
+    try {
+      const [status, loaded] = await Promise.all([
+        fetchMissionStatus(apiBaseUrl),
+        fetchJson<missionApi.LoadedPathResponse>(`${apiBaseUrl}/api/mission/loaded-path`),
+      ]);
+      reconcileLoadedMission(loaded, status);
+      setMissionRunning(status.state === "running");
+    } catch {
+      // Telemetry errors are presented by the existing status refresh path.
+    }
+  }
+
+  useEffect(() => {
+    if (!apiBaseUrl || wsStatus !== "connected") return;
+    void refreshMissionIdentity();
+    const timer = setInterval(() => void refreshMissionIdentity(), 3000);
+    return () => clearInterval(timer);
+  }, [apiBaseUrl, reconcileLoadedMission, wsStatus]);
+
   async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 2000);
@@ -1694,6 +1718,11 @@ export default function App() {
     return `${fallbackPrefix} (status ${res.status})`;
   }
 
+  async function parseMissionResponseError(res: Response, fallbackPrefix: string) {
+    const detail = await parseFetchError(res, fallbackPrefix);
+    return classifyMissionError(res.status, detail);
+  }
+
   async function loadMissionOnBackend(requestedStagedMissionId?: string) {
     const requestedMissionId = requestedStagedMissionId?.trim() || stagedMissionId?.trim() || "";
     const isStagedLoad = requestedMissionId !== "";
@@ -1718,6 +1747,11 @@ export default function App() {
         setWorkflowStep("loaded", "failed");
         return;
       }
+    } else if (protectedMissionResident) {
+      const message = "A protected surveyed mission is resident. Legacy filename load is blocked.";
+      Alert.alert("Mission conflict", message);
+      showToast("Mission conflict", message, "error");
+      return;
     } else if (!apiBaseUrl || !importedPlan || lines.length === 0) {
       return;
     }
@@ -1731,8 +1765,7 @@ export default function App() {
         const missionId = requestedMissionId;
         const loadRes = await missionApi.loadMissionToController(apiBaseUrl, { mission_id: missionId });
         if (!loadRes.ok) {
-          const errMsg = await parseFetchError(loadRes, "Load to controller failed");
-          throw new Error(errMsg);
+          throw await parseMissionResponseError(loadRes, "Load to controller failed");
         }
 
         const loadedRes = await missionApi.getLoadedPath(apiBaseUrl);
@@ -1742,12 +1775,13 @@ export default function App() {
         }
 
         const loadedData = (await loadedRes.json()) as missionApi.LoadedPathResponse;
-        setLoadedPathInspection(loadedData);
-
-        if (!verifyLoadedPathInspection(loadedData, missionId)) {
-          throw new Error("Loaded path verification failed: controller path does not match staged mission.");
+        const verification = verifyStagedLoadedMission(loadedData, missionId);
+        if (!verification.verified) {
+          setLoadedPathInspection(loadedData);
+          throw classifyMissionError(409, verification.message ?? "Loaded staged mission verification failed.");
         }
 
+        setLoadedPathInspection(loadedData);
         setMissionLoaded(true);
         setWorkflowStep("loaded", "verified");
         setMissionRunning(false);
@@ -1764,8 +1798,7 @@ export default function App() {
       });
 
       if (!res.ok) {
-        const errMsg = await parseFetchError(res, "Load failed");
-        throw new Error(errMsg);
+        throw await parseMissionResponseError(res, "Load failed");
       }
 
       setLoadedPathInspection(null);
@@ -1777,7 +1810,10 @@ export default function App() {
       setPage("home");
       showToast("File loaded", "Load succeeded. Start and Export are now available.", "success");
     } catch (error) {
-      if (isStagedLoad) {
+      const missionError = error && typeof error === "object" && "kind" in error
+        ? error as ReturnType<typeof classifyMissionError>
+        : null;
+      if (isStagedLoad && !missionError) {
         setLoadedPathInspection(null);
       }
       setWorkflowStep("loaded", "failed");
@@ -1786,8 +1822,11 @@ export default function App() {
         stagedMissionId: requestedMissionId || null,
         error: error instanceof Error ? error.message : String(error),
       });
-      Alert.alert("Load failed", error instanceof Error ? error.message : "Could not load the mission.");
-      showToast("Load failed", error instanceof Error ? error.message : "Could not load the mission.", "error");
+      const message = missionError?.message ?? (error instanceof Error ? error.message : "Could not load the mission.");
+      const title = missionError?.title ?? "Load failed";
+      Alert.alert(title, message);
+      showToast(title, message, "error");
+      if (missionError?.status === 409) void refreshMissionIdentity();
     } finally {
       setMissionActionBusy(false);
     }
@@ -1798,7 +1837,7 @@ export default function App() {
       return;
     }
 
-    const startGate = evaluateStagedStartGate(stagedWorkflow, loadedPathInspection);
+    const startGate = evaluateStagedStartGate(stagedWorkflow, loadedPathInspection, stagedMissionId);
     if (!startGate.allowed) {
       setWorkflowStep("started", "failed");
       Alert.alert("Cannot Start", startGate.message ?? "Staged mission is not ready to start.");
@@ -1819,19 +1858,15 @@ export default function App() {
     setMissionActionBusy(true);
     try {
       showToast(missionRunning ? "Stop" : "Start", missionRunning ? "Stopping mission..." : "Starting mission...", "info");
-      const res = await missionApi.startMission(
-        apiBaseUrl,
-        isStagedStart
-          ? { auto_origin: autoOrigin }
-          : {
-              path_name: importedPlan.fileName,
-              mission_file: "",
-              auto_origin: autoOrigin,
-            }
-      );
+      const startPayload = buildMissionStartPayload({
+        stagedMissionId,
+        stagedVerified: isStagedStart,
+        fileName: importedPlan.fileName,
+        autoOrigin,
+      });
+      const res = await missionApi.startMission(apiBaseUrl, startPayload);
       if (!res.ok) {
-        const errMsg = await parseFetchError(res, "Start failed");
-        throw new Error(errMsg);
+        throw await parseMissionResponseError(res, "Start failed");
       }
       setMissionRunning(true);
       setWorkflowStep("started", "verified");
@@ -1853,13 +1888,19 @@ export default function App() {
       Alert.alert("Started", `${importedPlan.fileName} started on the rover.`);
       showToast("Mission running", `${importedPlan.fileName} is now active.`, "success");
     } catch (error) {
+      const missionError = error && typeof error === "object" && "kind" in error
+        ? error as ReturnType<typeof classifyMissionError>
+        : null;
       setWorkflowStep("started", "failed");
       logAction("START_FAILED", {
         fileName: importedPlan.fileName,
         error: error instanceof Error ? error.message : String(error),
       });
-      Alert.alert("Start failed", error instanceof Error ? error.message : "Could not start the mission.");
-      showToast("Start failed", error instanceof Error ? error.message : "Could not start the mission.", "error");
+      const message = missionError?.message ?? (error instanceof Error ? error.message : "Could not start the mission.");
+      const title = missionError?.title ?? "Start failed";
+      Alert.alert(title, message);
+      showToast(title, message, "error");
+      if (missionError?.status === 409) void refreshMissionIdentity();
     } finally {
       setMissionActionBusy(false);
     }
@@ -2150,6 +2191,12 @@ export default function App() {
       Alert.alert("No backend", "Connect to a backend before running a template.");
       return;
     }
+    if (protectedMissionResident) {
+      const message = "Template load is blocked while a protected surveyed mission is resident.";
+      Alert.alert("Mission conflict", message);
+      showToast("Mission conflict", message, "error");
+      return;
+    }
     const fileName = `${name.replace(/\s+/g, "_").toLowerCase()}_template.dxf`;
     logAction("LOAD_TEMPLATE_REQUEST", { apiBaseUrl, fileName });
     setMissionActionBusy(true);
@@ -2161,8 +2208,7 @@ export default function App() {
       });
 
       if (!res.ok) {
-        const errMsg = await parseFetchError(res, "Load failed");
-        throw new Error(errMsg);
+        throw await parseMissionResponseError(res, "Load failed");
       }
 
       setImportedPlan({
@@ -2180,12 +2226,18 @@ export default function App() {
       setPage("home");
       showToast("Template loaded", "Template path loaded successfully.", "success");
     } catch (error) {
+      const missionError = error && typeof error === "object" && "kind" in error
+        ? error as ReturnType<typeof classifyMissionError>
+        : null;
       logAction("LOAD_TEMPLATE_FAILED", {
         fileName,
         error: error instanceof Error ? error.message : String(error),
       });
-      Alert.alert("Load failed", error instanceof Error ? error.message : "Could not load template.");
-      showToast("Load failed", error instanceof Error ? error.message : "Could not load.", "error");
+      const message = missionError?.message ?? (error instanceof Error ? error.message : "Could not load template.");
+      const title = missionError?.title ?? "Load failed";
+      Alert.alert(title, message);
+      showToast(title, message, "error");
+      if (missionError?.status === 409) void refreshMissionIdentity();
     } finally {
       setMissionActionBusy(false);
     }
@@ -2430,6 +2482,7 @@ export default function App() {
                     if (target) previewSelectedPath(target);
                   }}
                   stagedWorkflow={stagedWorkflow}
+                  stagedMissionId={stagedMissionId}
                   loadedPathInspection={loadedPathInspection}
                   onInvalidateWorkflow={invalidateStagedWorkflowFrom}
                 />
@@ -2455,6 +2508,10 @@ export default function App() {
                   onNav={(p) => setPage(p)}
                   onSelectLine={setSelectedLineId}
                   onGenerateTemplate={(name, generatedLines) => {
+                    if (protectedMissionResident) {
+                      Alert.alert("Mission conflict", "Generating a new template is blocked while a protected surveyed mission is resident.");
+                      return;
+                    }
                     const safeGeneratedLines = sanitizePlanLines(generatedLines);
                     setImportedPlan({ fileName: `${name}.dxf`, uri: "", fileType: "dxf", source: "generated" });
                     setLines(safeGeneratedLines);
@@ -2688,6 +2745,7 @@ function HomeView({
   selectedPathName,
   onRefreshPaths,
   stagedWorkflow,
+  stagedMissionId,
   loadedPathInspection,
   onInvalidateWorkflow,
 }: {
@@ -2748,14 +2806,20 @@ function HomeView({
   selectedPathName?: string | null;
   onRefreshPaths?: () => void;
   stagedWorkflow: StagedWorkflowState;
+  stagedMissionId: string | null;
   loadedPathInspection: missionApi.LoadedPathResponse | null;
   onInvalidateWorkflow?: (step: "alignment" | "spray" | "staged" | "loaded") => void;
 }) {
   const stagedStartGate = useMemo(
-    () => evaluateStagedStartGate(stagedWorkflow, loadedPathInspection),
-    [stagedWorkflow, loadedPathInspection]
+    () => evaluateStagedStartGate(stagedWorkflow, loadedPathInspection, stagedMissionId),
+    [stagedWorkflow, loadedPathInspection, stagedMissionId]
   );
-  const startBlocked = stagedStartGate.isStagedWorkflow && !stagedStartGate.allowed;
+  const startBlocked = !stagedStartGate.allowed;
+  const protectedResident = isProtectedMissionResident(loadedPathInspection);
+  const runningMismatch = runningMissionMismatch(
+    getLoadedMissionId(loadedPathInspection),
+    loadedPathInspection?.running_mission_id
+  );
   const selectedLine = lines.find((line) => line.id === selectedLineId) ?? null;
   const hasPlan = lines.length > 0;
   const hasSelectedLine = Boolean(selectedLine);
@@ -3326,13 +3390,17 @@ function HomeView({
                       </Pressable>
 
                       <Pressable
-                        onPress={() => setAutoOrigin(!autoOrigin)}
+                        onPress={() => {
+                          if (!protectedResident) setAutoOrigin(!autoOrigin);
+                        }}
+                        disabled={protectedResident}
                         style={{
                           flex: 1,
                           flexDirection: "row",
                           alignItems: "center",
                           gap: 6,
                           paddingVertical: 4,
+                          opacity: protectedResident ? 0.45 : 1,
                         }}
                       >
                         <View style={{
@@ -3379,6 +3447,13 @@ function HomeView({
                     {startBlocked && stagedStartGate.message ? (
                       <Text style={{ color: "#fbbf24", fontSize: 10, lineHeight: 14, marginBottom: 8 }}>
                         {stagedStartGate.message}
+                      </Text>
+                    ) : null}
+
+                    {loadedPathInspection?.loaded ? (
+                      <Text style={{ color: runningMismatch ? "#f87171" : "#94a3b8", fontSize: 9.5, lineHeight: 14, marginBottom: 8 }}>
+                        Staged: {stagedMissionId ?? "n/a"} | Loaded: {getLoadedMissionId(loadedPathInspection) ?? "n/a"} | Running: {loadedPathInspection.running_mission_id ?? "n/a"}{"\n"}
+                        Placement: {loadedPathInspection.placement_mode ?? "unknown"} | {loadedPathInspection.protected ? "protected" : "unprotected"}{runningMismatch ? ` | ${runningMismatch}` : ""}
                       </Text>
                     ) : null}
 
@@ -5524,6 +5599,7 @@ function FieldsPage({
   const [extModalOpen, setExtModalOpen] = useState(false);
   const [extPre, setExtPre] = useState("0.5");
   const [extAft, setExtAft] = useState("0.5");
+  const [extPerLine, setExtPerLine] = useState(false);
   const [isExtSetting, setIsExtSetting] = useState(false);
 
   const [isPathPlanningMode, setIsPathPlanningMode] = useState(false);
@@ -5542,6 +5618,16 @@ function FieldsPage({
   const canLoadStagedMission =
     !!stagedMissionId &&
     stagedWorkflow.staged === "verified";
+  const protectedResident = isProtectedMissionResident(loadedPathInspection);
+  const legacyLoadBlocked = protectedResident && !canLoadStagedMission;
+  const blockProtectedWorkflowMutation = (action: string) => {
+    if (!protectedResident) return false;
+    Alert.alert(
+      "Mission conflict",
+      `${action} is blocked while protected mission ${getLoadedMissionId(loadedPathInspection) ?? "<unknown>"} is resident.`
+    );
+    return true;
+  };
   const primaryReorderableLines = useMemo(
     () => lines.filter(isPrimaryEditableLine),
     [lines]
@@ -5565,6 +5651,7 @@ function FieldsPage({
   const targetPathForExtensions = selectedPathName || importedPlan?.fileName;
 
   const handleSetExtension = async () => {
+    if (blockProtectedWorkflowMutation("Changing extensions")) return;
     if (!targetPathForExtensions || !apiBaseUrl) {
       Alert.alert("Error", "No path selected to save extensions to.");
       return;
@@ -5575,6 +5662,7 @@ function FieldsPage({
         enabled: true,
         pre_extension_m: parseFloat(extPre) || 0,
         aft_extension_m: parseFloat(extAft) || 0,
+        per_line: extPerLine,
       });
       if (res.ok) {
         onInvalidateWorkflow("spray");
@@ -5593,6 +5681,7 @@ function FieldsPage({
   };
 
   const handleDisableExtension = async () => {
+    if (blockProtectedWorkflowMutation("Changing extensions")) return;
     if (!targetPathForExtensions || !apiBaseUrl) {
       Alert.alert("Error", "No path selected to disable extensions.");
       return;
@@ -5617,6 +5706,7 @@ function FieldsPage({
   };
 
   const handleSetSpray = async () => {
+    if (blockProtectedWorkflowMutation("Changing spray overrides")) return;
     const targetPath = selectedPathName || importedPlan?.fileName;
     if (!apiBaseUrl || !targetPath) {
       Alert.alert("Error", "No path selected to save overrides to.");
@@ -5803,6 +5893,7 @@ function FieldsPage({
   };
 
   const handleSetOrder = async () => {
+    if (blockProtectedWorkflowMutation("Reordering the path")) return;
     const targetPath = selectedPathName || importedPlan?.fileName;
     if (!apiBaseUrl || !targetPath) {
       Alert.alert("Error", "No path selected to reorder.");
@@ -5842,6 +5933,7 @@ function FieldsPage({
   };
 
   const handleDeletePath = async (filename: string) => {
+    if (blockProtectedWorkflowMutation("Deleting a path")) return;
     Alert.alert(
       "Delete Path",
       `Are you sure you want to delete ${filename}?`,
@@ -5901,6 +5993,7 @@ function FieldsPage({
   };
 
   const handleFixAlignment = async () => {
+    if (blockProtectedWorkflowMutation("Changing GPS alignment")) return;
     if (!selectedPathName || !apiBaseUrl || refPoints.length === 0) {
       onWorkflowStep?.("alignment", "failed");
       setVerifiedAlignmentRequest(null);
@@ -5986,6 +6079,7 @@ function FieldsPage({
   };
 
   const handlePickFile = async () => {
+    if (blockProtectedWorkflowMutation("Uploading a new path")) return;
     try {
       const result = await DocumentPicker.getDocumentAsync({
         type: ["*/*"],
@@ -6006,6 +6100,7 @@ function FieldsPage({
   };
 
   const handleParseFile = async () => {
+    if (blockProtectedWorkflowMutation("Parsing a new path")) return;
     if (!pickedFile || !apiBaseUrl) return;
     setIsUploading(true);
     try {
@@ -6145,6 +6240,7 @@ function FieldsPage({
             </ScrollView>
             <Pressable
               onPress={() => {
+                if (blockProtectedWorkflowMutation("Reordering the path")) return;
                 if (isReordering) {
                   handleSetOrder();
                 } else {
@@ -6153,11 +6249,12 @@ function FieldsPage({
                   setPathFilter("All");
                 }
               }}
+              disabled={protectedResident || isSavingOrder}
               style={{
                 paddingHorizontal: 16,
                 paddingVertical: 10,
                 borderRadius: 8,
-                backgroundColor: isReordering ? "#10b981" : "#8b5cf6",
+                backgroundColor: protectedResident ? "#94a3b8" : isReordering ? "#10b981" : "#8b5cf6",
               }}
             >
               <Text style={{ color: "#fff", fontSize: 12, fontWeight: "800" }}>
@@ -6449,8 +6546,22 @@ function FieldsPage({
                   <View style={{ marginTop: 4, padding: 12, backgroundColor: "#f5f3ff", borderRadius: 8, borderWidth: 1, borderColor: "#ddd6fe", gap: 6 }}>
                     <Text style={{ color: "#5b21b6", fontWeight: "800", fontSize: 13 }}>Controller Load Confirmed</Text>
                     <Text style={{ color: "#6d28d9", fontSize: 11 }} numberOfLines={2}>
-                      Mission ID: {stagedMissionId}
+                      Staged ID: {stagedMissionId}
                     </Text>
+                    <Text style={{ color: "#6d28d9", fontSize: 11 }} numberOfLines={2}>
+                      Loaded ID: {getLoadedMissionId(loadedPathInspection) ?? "n/a"}
+                    </Text>
+                    <Text style={{ color: "#6d28d9", fontSize: 11 }} numberOfLines={2}>
+                      Running ID: {loadedPathInspection.running_mission_id ?? "n/a"}
+                    </Text>
+                    <Text style={{ color: "#6d28d9", fontSize: 11 }}>
+                      Placement: {loadedPathInspection.placement_mode ?? "unknown"} | {loadedPathInspection.is_staged ? "staged" : "not staged"} | {loadedPathInspection.protected ? "protected" : "unprotected"}
+                    </Text>
+                    {runningMissionMismatch(getLoadedMissionId(loadedPathInspection), loadedPathInspection.running_mission_id) ? (
+                      <Text style={{ color: "#b91c1c", fontSize: 11, fontWeight: "800" }}>
+                        {runningMissionMismatch(getLoadedMissionId(loadedPathInspection), loadedPathInspection.running_mission_id)}
+                      </Text>
+                    ) : null}
                     <Text style={{ color: "#6d28d9", fontSize: 11 }} numberOfLines={2}>
                       Path: {selectedPathName || loadedPathInspection.name || "n/a"}
                     </Text>
@@ -6553,7 +6664,21 @@ function FieldsPage({
                 </Pressable>
                 
                 <Pressable
-                  onPress={() => setExtModalOpen(true)}
+                  onPress={async () => {
+                    // Load the saved config so the toggles reflect backend state
+                    // (per_line is sticky server-side; show its real value).
+                    if (apiBaseUrl && targetPathForExtensions) {
+                      try {
+                        const cfg = await pathApi.getExtensions(apiBaseUrl, targetPathForExtensions);
+                        setExtPre(String(cfg.pre_extension_m ?? 0.5));
+                        setExtAft(String(cfg.aft_extension_m ?? 0.5));
+                        setExtPerLine(!!cfg.per_line);
+                      } catch {
+                        // offline / not saved yet — keep current modal values
+                      }
+                    }
+                    setExtModalOpen(true);
+                  }}
                   style={{
                     height: 36,
                     paddingHorizontal: 12,
@@ -6625,6 +6750,22 @@ function FieldsPage({
                   keyboardType="numeric"
                 />
               </View>
+              <View style={{ marginBottom: 20, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+                <View style={{ flex: 1, paddingRight: 10 }}>
+                  <Text style={{ color: "#0f172a", fontSize: 13, fontWeight: "800" }}>Per-line extensions</Text>
+                  <Text style={{ color: "#64748b", fontSize: 11, marginTop: 2 }}>
+                    Each line gets its own run-up/run-out (square sides too)
+                  </Text>
+                </View>
+                <Switch
+                  value={extPerLine}
+                  onValueChange={(value) => {
+                    onInvalidateWorkflow("spray");
+                    setExtPerLine(value);
+                  }}
+                  trackColor={{ false: "#cbd5e1", true: "#8b5cf6" }}
+                />
+              </View>
               <View style={{ flexDirection: "row", gap: 10 }}>
                 <Pressable
                   onPress={() => setExtModalOpen(false)}
@@ -6654,12 +6795,13 @@ function FieldsPage({
           {!pickedFile ? (
             <Pressable
               onPress={handlePickFile}
+              disabled={protectedResident}
               style={{
                 height: 44,
                 borderRadius: 12,
                 alignItems: "center",
                 justifyContent: "center",
-                backgroundColor: "#e2e8f0",
+                backgroundColor: protectedResident ? "#cbd5e1" : "#e2e8f0",
                 borderWidth: 1,
                 borderColor: "#cbd5e1",
               }}
@@ -6677,14 +6819,14 @@ function FieldsPage({
               </View>
               <Pressable
                 onPress={handleParseFile}
-                disabled={isUploading}
+                disabled={isUploading || protectedResident}
                 style={{
                   height: 40,
                   paddingHorizontal: 16,
                   borderRadius: 8,
                   alignItems: "center",
                   justifyContent: "center",
-                  backgroundColor: isUploading ? "#94a3b8" : "#0f988f",
+                  backgroundColor: isUploading || protectedResident ? "#94a3b8" : "#0f988f",
                 }}
               >
                 <Text style={{ color: "#fff", fontSize: 13, fontWeight: "800" }}>
@@ -6877,6 +7019,7 @@ function FieldsPage({
                   <Pressable
                     key={path.name}
                     onPress={() => {
+                      if (blockProtectedWorkflowMutation("Selecting another path")) return;
                       setMissionSummary(null);
                       setAlignmentResult(null);
                       setVerifiedAlignmentRequest(null);
@@ -6921,18 +7064,18 @@ function FieldsPage({
           {selectedPathName && !missionSummary ? (
             <Pressable
               onPress={() => onLoadSelectedPath(canLoadStagedMission ? stagedMissionId ?? undefined : undefined)}
-              disabled={missionActionBusy}
+              disabled={missionActionBusy || legacyLoadBlocked}
               style={{
                 marginTop: 10,
                 height: 44,
                 borderRadius: 12,
                 alignItems: "center",
                 justifyContent: "center",
-                backgroundColor: missionActionBusy ? "#94a3b8" : "#2563eb",
+                backgroundColor: missionActionBusy || legacyLoadBlocked ? "#94a3b8" : "#2563eb",
               }}
             >
               <Text style={{ color: "#fff", fontSize: 14, fontWeight: "800" }}>
-                {missionActionBusy ? "Loading..." : "Load Path"}
+                {missionActionBusy ? "Loading..." : legacyLoadBlocked ? "Protected Mission Loaded" : canLoadStagedMission ? "Load Staged Mission" : "Load Path"}
               </Text>
             </Pressable>
           ) : null}
@@ -8512,6 +8655,94 @@ function PlanPreview({
   );
 }
 
+type SprayParamPayloadValue = string | number | boolean;
+
+type SprayControllerParam = {
+  name: string;
+  type: string;
+  default: unknown;
+  current: unknown;
+  group?: string | null;
+  description?: string | null;
+  min?: number | null;
+  max?: number | null;
+};
+
+const sprayParamTableHeaderStyle = {
+  width: 120,
+  paddingHorizontal: 10,
+  paddingVertical: 10,
+  color: "#0f172a",
+  fontSize: 12,
+  fontWeight: "800",
+} as const;
+
+const sprayParamTableTextCellStyle = {
+  width: 120,
+  paddingHorizontal: 10,
+  paddingVertical: 10,
+  color: "#334155",
+  fontSize: 12,
+} as const;
+
+const sprayParamTableInputCellStyle = {
+  width: 120,
+  paddingHorizontal: 10,
+  paddingVertical: 6,
+  justifyContent: "center",
+} as const;
+
+function formatSprayParamValue(value: unknown) {
+  if (value === null || value === undefined) return "";
+  return String(value);
+}
+
+function sprayParamKind(param: SprayControllerParam) {
+  return String(param.type ?? "").trim().toLowerCase();
+}
+
+function isNumericSprayParam(param: SprayControllerParam) {
+  const kind = sprayParamKind(param);
+  return ["number", "float", "double", "integer", "int"].includes(kind);
+}
+
+function parseSprayParamInput(rawValue: string, param: SprayControllerParam): SprayParamPayloadValue {
+  const value = rawValue.trim();
+  const kind = sprayParamKind(param);
+
+  if (["boolean", "bool"].includes(kind)) {
+    const normalized = value.toLowerCase();
+    if (["true", "1", "yes", "on"].includes(normalized)) return true;
+    if (["false", "0", "no", "off"].includes(normalized)) return false;
+    throw new Error(`${param.name} must be true or false.`);
+  }
+
+  if (["integer", "int"].includes(kind)) {
+    if (!/^-?\d+$/.test(value)) throw new Error(`${param.name} must be an integer.`);
+    const parsed = Number.parseInt(value, 10);
+    validateSprayParamRange(parsed, param);
+    return parsed;
+  }
+
+  if (["number", "float", "double"].includes(kind)) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) throw new Error(`${param.name} must be a number.`);
+    validateSprayParamRange(parsed, param);
+    return parsed;
+  }
+
+  return rawValue;
+}
+
+function validateSprayParamRange(value: number, param: SprayControllerParam) {
+  if (typeof param.min === "number" && value < param.min) {
+    throw new Error(`${param.name} must be at least ${param.min}.`);
+  }
+  if (typeof param.max === "number" && value > param.max) {
+    throw new Error(`${param.name} must be at most ${param.max}.`);
+  }
+}
+
 function SwoziPage({
   delayA,
   delayB,
@@ -8536,28 +8767,72 @@ function SwoziPage({
   const [sprayDuration, setSprayDuration] = useState("2");
   const [sprayStatus, setSprayStatus] = useState(false);
   const [isTestActive, setIsTestActive] = useState(false);
+  const [sprayParams, setSprayParams] = useState<SprayControllerParam[]>([]);
+  const [editedSprayParams, setEditedSprayParams] = useState<Record<string, string>>({});
+  const [isLoadingSprayParams, setIsLoadingSprayParams] = useState(false);
+  const [isSavingSprayParams, setIsSavingSprayParams] = useState(false);
+  const [isSprayHoldActive, setIsSprayHoldActive] = useState(false);
+  const [isSprayHoldChanging, setIsSprayHoldChanging] = useState(false);
+
+  const sprayApiUrl = useCallback((path: string) => {
+    if (!apiBaseUrl) return "";
+    return `${apiBaseUrl.replace(/\/$/, "")}${path}`;
+  }, [apiBaseUrl]);
+
+  const loadSprayParams = useCallback(async () => {
+    if (!apiBaseUrl) {
+      setSprayParams([]);
+      setEditedSprayParams({});
+      return;
+    }
+    setIsLoadingSprayParams(true);
+    try {
+      const res = await fetch(sprayApiUrl("/api/spray/params"), {
+        method: "GET",
+        headers: { Accept: "application/json" },
+      });
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(errText || "Failed to load spray parameters.");
+      }
+      const data = await res.json();
+      const params = Array.isArray(data?.parameters) ? data.parameters : [];
+      setSprayParams(params);
+      setEditedSprayParams({});
+    } catch (err: any) {
+      Alert.alert("Error", err.message || "Failed to load spray parameters.");
+    } finally {
+      setIsLoadingSprayParams(false);
+    }
+  }, [apiBaseUrl, sprayApiUrl]);
+
+  useEffect(() => {
+    loadSprayParams();
+  }, [loadSprayParams]);
 
   useEffect(() => {
     if (!apiBaseUrl) return;
     const interval = setInterval(async () => {
       try {
-        const res = await fetch(`${apiBaseUrl}/api/spray/status`);
+        const res = await fetch(sprayApiUrl("/api/spray/status"));
         if (res.ok) {
           const data = await res.json();
-          setSprayStatus(data.spraying || data.manual_override || data.spray_active_desired);
+          const active = !!(data.spraying || data.manual_override || data.spray_active_desired);
+          setSprayStatus(active);
+          setIsSprayHoldActive(active);
         }
       } catch (err) {
         // ignore network errors
       }
     }, 2000);
     return () => clearInterval(interval);
-  }, [apiBaseUrl]);
+  }, [apiBaseUrl, sprayApiUrl]);
 
   const handleSprayToggle = async () => {
     if (!apiBaseUrl) return;
     const isTurningOn = !isTestActive;
     try {
-      await fetch(`${apiBaseUrl}/api/spray/test`, {
+      const res = await fetch(sprayApiUrl("/api/spray/test"), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -8565,6 +8840,11 @@ function SwoziPage({
           duration_s: isTurningOn ? Number(sprayDuration) || 2 : 0
         })
       });
+      if (!res.ok) {
+        const errText = await res.text();
+        Alert.alert("Error", errText || "Failed to run spray test.");
+        return;
+      }
       setIsTestActive(isTurningOn);
       if (isTurningOn) {
         // automatically reset button state after duration
@@ -8574,6 +8854,83 @@ function SwoziPage({
       console.log("Spray test failed", err);
     }
   };
+
+  const handleSprayParamEdit = (name: string, value: string, current: unknown) => {
+    setEditedSprayParams((prev) => {
+      const next = { ...prev };
+      if (value === formatSprayParamValue(current)) delete next[name];
+      else next[name] = value;
+      return next;
+    });
+  };
+
+  const handleSetSprayVariables = async () => {
+    if (!apiBaseUrl) return;
+    const editedEntries = Object.entries(editedSprayParams);
+    if (editedEntries.length === 0) return;
+
+    const paramsByName = new Map(sprayParams.map((param) => [param.name, param]));
+    const payloadParams: Record<string, SprayParamPayloadValue> = {};
+
+    try {
+      for (const [name, rawValue] of editedEntries) {
+        const param = paramsByName.get(name);
+        if (!param) continue;
+        payloadParams[name] = parseSprayParamInput(rawValue, param);
+      }
+    } catch (err: any) {
+      Alert.alert("Invalid Value", err.message || "Check the edited spray parameter values.");
+      return;
+    }
+
+    if (Object.keys(payloadParams).length === 0) return;
+
+    setIsSavingSprayParams(true);
+    try {
+      const res = await fetch(sprayApiUrl("/api/spray/params"), {
+        method: "PUT",
+        headers: { Accept: "application/json", "Content-Type": "application/json" },
+        body: JSON.stringify({ parameters: payloadParams }),
+      });
+      if (!res.ok) {
+        const errText = await res.text();
+        Alert.alert("Error", errText || "Failed to set spray variables.");
+        return;
+      }
+      Alert.alert("Success", "Spray variables updated.");
+      await loadSprayParams();
+    } catch (err: any) {
+      Alert.alert("Error", err.message || "Failed to connect to backend.");
+    } finally {
+      setIsSavingSprayParams(false);
+    }
+  };
+
+  const handleSprayHoldToggle = async () => {
+    if (!apiBaseUrl) return;
+    const nextHoldActive = !isSprayHoldActive;
+    setIsSprayHoldChanging(true);
+    try {
+      const res = await fetch(sprayApiUrl(nextHoldActive ? "/api/spray/on" : "/api/spray/off"), {
+        method: "POST",
+        headers: { Accept: "application/json" },
+      });
+      if (!res.ok) {
+        const errText = await res.text();
+        Alert.alert("Error", errText || `Failed to turn spray ${nextHoldActive ? "on" : "off"}.`);
+        return;
+      }
+      setIsSprayHoldActive(nextHoldActive);
+      setSprayStatus(nextHoldActive);
+      if (!nextHoldActive) setIsTestActive(false);
+    } catch (err: any) {
+      Alert.alert("Error", err.message || "Failed to connect to backend.");
+    } finally {
+      setIsSprayHoldChanging(false);
+    }
+  };
+
+  const hasEditedSprayParams = Object.keys(editedSprayParams).length > 0;
 
   return (
     <ScrollView style={{ flex: 1, padding: 18 }}>
@@ -8618,7 +8975,101 @@ function SwoziPage({
           >
             <Text style={{ color: "#fff", fontWeight: "700" }}>{isTestActive ? "Stop" : "Start"}</Text>
           </Pressable>
+          <Pressable
+            onPress={handleSprayHoldToggle}
+            disabled={isSprayHoldChanging}
+            style={{
+              backgroundColor: isSprayHoldChanging ? "#94a3b8" : isSprayHoldActive ? "#ef4444" : "#0f766e",
+              paddingHorizontal: 16,
+              paddingVertical: 10,
+              borderRadius: 8,
+              marginLeft: 10,
+            }}
+          >
+            <Text style={{ color: "#fff", fontWeight: "700" }}>
+              {isSprayHoldChanging ? "..." : isSprayHoldActive ? "Spray Off" : "Spray On"}
+            </Text>
+          </Pressable>
         </View>
+      </View>
+
+      <View style={{ marginTop: 4, marginBottom: 16 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+          <Text style={itemH}>Spray Controller Params</Text>
+          {hasEditedSprayParams && (
+            <Pressable
+              onPress={handleSetSprayVariables}
+              disabled={isSavingSprayParams}
+              style={{
+                backgroundColor: isSavingSprayParams ? "#94a3b8" : "#0f988f",
+                paddingHorizontal: 14,
+                paddingVertical: 9,
+                borderRadius: 8,
+              }}
+            >
+              <Text style={{ color: "#fff", fontSize: 13, fontWeight: "800" }}>
+                {isSavingSprayParams ? "Saving..." : "Set Variables"}
+              </Text>
+            </Pressable>
+          )}
+        </View>
+        {isLoadingSprayParams ? (
+          <View style={{ paddingVertical: 16, alignItems: "center" }}>
+            <ActivityIndicator color="#0f988f" />
+          </View>
+        ) : sprayParams.length === 0 ? (
+          <Text style={{ color: "#64748b", fontSize: 13 }}>No spray parameters loaded.</Text>
+        ) : (
+          <ScrollView horizontal showsHorizontalScrollIndicator>
+            <View style={{ borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, overflow: "hidden" }}>
+              <View style={{ flexDirection: "row", backgroundColor: "#f1f5f9" }}>
+                {["Name", "Group", "Type", "Current", "Default", "Min", "Max", "Description"].map((heading) => (
+                  <Text key={heading} style={sprayParamTableHeaderStyle}>{heading}</Text>
+                ))}
+              </View>
+              {sprayParams.map((param, index) => {
+                const editedValue = editedSprayParams[param.name];
+                return (
+                  <View
+                    key={param.name}
+                    style={{
+                      flexDirection: "row",
+                      backgroundColor: index % 2 === 0 ? "#fff" : "#f8fafc",
+                      borderTopWidth: 1,
+                      borderTopColor: "#e2e8f0",
+                    }}
+                  >
+                    <Text style={sprayParamTableTextCellStyle}>{param.name}</Text>
+                    <Text style={sprayParamTableTextCellStyle}>{formatSprayParamValue(param.group)}</Text>
+                    <Text style={sprayParamTableTextCellStyle}>{formatSprayParamValue(param.type)}</Text>
+                    <View style={sprayParamTableInputCellStyle}>
+                      <TextInput
+                        value={editedValue ?? formatSprayParamValue(param.current)}
+                        onChangeText={(value) => handleSprayParamEdit(param.name, value, param.current)}
+                        keyboardType={isNumericSprayParam(param) ? "numeric" : "default"}
+                        autoCapitalize="none"
+                        style={{
+                          minWidth: 92,
+                          borderWidth: 1,
+                          borderColor: editedValue == null ? "#cbd5e1" : "#0f988f",
+                          borderRadius: 6,
+                          paddingHorizontal: 8,
+                          paddingVertical: 6,
+                          color: "#0f172a",
+                          fontSize: 12,
+                        }}
+                      />
+                    </View>
+                    <Text style={sprayParamTableTextCellStyle}>{formatSprayParamValue(param.default)}</Text>
+                    <Text style={sprayParamTableTextCellStyle}>{formatSprayParamValue(param.min)}</Text>
+                    <Text style={sprayParamTableTextCellStyle}>{formatSprayParamValue(param.max)}</Text>
+                    <Text style={[sprayParamTableTextCellStyle, { width: 220 }]}>{formatSprayParamValue(param.description)}</Text>
+                  </View>
+                );
+              })}
+            </View>
+          </ScrollView>
+        )}
       </View>
 
       <RowToggle label="Manual Painting with Long Press" value={toggleA} onChange={setToggleA} />

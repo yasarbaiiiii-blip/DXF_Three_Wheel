@@ -35,6 +35,19 @@ export type ExtensionPayload = {
   enabled: boolean;
   pre_extension_m: number;
   aft_extension_m: number;
+  // Optional: omit to leave the backend's saved value unchanged (the server
+  // treats a missing per_line as "sticky" and preserves it). Send true/false
+  // to explicitly turn per-line extensions on/off.
+  per_line?: boolean;
+};
+
+export type ExtensionConfigResponse = {
+  enabled: boolean;
+  pre_extension_m: number;
+  aft_extension_m: number;
+  per_line: boolean;
+  name: string;
+  saved: boolean;
 };
 
 export type RefPoint = {
@@ -166,6 +179,16 @@ export function saveExtensions(
   payload: ExtensionPayload
 ): Promise<Response> {
   return postJson(apiBaseUrl, `/api/path/${encodeURIComponent(pathName)}/extensions`, payload);
+}
+
+export function getExtensions(
+  apiBaseUrl: string,
+  pathName: string
+): Promise<ExtensionConfigResponse> {
+  return getJson<ExtensionConfigResponse>(
+    apiBaseUrl,
+    `/api/path/${encodeURIComponent(pathName)}/extensions`
+  );
 }
 
 export function planPath(apiBaseUrl: string, payload: PathPlanRequest): Promise<Response> {

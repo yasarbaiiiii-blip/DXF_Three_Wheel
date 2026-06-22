@@ -8,11 +8,13 @@ export type LoadMissionToControllerPayload = {
   mission_id: string;
 };
 
+export type PlacementMode = "GPS_SURVEYED" | "LOCAL_NED";
+
 export type StartMissionPayload = {
+  mission_id?: string;
   path_name?: string;
   mission_file?: string;
   auto_origin?: boolean;
-  [key: string]: unknown;
 };
 
 export type MissionStatus = {
@@ -22,6 +24,8 @@ export type MissionStatus = {
   dist_to_goal: number | null;
   speed: number | null;
   xtrack: number | null;
+  loaded_mission_id?: string | null;
+  running_mission_id?: string | null;
   [key: string]: unknown;
 };
 
@@ -29,6 +33,11 @@ export type LoadedPathResponse = {
   loaded: boolean;
   name?: string | null;
   mission_id?: string | null;
+  running_mission_id?: string | null;
+  source_name?: string | null;
+  placement_mode?: PlacementMode | null;
+  is_staged?: boolean;
+  protected?: boolean;
   state: string;
   num_waypoints: number;
   num_mark: number;
